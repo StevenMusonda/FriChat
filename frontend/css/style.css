@@ -1591,6 +1591,299 @@ a:hover {
     font-size: 14px;
 }
 
+/* ===== Message Actions ===== */
+.message {
+    position: relative;
+}
+
+.message:hover .message-actions {
+    opacity: 1;
+}
+
+.message-actions {
+    position: absolute;
+    top: -10px;
+    display: flex;
+    gap: 5px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 10;
+}
+
+.message.sent .message-actions {
+    right: 0;
+}
+
+.message.received .message-actions {
+    left: 0;
+}
+
+.message-action-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: var(--shadow-sm);
+}
+
+.message-action-btn:hover {
+    background-color: var(--bg-tertiary);
+    transform: scale(1.1);
+}
+
+.message-action-btn svg {
+    width: 14px;
+    height: 14px;
+    stroke: var(--text-secondary);
+}
+
+/* Message Action Dropdown */
+.message-action-dropdown {
+    position: absolute;
+    top: 25px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    padding: 5px 0;
+    z-index: 1000;
+    min-width: 150px;
+}
+
+.message.sent .message-action-dropdown {
+    right: 0;
+}
+
+.message.received .message-action-dropdown {
+    left: 0;
+}
+
+.message-action-item {
+    padding: 8px 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background-color 0.2s;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.message-action-item:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.message-action-item.danger {
+    color: var(--danger-color);
+}
+
+.message-action-item svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* ===== Pinned Messages ===== */
+.pinned-messages-container {
+    background-color: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 10px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pinned-message {
+    background-color: var(--bg-primary);
+    border-left: 3px solid var(--primary-color);
+    padding: 10px 15px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    box-shadow: var(--shadow-sm);
+}
+
+.pinned-message-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.pinned-message-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.pinned-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--primary-color);
+}
+
+.pinned-message-text {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pinned-message-info {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 8px;
+}
+
+.pinned-message-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.unpin-btn {
+    padding: 5px 10px;
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.unpin-btn:hover {
+    background-color: var(--danger-color);
+    color: white;
+    border-color: var(--danger-color);
+}
+
+/* Pin Duration Modal */
+.pin-duration-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.pin-duration-content {
+    background-color: var(--bg-primary);
+    border-radius: 12px;
+    padding: 25px;
+    max-width: 300px;
+    width: 90%;
+    box-shadow: var(--shadow-lg);
+}
+
+.pin-duration-content h3 {
+    margin: 0 0 15px 0;
+    color: var(--text-primary);
+}
+
+.pin-duration-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.pin-duration-btn {
+    padding: 12px;
+    background-color: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.pin-duration-btn:hover {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.pin-duration-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.pin-duration-actions button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.pin-duration-actions .btn-cancel {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.pin-duration-actions .btn-cancel:hover {
+    background-color: var(--bg-tertiary);
+}
+
+/* Chat Delete Confirmation */
+.chat-delete-btn {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background-color: transparent;
+    border: none;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.chat-item:hover .chat-delete-btn {
+    display: flex;
+}
+
+.chat-delete-btn:hover {
+    background-color: var(--danger-color);
+}
+
+.chat-delete-btn svg {
+    width: 16px;
+    height: 16px;
+    stroke: var(--text-secondary);
+}
+
+.chat-delete-btn:hover svg {
+    stroke: white;
+}
+
+/* Deleted Message Placeholder */
+.message-deleted {
+    font-style: italic;
+    color: var(--text-tertiary);
+    opacity: 0.7;
+}
+
 /* ===== Utility Classes ===== */
 .hidden {
     display: none !important;

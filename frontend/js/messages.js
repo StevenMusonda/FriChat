@@ -127,8 +127,40 @@ function renderMessages(messages) {
             groupedReactions[reaction.emoji].push(reaction);
         });
         
+        // Check if message is deleted
+        const isDeleted = message.is_deleted || message.deleted_at;
+        
+        if (isDeleted && message.deleted_for_everyone) {
+            return `
+                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
+                    <div class="message-avatar">${senderInitial}</div>
+                    <div class="message-content">
+                        ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
+                        <div class="message-bubble">
+                            <div class="message-deleted">🚫 This message was deleted</div>
+                        </div>
+                        <div class="message-footer">
+                            <span class="message-time">${formatTime(message.created_at)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Don't show message if deleted for current user only
+        if (isDeleted) return '';
+        
         return `
             <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
+                <div class="message-actions">
+                    <button class="message-action-btn" onclick="showMessageActions(${message.id}, event)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="1"></circle>
+                            <circle cx="19" cy="12" r="1"></circle>
+                            <circle cx="5" cy="12" r="1"></circle>
+                        </svg>
+                    </button>
+                </div>
                 <div class="message-avatar">${senderInitial}</div>
                 <div class="message-content">
                     ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}

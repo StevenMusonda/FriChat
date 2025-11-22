@@ -23,4 +23,7 @@ router.delete('/:chatId/members/:userId', chatController.removeMember);
 // User search
 router.get('/search/users', chatController.searchUsers);
 
+// Delete chat
+router.delete('/:chatId', chatController.deleteChat);
+
 module.exports = router;

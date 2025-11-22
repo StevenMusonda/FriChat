@@ -29,7 +29,7 @@ async function getMessages(req, res) {
             });
         }
 
-        // Get messages
+        // Get messages (exclude deleted messages)
         const messages = await executeQuery(`
             SELECT 
                 m.id,
@@ -46,14 +46,22 @@ async function getMessages(req, res) {
                 f.file_size,
                 f.upload_path,
                 m.status,
-                m.created_at
+                m.created_at,
+                m.deleted_at,
+                m.deleted_for_everyone,
+                CASE 
+                    WHEN m.deleted_for_everyone = TRUE THEN TRUE
+                    WHEN dm.id IS NOT NULL THEN TRUE
+                    ELSE FALSE
+                END as is_deleted
             FROM messages m
             JOIN users u ON m.sender_id = u.id
             LEFT JOIN files f ON m.file_id = f.id
+            LEFT JOIN deleted_messages dm ON m.id = dm.message_id AND dm.user_id = ?
             WHERE m.chat_id = ?
             ORDER BY m.created_at DESC
             LIMIT ? OFFSET ?
-        `, [chatId, parseInt(limit), parseInt(offset)]);
+        `, [userId, chatId, parseInt(limit), parseInt(offset)]);
 
         // Get reactions for each message
         for (let message of messages) {
@@ -373,11 +381,290 @@ async function removeReaction(req, res) {
     }
 }
 
+/**
+ * Delete message (for everyone if within 1 minute, otherwise for self only)
+ */
+async function deleteMessage(req, res) {
+    try {
+        const { messageId } = req.params;
+        const userId = req.user.id;
+
+        // Get message details
+        const message = await queryOne(
+            'SELECT * FROM messages WHERE id = ?',
+            [messageId]
+        );
+
+        if (!message) {
+            return res.status(404).json({
+                success: false,
+                message: 'Message not found'
+            });
+        }
+
+        // Check if user is the sender
+        if (message.sender_id !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You can only delete your own messages'
+            });
+        }
+
+        // Calculate time difference
+        const messageTime = new Date(message.created_at);
+        const currentTime = new Date();
+        const timeDiff = (currentTime - messageTime) / 1000; // in seconds
+
+        // If within 60 seconds, delete for everyone
+        if (timeDiff <= 60) {
+            await executeQuery(
+                'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?, deleted_for_everyone = TRUE WHERE id = ?',
+                [userId, messageId]
+            );
+
+            return res.json({
+                success: true,
+                message: 'Message deleted for everyone',
+                deletedForEveryone: true
+            });
+        }
+
+        // Otherwise, delete for self only
+        await executeQuery(
+            'INSERT INTO deleted_messages (message_id, user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE deleted_at = CURRENT_TIMESTAMP',
+            [messageId, userId]
+        );
+
+        res.json({
+            success: true,
+            message: 'Message deleted for you',
+            deletedForEveryone: false
+        });
+    } catch (error) {
+        console.error('Delete message error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete message',
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Pin a message
+ */
+async function pinMessage(req, res) {
+    try {
+        const { messageId } = req.params;
+        const { duration } = req.body; // '24h', '7d', '30d'
+        const userId = req.user.id;
+
+        console.log('Pin message request:', { messageId, duration, userId });
+
+        // Get message details
+        const message = await queryOne(
+            'SELECT chat_id FROM messages WHERE id = ?',
+            [messageId]
+        );
+
+        if (!message) {
+            console.log('Message not found:', messageId);
+            return res.status(404).json({
+                success: false,
+                message: 'Message not found'
+            });
+        }
+
+        console.log('Message found, chat_id:', message.chat_id);
+
+        // Check if user is a member of the chat
+        const membership = await queryOne(
+            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+            [message.chat_id, userId]
+        );
+
+        if (!membership) {
+            console.log('User not member of chat');
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        // Calculate pinned_until based on duration
+        let hours = 24; // default 24 hours
+        if (duration === '7d') hours = 24 * 7;
+        else if (duration === '30d') hours = 24 * 30;
+
+        const pinnedUntil = new Date(Date.now() + hours * 60 * 60 * 1000);
+        console.log('Pinned until:', pinnedUntil);
+
+        // Check if message is already pinned
+        const existingPin = await queryOne(
+            'SELECT id FROM pinned_messages WHERE message_id = ?',
+            [messageId]
+        );
+
+        if (existingPin) {
+            console.log('Updating existing pin');
+            // Update existing pin
+            await executeQuery(
+                'UPDATE pinned_messages SET pinned_by = ?, pinned_until = ?, created_at = CURRENT_TIMESTAMP WHERE message_id = ?',
+                [userId, pinnedUntil, messageId]
+            );
+        } else {
+            console.log('Creating new pin');
+            // Create new pin
+            await executeQuery(
+                'INSERT INTO pinned_messages (message_id, chat_id, pinned_by, pinned_until) VALUES (?, ?, ?, ?)',
+                [messageId, message.chat_id, userId, pinnedUntil]
+            );
+        }
+
+        // Get pinned message details
+        const pinnedMessage = await queryOne(`
+            SELECT 
+                pm.*,
+                m.content,
+                m.message_type,
+                u.username as pinned_by_username
+            FROM pinned_messages pm
+            JOIN messages m ON pm.message_id = m.id
+            JOIN users u ON pm.pinned_by = u.id
+            WHERE pm.message_id = ?
+        `, [messageId]);
+
+        res.json({
+            success: true,
+            message: 'Message pinned successfully',
+            data: pinnedMessage
+        });
+    } catch (error) {
+        console.error('Pin message error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to pin message',
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Unpin a message
+ */
+async function unpinMessage(req, res) {
+    try {
+        const { messageId } = req.params;
+        const userId = req.user.id;
+
+        // Get pin details
+        const pin = await queryOne(
+            'SELECT chat_id FROM pinned_messages WHERE message_id = ?',
+            [messageId]
+        );
+
+        if (!pin) {
+            return res.status(404).json({
+                success: false,
+                message: 'Message is not pinned'
+            });
+        }
+
+        // Check if user is a member of the chat
+        const membership = await queryOne(
+            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+            [pin.chat_id, userId]
+        );
+
+        if (!membership) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        // Delete pin
+        await executeQuery(
+            'DELETE FROM pinned_messages WHERE message_id = ?',
+            [messageId]
+        );
+
+        res.json({
+            success: true,
+            message: 'Message unpinned successfully'
+        });
+    } catch (error) {
+        console.error('Unpin message error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to unpin message',
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Get pinned messages for a chat
+ */
+async function getPinnedMessages(req, res) {
+    try {
+        const { chatId } = req.params;
+        const userId = req.user.id;
+
+        // Check if user is a member of the chat
+        const membership = await queryOne(
+            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+            [chatId, userId]
+        );
+
+        if (!membership) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        // Get pinned messages that haven't expired
+        const pinnedMessages = await executeQuery(`
+            SELECT 
+                pm.*,
+                m.content,
+                m.message_type,
+                m.sender_id,
+                sender.username as sender_username,
+                sender.full_name as sender_full_name,
+                pinner.username as pinned_by_username
+            FROM pinned_messages pm
+            JOIN messages m ON pm.message_id = m.id
+            JOIN users sender ON m.sender_id = sender.id
+            JOIN users pinner ON pm.pinned_by = pinner.id
+            WHERE pm.chat_id = ? AND pm.pinned_until > CURRENT_TIMESTAMP
+            ORDER BY pm.created_at DESC
+        `, [chatId]);
+
+        res.json({
+            success: true,
+            data: pinnedMessages
+        });
+    } catch (error) {
+        console.error('Get pinned messages error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve pinned messages',
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
     getMessages,
     sendMessage,
     uploadFile,
     updateMessageStatus,
     addReaction,
-    removeReaction
+    removeReaction,
+    deleteMessage,
+    pinMessage,
+    unpinMessage,
+    getPinnedMessages
 };

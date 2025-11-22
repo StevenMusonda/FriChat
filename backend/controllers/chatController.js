@@ -15,7 +15,7 @@ async function getUserChats(req, res) {
         
         console.log('Getting chats for user:', userId);
 
-        // Get basic chat information first
+        // Get basic chat information first (exclude deleted chats)
         const chats = await executeQuery(`
             SELECT DISTINCT
                 c.id,
@@ -25,9 +25,10 @@ async function getUserChats(req, res) {
                 c.updated_at
             FROM chats c
             JOIN group_members gm ON c.id = gm.chat_id
-            WHERE gm.user_id = ?
+            LEFT JOIN deleted_chats dc ON c.id = dc.chat_id AND dc.user_id = ?
+            WHERE gm.user_id = ? AND dc.id IS NULL
             ORDER BY c.updated_at DESC
-        `, [userId]);
+        `, [userId, userId]);
         
         console.log('Found chats:', chats.length);
 
@@ -77,12 +78,8 @@ async function getUserChats(req, res) {
                 AND status != 'read'
             `, [chat.id, userId]);
             
-            console.log(`Raw unread count result for chat ${chat.id}:`, unreadCountResult);
-            
             const unreadCountValue = unreadCountResult.length > 0 ? unreadCountResult[0].count : 0;
             chat.unread_count = parseInt(unreadCountValue) || 0;
-            
-            console.log(`Chat ${chat.id} unread count for user ${userId}: ${chat.unread_count}`);
         }
 
         res.json({
@@ -374,11 +371,53 @@ async function searchUsers(req, res) {
     }
 }
 
+/**
+ * Delete chat (soft delete - removes from user's chat list)
+ */
+async function deleteChat(req, res) {
+    try {
+        const { chatId } = req.params;
+        const userId = req.user.id;
+
+        // Check if user is a member of this chat
+        const membership = await queryOne(
+            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+            [chatId, userId]
+        );
+
+        if (!membership) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        // Add to deleted_chats table
+        await executeQuery(
+            'INSERT INTO deleted_chats (chat_id, user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE deleted_at = CURRENT_TIMESTAMP',
+            [chatId, userId]
+        );
+
+        res.json({
+            success: true,
+            message: 'Chat deleted successfully'
+        });
+    } catch (error) {
+        console.error('Delete chat error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete chat',
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
     getUserChats,
     getChatById,
     createChat,
     addMember,
     removeMember,
-    searchUsers
+    searchUsers,
+    deleteChat
 };

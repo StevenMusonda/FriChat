@@ -126,7 +126,6 @@ function renderChatList(chats) {
         
         // Get unread count
         const unreadCount = chat.unread_count || 0;
-        console.log(`Chat ${chat.id} (${displayName}): unread_count = ${unreadCount}, raw value:`, chat.unread_count);
         
         return `
             <div class="chat-item ${chat.id === currentChatId ? 'active' : ''}" data-chat-id="${chat.id}">
@@ -141,6 +140,12 @@ function renderChatList(chats) {
                     <div class="chat-item-preview">${escapeHtml(lastMessageText)}</div>
                 </div>
                 ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
+                <button class="chat-delete-btn" onclick="event.stopPropagation(); deleteChat(${chat.id})">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>
             </div>
         `;
     }).join('');
@@ -186,6 +191,9 @@ async function openChat(chatId) {
     
     // Load messages
     await loadMessages(chatId);
+    
+    // Load pinned messages
+    await loadPinnedMessages(chatId);
     
     // Join WebSocket room
     joinChat(chatId);

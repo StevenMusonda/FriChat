@@ -18,6 +18,7 @@ const messageRoutes = require('./routes/messages');
 
 // Import utilities
 const { executeQuery, queryOne } = require('./config/database');
+const { startScheduler } = require('./utils/scheduler');
 
 // Initialize Express app
 const app = express();
@@ -372,6 +373,9 @@ server.listen(PORT, () => {
 ║  Database: ${process.env.DB_TYPE || 'mysql'}                  ║
 ╚═══════════════════════════════════════╝
     `);
+    
+    // Start the message pin scheduler
+    startScheduler();
 });
 
 module.exports = { app, io };
