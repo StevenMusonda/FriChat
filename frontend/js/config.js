@@ -4,8 +4,8 @@
  */
 
 const CONFIG = {
-    API_BASE_URL: 'http://localhost:3000/api',
-    SOCKET_URL: 'http://localhost:3000',
+    API_BASE_URL: 'https://frichat-vfr1.onrender.com',
+    SOCKET_URL: 'wss://frichat-vfr1.onrender.com/socket.io',
     
     // API Endpoints
     ENDPOINTS: {
