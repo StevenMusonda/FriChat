@@ -69,7 +69,7 @@ async function getUserChats(req, res) {
             chat.lastMessage = lastMessage.length > 0 ? JSON.stringify(lastMessage[0]) : null;
             
             // Get unread count for current user
-            const unreadCount = await executeQuery(`
+            const unreadCountResult = await executeQuery(`
                 SELECT COUNT(*) as count
                 FROM messages
                 WHERE chat_id = ?
@@ -77,7 +77,12 @@ async function getUserChats(req, res) {
                 AND status != 'read'
             `, [chat.id, userId]);
             
-            chat.unread_count = unreadCount.length > 0 ? unreadCount[0].count : 0;
+            console.log(`Raw unread count result for chat ${chat.id}:`, unreadCountResult);
+            
+            const unreadCountValue = unreadCountResult.length > 0 ? unreadCountResult[0].count : 0;
+            chat.unread_count = parseInt(unreadCountValue) || 0;
+            
+            console.log(`Chat ${chat.id} unread count for user ${userId}: ${chat.unread_count}`);
         }
 
         res.json({

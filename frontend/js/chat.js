@@ -126,6 +126,7 @@ function renderChatList(chats) {
         
         // Get unread count
         const unreadCount = chat.unread_count || 0;
+        console.log(`Chat ${chat.id} (${displayName}): unread_count = ${unreadCount}, raw value:`, chat.unread_count);
         
         return `
             <div class="chat-item ${chat.id === currentChatId ? 'active' : ''}" data-chat-id="${chat.id}">
