@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FriChat - Chat</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="chat-page">
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <aside class="chat-sidebar" id="chatSidebar">
+            <div class="sidebar-header">
+                <div class="user-profile">
+                    <div class="user-avatar" id="userAvatar">
+                        <span id="userInitial">U</span>
+                    </div>
+                    <div class="user-info">
+                        <h3 id="userName">User</h3>
+                        <span class="user-status online" id="userStatus">Online</span>
+                    </div>
+                </div>
+                <div class="sidebar-actions">
+                    <button class="icon-btn" id="newChatBtn" title="New Chat">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="themeToggle" title="Toggle Theme">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="logoutBtn" title="Logout">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="sidebar-search">
+                <input type="text" id="chatSearch" placeholder="Search chats...">
+            </div>
+
+            <div class="chat-list" id="chatList">
+                <!-- Chat items will be loaded here -->
+                <div class="empty-state">
+                    <p>No chats yet. Start a new conversation!</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-main" id="chatMain">
+            <div class="chat-welcome">
+                <h2>Welcome to FriChat!</h2>
+                <p>Select a chat to start messaging or create a new one.</p>
+            </div>
+
+            <!-- Active Chat (hidden by default) -->
+            <div class="active-chat" id="activeChat" style="display: none;">
+                <div class="chat-header">
+                    <button class="icon-btn mobile-back-btn" id="mobileBackBtn" title="Back" style="display: none;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                    </button>
+                    <div class="chat-info">
+                        <div class="chat-avatar" id="chatAvatar">
+                            <span id="chatInitial">C</span>
+                        </div>
+                        <div>
+                            <h3 id="chatName">Chat Name</h3>
+                            <span class="chat-status" id="chatStatus">Online</span>
+                        </div>
+                    </div>
+                    <div class="chat-actions">
+                        <button class="icon-btn" id="chatInfoBtn" title="Chat Info">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="messages-container" id="messagesContainer">
+                    <!-- Messages will be loaded here -->
+                </div>
+
+                <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                    <span></span> is typing...
+                </div>
+
+                <div class="message-input-container">
+                    <button class="icon-btn" id="attachBtn" title="Attach File">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                        </svg>
+                    </button>
+                    <input type="file" id="fileInput" style="display: none;" multiple>
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        placeholder="Type a message..." 
+                        autocomplete="off"
+                    >
+                    <button class="icon-btn" id="emojiBtn" title="Emoji">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+                            <line x1="9" y1="9" x2="9.01" y2="9"></line>
+                            <line x1="15" y1="9" x2="15.01" y2="9"></line>
+                        </svg>
+                    </button>
+                    <button class="btn btn-primary" id="sendBtn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- New Chat Modal -->
+    <div class="modal" id="newChatModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>New Chat</h3>
+                <button class="modal-close" id="closeNewChatModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Chat Type</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="chatType" value="direct" checked>
+                            Direct Chat
+                        </label>
+                        <label>
+                            <input type="radio" name="chatType" value="group">
+                            Group Chat
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group" id="groupNameGroup" style="display: none;">
+                    <label for="groupName">Group Name</label>
+                    <input type="text" id="groupName" placeholder="Enter group name">
+                </div>
+
+                <div class="form-group">
+                    <label for="userSearch">Search Users</label>
+                    <input type="text" id="userSearch" placeholder="Search by username...">
+                </div>
+
+                <div class="user-list" id="userList">
+                    <!-- User search results -->
+                </div>
+
+                <div class="selected-users" id="selectedUsers">
+                    <!-- Selected users will appear here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelNewChat">Cancel</button>
+                <button class="btn btn-primary" id="createChatBtn">Create Chat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Info Modal -->
+    <div class="modal" id="chatInfoModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Chat Information</h3>
+                <button class="modal-close" id="closeChatInfoModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="chatInfoContent">
+                    <!-- Chat info will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Emoji Picker -->
+    <div class="emoji-picker" id="emojiPicker" style="display: none;">
+        <div class="emoji-grid">
+            <span class="emoji-item">😀</span>
+            <span class="emoji-item">😃</span>
+            <span class="emoji-item">😄</span>
+            <span class="emoji-item">😁</span>
+            <span class="emoji-item">😆</span>
+            <span class="emoji-item">😅</span>
+            <span class="emoji-item">😂</span>
+            <span class="emoji-item">🤣</span>
+            <span class="emoji-item">😊</span>
+            <span class="emoji-item">😇</span>
+            <span class="emoji-item">🙂</span>
+            <span class="emoji-item">🙃</span>
+            <span class="emoji-item">😉</span>
+            <span class="emoji-item">😌</span>
+            <span class="emoji-item">😍</span>
+            <span class="emoji-item">🥰</span>
+            <span class="emoji-item">😘</span>
+            <span class="emoji-item">😗</span>
+            <span class="emoji-item">😙</span>
+            <span class="emoji-item">😚</span>
+            <span class="emoji-item">😋</span>
+            <span class="emoji-item">😛</span>
+            <span class="emoji-item">😝</span>
+            <span class="emoji-item">😜</span>
+            <span class="emoji-item">🤪</span>
+            <span class="emoji-item">🤨</span>
+            <span class="emoji-item">🧐</span>
+            <span class="emoji-item">🤓</span>
+            <span class="emoji-item">😎</span>
+            <span class="emoji-item">🤩</span>
+            <span class="emoji-item">🥳</span>
+            <span class="emoji-item">😏</span>
+            <span class="emoji-item">😒</span>
+            <span class="emoji-item">😞</span>
+            <span class="emoji-item">😔</span>
+            <span class="emoji-item">😟</span>
+            <span class="emoji-item">😕</span>
+            <span class="emoji-item">🙁</span>
+            <span class="emoji-item">☹️</span>
+            <span class="emoji-item">😣</span>
+            <span class="emoji-item">😖</span>
+            <span class="emoji-item">😫</span>
+            <span class="emoji-item">😩</span>
+            <span class="emoji-item">🥺</span>
+            <span class="emoji-item">😢</span>
+            <span class="emoji-item">😭</span>
+            <span class="emoji-item">😤</span>
+            <span class="emoji-item">😠</span>
+            <span class="emoji-item">😡</span>
+            <span class="emoji-item">🤬</span>
+            <span class="emoji-item">👍</span>
+            <span class="emoji-item">👎</span>
+            <span class="emoji-item">👌</span>
+            <span class="emoji-item">✌️</span>
+            <span class="emoji-item">🤞</span>
+            <span class="emoji-item">🤟</span>
+            <span class="emoji-item">🤘</span>
+            <span class="emoji-item">🤙</span>
+            <span class="emoji-item">👈</span>
+            <span class="emoji-item">👉</span>
+            <span class="emoji-item">👆</span>
+            <span class="emoji-item">👇</span>
+            <span class="emoji-item">☝️</span>
+            <span class="emoji-item">✋</span>
+            <span class="emoji-item">🤚</span>
+            <span class="emoji-item">🖐</span>
+            <span class="emoji-item">🖖</span>
+            <span class="emoji-item">👋</span>
+            <span class="emoji-item">💪</span>
+            <span class="emoji-item">❤️</span>
+            <span class="emoji-item">🧡</span>
+            <span class="emoji-item">💛</span>
+            <span class="emoji-item">💚</span>
+            <span class="emoji-item">💙</span>
+            <span class="emoji-item">💜</span>
+            <span class="emoji-item">🖤</span>
+            <span class="emoji-item">🤍</span>
+            <span class="emoji-item">🤎</span>
+            <span class="emoji-item">💔</span>
+            <span class="emoji-item">❣️</span>
+            <span class="emoji-item">💕</span>
+            <span class="emoji-item">💞</span>
+            <span class="emoji-item">💓</span>
+            <span class="emoji-item">💗</span>
+            <span class="emoji-item">💖</span>
+            <span class="emoji-item">💘</span>
+            <span class="emoji-item">💝</span>
+            <span class="emoji-item">🎉</span>
+            <span class="emoji-item">🎊</span>
+            <span class="emoji-item">🎁</span>
+            <span class="emoji-item">🎈</span>
+            <span class="emoji-item">🎂</span>
+            <span class="emoji-item">🎀</span>
+            <span class="emoji-item">🎗</span>
+            <span class="emoji-item">🏆</span>
+            <span class="emoji-item">🥇</span>
+            <span class="emoji-item">🥈</span>
+            <span class="emoji-item">🥉</span>
+            <span class="emoji-item">⭐</span>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/messages.js"></script>
+    <script src="js/ui.js"></script>
+    
+    <script>
+        // Initialize chat application
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Check authentication
+            if (!isAuthenticated()) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Initialize UI components
+            initializeUI();
+            
+            // Initialize WebSocket connection
+            const ws = initializeWebSocket();
+            window.socket = ws;
+
+            // Set up WebSocket event handlers
+            onNewMessage((message) => {
+                const currentUser = getCurrentUser();
+                
+                // Add message to UI if it's for the current chat
+                if (message.chat_id === currentChatId) {
+                    addMessageToUI(message);
+                    // Mark as read since user is viewing this chat
+                    markMessagesAsRead(currentChatId);
+                } else if (message.sender_id !== currentUser.userId) {
+                    // For other chats, reload chat list to update last message and unread count
+                    loadChats();
+                }
+            });
+
+            onMessageStatus((data) => {
+                // Update message status in UI
+                updateMessageStatusInUI(data.messageId, data.status);
+            });
+
+            onReaction((data, action) => {
+                // Reload messages to show updated reactions
+                if (currentChatId) {
+                    loadMessages(currentChatId);
+                }
+            });
+
+            onTyping((data) => {
+                // Show/hide typing indicator
+                handleTypingIndicator(data);
+            });
+
+            onUserStatus((data) => {
+                // Update user status in UI
+                handleUserStatusUpdate(data);
+            });
+
+            // Initialize new chat modal
+            initializeNewChatModal();
+
+            // Initialize message input
+            initializeMessageInput();
+
+            // Load user's chats
+            await loadChats();
+
+            // Load last opened chat if exists
+            const lastChatId = localStorage.getItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT);
+            if (lastChatId) {
+                openChat(parseInt(lastChatId));
+            }
+
+            // Search functionality in sidebar
+            document.getElementById('chatSearch').addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                const filteredChats = allChats.filter(chat => {
+                    const chatName = chat.chat_name || '';
+                    return chatName.toLowerCase().includes(query);
+                });
+                renderChatList(filteredChats);
+            });
+
+            console.log('FriChat initialized successfully');
+        });
+
+        // Handle page visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Page is hidden
+                console.log('Page hidden');
+            } else {
+                // Page is visible again
+                console.log('Page visible');
+                
+                // Reconnect WebSocket if needed
+                if (!socket || !socket.connected) {
+                    initializeWebSocket();
+                }
+                
+                // Reload chats
+                if (currentChatId) {
+                    loadMessages(currentChatId);
+                }
+            }
+        });
+
+        // Handle before unload
+        window.addEventListener('beforeunload', () => {
+            // Disconnect WebSocket gracefully
+            if (socket) {
+                socket.disconnect();
+            }
+        });
+    </script>
+</body>
+</html>

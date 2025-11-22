@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FriChat - Sign Up</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>FriChat</h1>
+                <p>Create your account to start chatting!</p>
+            </div>
+
+            <form id="signupForm" class="auth-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        required 
+                        placeholder="Choose a username"
+                        pattern="[a-zA-Z0-9_]{3,50}"
+                        title="Username must be 3-50 characters (letters, numbers, underscore only)"
+                        autocomplete="username"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        name="email" 
+                        required 
+                        placeholder="Enter your email"
+                        autocomplete="email"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="fullName">Full Name (Optional)</label>
+                    <input 
+                        type="text" 
+                        id="fullName" 
+                        name="fullName" 
+                        placeholder="Enter your full name"
+                        autocomplete="name"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        required 
+                        placeholder="Choose a password (min 6 characters)"
+                        minlength="6"
+                        autocomplete="new-password"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <input 
+                        type="password" 
+                        id="confirmPassword" 
+                        name="confirmPassword" 
+                        required 
+                        placeholder="Confirm your password"
+                        autocomplete="new-password"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary" id="signupBtn">
+                        <span class="btn-text">Sign Up</span>
+                        <span class="btn-loader" style="display: none;">Creating account...</span>
+                    </button>
+                </div>
+
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+            </form>
+
+            <div class="auth-footer">
+                <p>Already have an account? <a href="login.html">Login</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        // Initialize signup form
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check if already logged in
+            if (localStorage.getItem('authToken')) {
+                window.location.href = 'chat.html';
+            }
+
+            const signupForm = document.getElementById('signupForm');
+            const signupBtn = document.getElementById('signupBtn');
+            const errorMessage = document.getElementById('errorMessage');
+
+            signupForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const username = document.getElementById('username').value;
+                const email = document.getElementById('email').value;
+                const fullName = document.getElementById('fullName').value;
+                const password = document.getElementById('password').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
+
+                // Validate passwords match
+                if (password !== confirmPassword) {
+                    errorMessage.textContent = 'Passwords do not match';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                // Show loading state
+                signupBtn.disabled = true;
+                signupBtn.querySelector('.btn-text').style.display = 'none';
+                signupBtn.querySelector('.btn-loader').style.display = 'inline';
+                errorMessage.style.display = 'none';
+
+                try {
+                    const result = await register(username, email, password, fullName);
+                    
+                    if (result.success) {
+                        // Redirect to chat
+                        window.location.href = 'chat.html';
+                    } else {
+                        errorMessage.textContent = result.message || 'Registration failed';
+                        errorMessage.style.display = 'block';
+                    }
+                } catch (error) {
+                    errorMessage.textContent = 'An error occurred. Please try again.';
+                    errorMessage.style.display = 'block';
+                } finally {
+                    // Reset button state
+                    signupBtn.disabled = false;
+                    signupBtn.querySelector('.btn-text').style.display = 'inline';
+                    signupBtn.querySelector('.btn-loader').style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
