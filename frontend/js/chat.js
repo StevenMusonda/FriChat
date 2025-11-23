@@ -125,19 +125,25 @@ function renderChatList(chats) {
         let lastMessageTime = '';
         
         if (lastMessage) {
-            if (lastMessage.messageType === 'text') {
-                lastMessageText = lastMessage.content || 'Message';
-            } else if (lastMessage.messageType === 'image') {
+            // Support both snake_case (from backend) and camelCase
+            const messageType = lastMessage.messageType || lastMessage.message_type;
+            const content = lastMessage.content;
+            const fileName = lastMessage.fileName || lastMessage.file_name;
+            const createdAt = lastMessage.createdAt || lastMessage.created_at;
+            
+            if (messageType === 'text') {
+                lastMessageText = content || 'Message';
+            } else if (messageType === 'image') {
                 lastMessageText = '📷 Photo';
-            } else if (lastMessage.messageType === 'video') {
+            } else if (messageType === 'video') {
                 lastMessageText = '🎥 Video';
-            } else if (lastMessage.messageType === 'file') {
-                lastMessageText = `📎 ${lastMessage.fileName || 'File'}`;
+            } else if (messageType === 'file') {
+                lastMessageText = `📎 ${fileName || 'File'}`;
             } else {
                 lastMessageText = '📎 Attachment';
             }
             
-            lastMessageTime = formatTime(lastMessage.createdAt);
+            lastMessageTime = formatTime(createdAt);
         }
         
         // Get unread count
