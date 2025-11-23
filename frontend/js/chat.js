@@ -92,9 +92,17 @@ function renderChatList(chats) {
         if (chat.chat_type === 'direct') {
             // Convert both to numbers for comparison to avoid type mismatch
             const currentUserId = parseInt(currentUser.userId);
-            const otherUser = participants.find(p => parseInt(p.userId) !== currentUserId);
+            console.log('Debug chat name - Chat ID:', chat.id);
+            console.log('Debug chat name - Current userId:', currentUserId);
+            console.log('Debug chat name - Participants:', participants);
+            const otherUser = participants.find(p => {
+                const pUserId = parseInt(p.userId || p.userid);
+                console.log('Debug chat name - Checking participant:', p, 'userId:', pUserId);
+                return pUserId !== currentUserId;
+            });
+            console.log('Debug chat name - Other user found:', otherUser);
             if (otherUser) {
-                displayName = otherUser.fullName || otherUser.username;
+                displayName = otherUser.fullName || otherUser.fullName || otherUser.username;
                 displayInitial = displayName.charAt(0).toUpperCase();
             }
         }
