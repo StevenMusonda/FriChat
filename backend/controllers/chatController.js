@@ -59,9 +59,11 @@ async function getUserChats(req, res) {
                     m.sender_id as senderId,
                     sender.username as senderName,
                     m.status,
-                    m.created_at as createdAt
+                    m.created_at as createdAt,
+                    f.original_name as fileName
                 FROM messages m
                 JOIN users sender ON m.sender_id = sender.id
+                LEFT JOIN files f ON m.file_id = f.id
                 WHERE m.chat_id = ?
                 ORDER BY m.created_at DESC
                 LIMIT 1
