@@ -90,7 +90,9 @@ function renderChatList(chats) {
         let displayInitial = chat.chat_name ? chat.chat_name.charAt(0).toUpperCase() : 'C';
         
         if (chat.chat_type === 'direct') {
-            const otherUser = participants.find(p => p.userId !== currentUser.userId);
+            // Convert both to numbers for comparison to avoid type mismatch
+            const currentUserId = parseInt(currentUser.userId);
+            const otherUser = participants.find(p => parseInt(p.userId) !== currentUserId);
             if (otherUser) {
                 displayName = otherUser.fullName || otherUser.username;
                 displayInitial = displayName.charAt(0).toUpperCase();

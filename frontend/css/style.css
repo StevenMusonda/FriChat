@@ -1188,8 +1188,9 @@ a:hover {
         gap: 8px;
         overflow-y: scroll;
         -webkit-overflow-scrolling: touch;
-        height: auto;
+        flex: 1;
         min-height: 0;
+        max-height: calc(100vh - var(--header-height) - var(--input-height) - 20px);
     }
 
     .message {
@@ -1256,6 +1257,8 @@ a:hover {
         position: sticky;
         bottom: 0;
         flex-shrink: 0;
+        z-index: 10;
+        background-color: var(--bg-primary);
     }
 
     #messageInput {
