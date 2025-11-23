@@ -200,6 +200,12 @@ async function openChat(chatId) {
     document.querySelector('.chat-welcome').style.display = 'none';
     document.getElementById('activeChat').style.display = 'flex';
     
+    // Show/hide close chat button based on screen size
+    const closeChatBtn = document.getElementById('closeChatBtn');
+    if (closeChatBtn) {
+        closeChatBtn.style.display = window.innerWidth > 768 ? 'block' : 'none';
+    }
+    
     // Mobile: hide sidebar and show chat main
     const chatSidebar = document.querySelector('.chat-sidebar');
     const chatMain = document.querySelector('.chat-main');

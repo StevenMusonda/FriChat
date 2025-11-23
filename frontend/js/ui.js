@@ -15,6 +15,7 @@ function initializeUI() {
     initializeUserProfile();
     initializeChatInfo();
     initializeMobileBackButton();
+    initializeCloseChatButton();
 }
 
 /**
@@ -557,6 +558,32 @@ function initializeMobileBackButton() {
         
         // Clear current chat
         currentChatId = null;
+    });
+}
+
+/**
+ * Initialize close chat button for desktop
+ */
+function initializeCloseChatButton() {
+    const closeChatBtn = document.getElementById('closeChatBtn');
+    
+    if (!closeChatBtn) return;
+    
+    closeChatBtn.addEventListener('click', () => {
+        // Hide active chat and show welcome screen
+        const activeChat = document.getElementById('activeChat');
+        const chatWelcome = document.querySelector('.chat-welcome');
+        
+        if (activeChat) activeChat.style.display = 'none';
+        if (chatWelcome) chatWelcome.style.display = 'flex';
+        
+        // Clear current chat
+        currentChatId = null;
+        
+        // Remove active class from all chat items
+        document.querySelectorAll('.chat-item').forEach(item => {
+            item.classList.remove('active');
+        });
     });
 }
 

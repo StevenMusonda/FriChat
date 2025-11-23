@@ -491,6 +491,10 @@ a:hover {
     margin-right: 5px;
 }
 
+.close-chat-btn {
+    display: block;
+}
+
 .chat-info {
     display: flex;
     align-items: center;
@@ -1025,6 +1029,10 @@ a:hover {
 
     .mobile-back-btn {
         display: flex !important;
+    }
+
+    .close-chat-btn {
+        display: none !important;
     }
 
     .message {
