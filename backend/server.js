@@ -155,7 +155,7 @@ io.on('connection', (socket) => {
             // Handle file if present
             if (fileData) {
                 const fileResult = await executeQuery(
-                    'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
                     [
                         fileData.originalName,
                         fileData.storedName,
@@ -166,16 +166,16 @@ io.on('connection', (socket) => {
                         senderId
                     ]
                 );
-                fileId = fileResult.insertId || fileResult[0]?.id;
+                fileId = fileResult.insertId || fileResult[0]?.id || fileResult.id;
             }
 
             // Insert message
             const result = await executeQuery(
-                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, status) VALUES (?, ?, ?, ?, ?, ?)',
+                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, status) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
                 [chatId, senderId, messageType, content, fileId, 'sent']
             );
 
-            const messageId = result.insertId || result[0]?.id;
+            const messageId = result.insertId || result[0]?.id || result.id;
 
             // Update chat timestamp
             await executeQuery(
@@ -206,6 +206,12 @@ io.on('connection', (socket) => {
                 LEFT JOIN files f ON m.file_id = f.id
                 WHERE m.id = ?
             `, [messageId]);
+
+            if (!message) {
+                console.error('Failed to retrieve message after insert:', messageId);
+                socket.emit('error', { message: 'Message created but could not be retrieved' });
+                return;
+            }
 
             // Broadcast to all users in the chat
             io.to(`chat_${chatId}`).emit('new_message', message);
