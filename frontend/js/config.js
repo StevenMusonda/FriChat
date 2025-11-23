@@ -4,7 +4,7 @@
  */
 
 const CONFIG = {
-    API_BASE_URL: 'https://frichat-vfr1.onrender.com',
+    API_BASE_URL: 'https://frichat-vfr1.onrender.com/api',
     SOCKET_URL: 'https://frichat-vfr1.onrender.com',
     
     // API Endpoints
