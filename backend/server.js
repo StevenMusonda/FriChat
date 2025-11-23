@@ -266,10 +266,17 @@ io.on('connection', (socket) => {
             const { messageId, userId, emoji } = data;
 
             // Add reaction
-            await executeQuery(
-                'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = ?',
-                [messageId, userId, emoji, emoji]
-            );
+            if (process.env.DB_TYPE === 'postgresql') {
+                await executeQuery(
+                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = ?',
+                    [messageId, userId, emoji, emoji]
+                );
+            } else {
+                await executeQuery(
+                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = ?',
+                    [messageId, userId, emoji, emoji]
+                );
+            }
 
             // Get chat ID
             const message = await queryOne(

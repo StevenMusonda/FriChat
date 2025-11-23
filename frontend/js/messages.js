@@ -587,7 +587,49 @@ if (typeof onMessageStatus === 'function') {
     onMessageStatus(handleMessageStatusUpdate);
 }
 
+/**
+ * Handle reaction update from WebSocket
+ */
+function handleReactionUpdate(data, action) {
+    const { messageId, userId, username, emoji } = data;
+    
+    // Find message in current messages array
+    const message = currentMessages.find(m => m.id === messageId);
+    if (!message) return;
+    
+    // Parse existing reactions
+    let reactions = [];
+    if (message.reactions && typeof message.reactions === 'string') {
+        try {
+            reactions = JSON.parse(message.reactions) || [];
+        } catch (e) {
+            reactions = [];
+        }
+    } else if (Array.isArray(message.reactions)) {
+        reactions = message.reactions;
+    }
+    
+    if (action === 'add') {
+        // Add new reaction
+        reactions.push({
+            userId: userId,
+            username: username,
+            emoji: emoji
+        });
+    } else if (action === 'remove') {
+        // Remove reaction
+        reactions = reactions.filter(r => !(r.userId === userId && r.emoji === emoji));
+    }
+    
+    // Update message reactions
+    message.reactions = reactions;
+    
+    // Re-render just this message
+    renderMessages(currentMessages);
+}
+
 // Make functions globally accessible
 if (typeof window !== 'undefined') {
     window.toggleReaction = toggleReaction;
+    window.handleReactionUpdate = handleReactionUpdate;
 }

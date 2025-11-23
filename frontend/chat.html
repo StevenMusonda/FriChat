@@ -351,10 +351,9 @@
             });
 
             onReaction((data, action) => {
-                // Reload messages to show updated reactions
-                if (currentChatId) {
-                    loadMessages(currentChatId);
-                }
+                console.log('Reaction event received:', action, data);
+                // Update reaction in UI directly instead of reloading all messages
+                handleReactionUpdate(data, action);
             });
 
             onTyping((data) => {
