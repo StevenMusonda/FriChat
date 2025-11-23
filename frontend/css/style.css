@@ -1008,6 +1008,15 @@ a:hover {
     .chat-main.active {
         display: flex;
         flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    .active-chat {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
     .chat-sidebar.hidden {
@@ -1185,12 +1194,12 @@ a:hover {
 
     .messages-container {
         padding: 12px;
+        padding-bottom: 80px;
         gap: 8px;
-        overflow-y: scroll;
+        overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         flex: 1;
         min-height: 0;
-        max-height: calc(100vh - var(--header-height) - var(--input-height) - 20px);
     }
 
     .message {
@@ -1254,11 +1263,15 @@ a:hover {
         gap: 8px;
         height: auto;
         min-height: 56px;
-        position: sticky;
+        position: fixed;
         bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
         flex-shrink: 0;
-        z-index: 10;
+        z-index: 100;
         background-color: var(--bg-primary);
+        border-top: 1px solid var(--border-color);
     }
 
     #messageInput {
