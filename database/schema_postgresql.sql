@@ -104,7 +104,7 @@ CREATE TABLE message_reactions (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     emoji VARCHAR(10) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(message_id, user_id, emoji)
+    UNIQUE(message_id, user_id)
 );
 
 CREATE INDEX idx_reaction_message_id ON message_reactions(message_id);

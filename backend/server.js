@@ -268,13 +268,13 @@ io.on('connection', (socket) => {
             // Add reaction
             if (process.env.DB_TYPE === 'postgresql') {
                 await executeQuery(
-                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = ?',
-                    [messageId, userId, emoji, emoji]
+                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji',
+                    [messageId, userId, emoji]
                 );
             } else {
                 await executeQuery(
-                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = ?',
-                    [messageId, userId, emoji, emoji]
+                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = VALUES(emoji)',
+                    [messageId, userId, emoji]
                 );
             }
 
