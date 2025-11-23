@@ -126,11 +126,11 @@ function renderChatList(chats) {
         let lastMessageTime = '';
         
         if (lastMessage) {
-            // Support both snake_case (from backend) and camelCase
-            const messageType = lastMessage.messageType || lastMessage.message_type;
+            // Support both snake_case (from backend), camelCase, and lowercase
+            const messageType = lastMessage.messageType || lastMessage.message_type || lastMessage.messagetype;
             const content = lastMessage.content;
-            const fileName = lastMessage.fileName || lastMessage.file_name;
-            const createdAt = lastMessage.createdAt || lastMessage.created_at;
+            const fileName = lastMessage.fileName || lastMessage.file_name || lastMessage.filename;
+            const createdAt = lastMessage.createdAt || lastMessage.created_at || lastMessage.createdat;
             
             if (messageType === 'text') {
                 lastMessageText = content || 'Message';
