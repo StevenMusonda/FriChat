@@ -222,6 +222,7 @@ function getFileUrl(uploadPath) {
  * Render message content based on type
  */
 function renderMessageContent(message) {
+    console.log('Rendering message:', message.id, 'type:', message.message_type, 'upload_path:', message.upload_path);
     switch (message.message_type) {
         case 'text':
             return `<div class="message-text">${escapeHtml(message.content)}</div>`;
@@ -439,6 +440,7 @@ function scrollToBottom() {
  * Add new message to UI
  */
 function addMessageToUI(message) {
+    console.log('Adding message to UI:', message);
     currentMessages.push(message);
     renderMessages(currentMessages);
     scrollToBottom();
@@ -592,10 +594,16 @@ if (typeof onMessageStatus === 'function') {
  */
 function handleReactionUpdate(data, action) {
     const { messageId, userId, username, emoji } = data;
+    console.log('handleReactionUpdate called:', { messageId, userId, username, emoji, action });
+    console.log('Current messages:', currentMessages.map(m => ({ id: m.id, reactions: m.reactions })));
     
     // Find message in current messages array
     const message = currentMessages.find(m => m.id === messageId);
-    if (!message) return;
+    console.log('Found message:', message);
+    if (!message) {
+        console.error('Message not found in currentMessages:', messageId);
+        return;
+    }
     
     // Parse existing reactions
     let reactions = [];
@@ -623,8 +631,10 @@ function handleReactionUpdate(data, action) {
     
     // Update message reactions
     message.reactions = reactions;
+    console.log('Updated message reactions:', message.reactions);
     
-    // Re-render just this message
+    // Re-render messages
+    console.log('Re-rendering messages after reaction update');
     renderMessages(currentMessages);
 }
 
