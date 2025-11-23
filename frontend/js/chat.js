@@ -119,6 +119,7 @@ function renderChatList(chats) {
             } else if (typeof chat.lastMessage === 'object') {
                 lastMessage = chat.lastMessage;
             }
+            console.log('Chat', chat.id, 'lastMessage:', lastMessage);
         }
         
         let lastMessageText = 'No messages yet';
