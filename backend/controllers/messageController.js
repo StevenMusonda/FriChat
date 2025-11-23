@@ -333,11 +333,18 @@ async function addReaction(req, res) {
             });
         }
 
-        // Add or update reaction
-        await executeQuery(
-            'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = ?',
-            [messageId, userId, emoji, emoji]
-        );
+        // Add or update reaction (PostgreSQL compatible)
+        if (process.env.DB_TYPE === 'postgresql') {
+            await executeQuery(
+                'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON CONFLICT (message_id, user_id, emoji) DO UPDATE SET emoji = ?',
+                [messageId, userId, emoji, emoji]
+            );
+        } else {
+            await executeQuery(
+                'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = ?',
+                [messageId, userId, emoji, emoji]
+            );
+        }
 
         res.json({
             success: true,
@@ -430,10 +437,17 @@ async function deleteMessage(req, res) {
         }
 
         // Otherwise, delete for self only
-        await executeQuery(
-            'INSERT INTO deleted_messages (message_id, user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE deleted_at = CURRENT_TIMESTAMP',
-            [messageId, userId]
-        );
+        if (process.env.DB_TYPE === 'postgresql') {
+            await executeQuery(
+                'INSERT INTO deleted_messages (message_id, user_id) VALUES (?, ?) ON CONFLICT (message_id, user_id) DO UPDATE SET deleted_at = CURRENT_TIMESTAMP',
+                [messageId, userId]
+            );
+        } else {
+            await executeQuery(
+                'INSERT INTO deleted_messages (message_id, user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE deleted_at = CURRENT_TIMESTAMP',
+                [messageId, userId]
+            );
+        }
 
         res.json({
             success: true,

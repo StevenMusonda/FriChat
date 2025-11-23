@@ -393,10 +393,17 @@ async function deleteChat(req, res) {
         }
 
         // Add to deleted_chats table
-        await executeQuery(
-            'INSERT INTO deleted_chats (chat_id, user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE deleted_at = CURRENT_TIMESTAMP',
-            [chatId, userId]
-        );
+        if (process.env.DB_TYPE === 'postgresql') {
+            await executeQuery(
+                'INSERT INTO deleted_chats (chat_id, user_id) VALUES (?, ?) ON CONFLICT (chat_id, user_id) DO UPDATE SET deleted_at = CURRENT_TIMESTAMP',
+                [chatId, userId]
+            );
+        } else {
+            await executeQuery(
+                'INSERT INTO deleted_chats (chat_id, user_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE deleted_at = CURRENT_TIMESTAMP',
+                [chatId, userId]
+            );
+        }
 
         res.json({
             success: true,
