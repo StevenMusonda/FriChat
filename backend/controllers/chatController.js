@@ -201,12 +201,20 @@ async function createChat(req, res) {
         }
 
         // Create chat
-        const result = await executeQuery(
-            'INSERT INTO chats (chat_type, chat_name, created_by) VALUES (?, ?, ?)',
-            [chatType, chatType === 'group' ? sanitizeHtml(chatName) : null, userId]
-        );
-
-        const chatId = result.insertId || result[0]?.id;
+        let chatId;
+        if (process.env.DB_TYPE === 'postgresql') {
+            const result = await executeQuery(
+                'INSERT INTO chats (chat_type, chat_name, created_by) VALUES (?, ?, ?) RETURNING id',
+                [chatType, chatType === 'group' ? sanitizeHtml(chatName) : null, userId]
+            );
+            chatId = result[0]?.id;
+        } else {
+            const result = await executeQuery(
+                'INSERT INTO chats (chat_type, chat_name, created_by) VALUES (?, ?, ?)',
+                [chatType, chatType === 'group' ? sanitizeHtml(chatName) : null, userId]
+            );
+            chatId = result.insertId;
+        }
 
         // Add creator as admin (for group) or member (for direct)
         const creatorRole = chatType === 'group' ? 'admin' : 'member';
