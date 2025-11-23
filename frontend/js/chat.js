@@ -126,9 +126,15 @@ function renderChatList(chats) {
         
         if (lastMessage) {
             if (lastMessage.messageType === 'text') {
-                lastMessageText = lastMessage.content || '';
+                lastMessageText = lastMessage.content || 'Message';
+            } else if (lastMessage.messageType === 'image') {
+                lastMessageText = '📷 Photo';
+            } else if (lastMessage.messageType === 'video') {
+                lastMessageText = '🎥 Video';
+            } else if (lastMessage.messageType === 'file') {
+                lastMessageText = `📎 ${lastMessage.fileName || 'File'}`;
             } else {
-                lastMessageText = `📎 ${lastMessage.messageType}`;
+                lastMessageText = '📎 Attachment';
             }
             
             lastMessageTime = formatTime(lastMessage.createdAt);
