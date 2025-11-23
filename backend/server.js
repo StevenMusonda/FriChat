@@ -44,6 +44,12 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Make io available to routes
+app.use((req, res, next) => {
+    req.io = io;
+    next();
+});
+
 // Serve uploaded files with CORS headers
 app.use('/uploads', cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',

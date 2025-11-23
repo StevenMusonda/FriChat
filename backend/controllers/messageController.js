@@ -198,28 +198,52 @@ async function uploadFile(req, res) {
         }
 
         // Save file metadata to database
-        const fileResult = await executeQuery(
-            'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [
-                req.file.originalname,
-                req.file.filename,
-                path.extname(req.file.originalname),
-                req.file.size,
-                req.file.mimetype,
-                req.file.path,
-                userId
-            ]
-        );
-
-        const fileId = fileResult.insertId || fileResult[0]?.id;
+        let fileId;
+        if (process.env.DB_TYPE === 'postgresql') {
+            const fileResult = await executeQuery(
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                [
+                    req.file.originalname,
+                    req.file.filename,
+                    path.extname(req.file.originalname),
+                    req.file.size,
+                    req.file.mimetype,
+                    req.file.path,
+                    userId
+                ]
+            );
+            fileId = fileResult[0]?.id;
+        } else {
+            const fileResult = await executeQuery(
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    req.file.originalname,
+                    req.file.filename,
+                    path.extname(req.file.originalname),
+                    req.file.size,
+                    req.file.mimetype,
+                    req.file.path,
+                    userId
+                ]
+            );
+            fileId = fileResult.insertId;
+        }
 
         // Create message with file reference
-        const messageResult = await executeQuery(
-            'INSERT INTO messages (chat_id, sender_id, message_type, file_id, status) VALUES (?, ?, ?, ?, ?)',
-            [chatId, userId, messageType, fileId, 'sent']
-        );
-
-        const messageId = messageResult.insertId || messageResult[0]?.id;
+        let messageId;
+        if (process.env.DB_TYPE === 'postgresql') {
+            const messageResult = await executeQuery(
+                'INSERT INTO messages (chat_id, sender_id, message_type, file_id, status) VALUES (?, ?, ?, ?, ?) RETURNING id',
+                [chatId, userId, messageType, fileId, 'sent']
+            );
+            messageId = messageResult[0]?.id;
+        } else {
+            const messageResult = await executeQuery(
+                'INSERT INTO messages (chat_id, sender_id, message_type, file_id, status) VALUES (?, ?, ?, ?, ?)',
+                [chatId, userId, messageType, fileId, 'sent']
+            );
+            messageId = messageResult.insertId;
+        }
 
         // Update chat updated_at
         await executeQuery(
@@ -249,6 +273,11 @@ async function uploadFile(req, res) {
             LEFT JOIN files f ON m.file_id = f.id
             WHERE m.id = ?
         `, [messageId]);
+
+        // Emit message via WebSocket to all chat members
+        if (req.io && message) {
+            req.io.to(`chat_${chatId}`).emit('new_message', message);
+        }
 
         res.status(201).json({
             success: true,
