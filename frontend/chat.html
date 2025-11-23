@@ -337,6 +337,8 @@
                     addMessageToUI(message);
                     // Mark as read since user is viewing this chat
                     markMessagesAsRead(currentChatId);
+                    // Update chat list to show latest message
+                    loadChats();
                 } else if (message.sender_id !== currentUser.userId) {
                     // For other chats, reload chat list to update last message and unread count
                     loadChats();
