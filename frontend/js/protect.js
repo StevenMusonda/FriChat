@@ -3,7 +3,7 @@
  * Note: Determined users can still bypass this
  */
 
-/*
+
 (function() {
     'use strict';
     
@@ -102,5 +102,5 @@
     
 })();
 
-*/
+
 
