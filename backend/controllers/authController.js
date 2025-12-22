@@ -32,13 +32,21 @@ async function register(req, res) {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
 
-        // Insert user
-        const result = await executeQuery(
-            'INSERT INTO users (username, email, password_hash, full_name, status) VALUES (?, ?, ?, ?, ?)',
-            [username, email, passwordHash, sanitizeHtml(fullName) || null, 'offline']
-        );
-
-        const userId = result.insertId || result[0]?.id;
+        // Insert user and get inserted id (handle MySQL and PostgreSQL)
+        let userId;
+        if (process.env.DB_TYPE === 'postgresql') {
+            const result = await executeQuery(
+                'INSERT INTO users (username, email, password_hash, full_name, status) VALUES (?, ?, ?, ?, ?) RETURNING id',
+                [username, email, passwordHash, sanitizeHtml(fullName) || null, 'offline']
+            );
+            userId = result[0]?.id;
+        } else {
+            const result = await executeQuery(
+                'INSERT INTO users (username, email, password_hash, full_name, status) VALUES (?, ?, ?, ?, ?)',
+                [username, email, passwordHash, sanitizeHtml(fullName) || null, 'offline']
+            );
+            userId = result.insertId || result[0]?.id;
+        }
 
         // Generate JWT token
         const token = jwt.sign(
