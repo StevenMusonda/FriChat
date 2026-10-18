@@ -26,6 +26,8 @@ function initializeWebSocket() {
     
     // Connect to Socket.IO server
     socket = io(CONFIG.SOCKET_URL, {
+        // Server verifies this JWT on handshake (re-read on each reconnect)
+        auth: (cb) => cb({ token: localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN) }),
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
@@ -36,10 +38,8 @@ function initializeWebSocket() {
     socket.on('connect', () => {
         console.log('WebSocket connected');
         
-        // Authenticate with server
-        socket.emit('authenticate', {
-            userId: user.userId
-        });
+        // Go online and join chat rooms (identity comes from the handshake token)
+        socket.emit('authenticate');
     });
     
     socket.on('disconnect', () => {

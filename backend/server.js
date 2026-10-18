@@ -10,6 +10,7 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -73,19 +74,58 @@ app.get('/api/health', (req, res) => {
 // Socket.IO connection handling
 const connectedUsers = new Map(); // userId -> socketId
 
+/**
+ * Verify JWT on handshake - the socket's identity comes from the token,
+ * never from client-supplied userId/senderId fields
+ */
+io.use(async (socket, next) => {
+    try {
+        const token = socket.handshake.auth && socket.handshake.auth.token;
+        if (!token) {
+            return next(new Error('Access token required'));
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await queryOne(
+            'SELECT id, username FROM users WHERE id = ?',
+            [decoded.userId]
+        );
+
+        if (!user) {
+            return next(new Error('User not found'));
+        }
+
+        socket.userId = user.id;
+        socket.username = user.username;
+        next();
+    } catch (error) {
+        next(new Error('Invalid or expired token'));
+    }
+});
+
+/**
+ * Check that a user belongs to a chat
+ */
+async function isChatMember(chatId, userId) {
+    const membership = await queryOne(
+        'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+        [chatId, userId]
+    );
+    return !!membership;
+}
+
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
 
     /**
      * User authentication and online status
      */
-    socket.on('authenticate', async (data) => {
+    socket.on('authenticate', async () => {
         try {
-            const { userId } = data;
-            
+            const userId = socket.userId;
+
             if (userId) {
                 connectedUsers.set(userId, socket.id);
-                socket.userId = userId;
 
                 // Update user status to online
                 await executeQuery(
@@ -121,15 +161,11 @@ io.on('connection', (socket) => {
      */
     socket.on('join_chat', async (data) => {
         try {
-            const { chatId, userId } = data;
+            const { chatId } = data;
+            const userId = socket.userId;
 
             // Verify user is a member
-            const membership = await queryOne(
-                'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
-                [chatId, userId]
-            );
-
-            if (membership) {
+            if (await isChatMember(chatId, userId)) {
                 socket.join(`chat_${chatId}`);
                 console.log(`User ${userId} joined chat ${chatId}`);
             }
@@ -143,15 +179,11 @@ io.on('connection', (socket) => {
      */
     socket.on('send_message', async (data) => {
         try {
-            const { chatId, senderId, messageType, content, fileData } = data;
+            const { chatId, messageType, content, fileData } = data;
+            const senderId = socket.userId;
 
             // Verify sender is a member
-            const membership = await queryOne(
-                'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
-                [chatId, senderId]
-            );
-
-            if (!membership) {
+            if (!(await isChatMember(chatId, senderId))) {
                 socket.emit('error', { message: 'Access denied' });
                 return;
             }
@@ -233,26 +265,29 @@ io.on('connection', (socket) => {
      */
     socket.on('message_status', async (data) => {
         try {
-            const { messageId, status, userId } = data;
+            const { messageId, status } = data;
+            const userId = socket.userId;
+
+            // Get chat ID and verify the user can see this message
+            const message = await queryOne(
+                'SELECT chat_id, sender_id FROM messages WHERE id = ?',
+                [messageId]
+            );
+
+            if (!message || !(await isChatMember(message.chat_id, userId))) {
+                return;
+            }
 
             await executeQuery(
                 'UPDATE messages SET status = ? WHERE id = ?',
                 [status, messageId]
             );
 
-            // Get chat ID to broadcast to room
-            const message = await queryOne(
-                'SELECT chat_id, sender_id FROM messages WHERE id = ?',
-                [messageId]
-            );
-
-            if (message) {
-                io.to(`chat_${message.chat_id}`).emit('message_status_update', {
-                    messageId: messageId,
-                    status: status,
-                    userId: userId
-                });
-            }
+            io.to(`chat_${message.chat_id}`).emit('message_status_update', {
+                messageId: messageId,
+                status: status,
+                userId: userId
+            });
         } catch (error) {
             console.error('Message status error:', error);
         }
@@ -263,7 +298,18 @@ io.on('connection', (socket) => {
      */
     socket.on('add_reaction', async (data) => {
         try {
-            const { messageId, userId, emoji } = data;
+            const { messageId, emoji } = data;
+            const userId = socket.userId;
+
+            // Get chat ID and verify the user can see this message
+            const message = await queryOne(
+                'SELECT chat_id FROM messages WHERE id = ?',
+                [messageId]
+            );
+
+            if (!message || !(await isChatMember(message.chat_id, userId))) {
+                return;
+            }
 
             // Add reaction
             if (process.env.DB_TYPE === 'postgresql') {
@@ -278,26 +324,12 @@ io.on('connection', (socket) => {
                 );
             }
 
-            // Get chat ID
-            const message = await queryOne(
-                'SELECT chat_id FROM messages WHERE id = ?',
-                [messageId]
-            );
-
-            // Get user info
-            const user = await queryOne(
-                'SELECT username FROM users WHERE id = ?',
-                [userId]
-            );
-
-            if (message) {
-                io.to(`chat_${message.chat_id}`).emit('reaction_added', {
-                    messageId: messageId,
-                    userId: userId,
-                    username: user.username,
-                    emoji: emoji
-                });
-            }
+            io.to(`chat_${message.chat_id}`).emit('reaction_added', {
+                messageId: messageId,
+                userId: userId,
+                username: socket.username,
+                emoji: emoji
+            });
         } catch (error) {
             console.error('Add reaction error:', error);
         }
@@ -308,26 +340,29 @@ io.on('connection', (socket) => {
      */
     socket.on('remove_reaction', async (data) => {
         try {
-            const { messageId, userId, emoji } = data;
+            const { messageId, emoji } = data;
+            const userId = socket.userId;
+
+            // Get chat ID and verify the user can see this message
+            const message = await queryOne(
+                'SELECT chat_id FROM messages WHERE id = ?',
+                [messageId]
+            );
+
+            if (!message || !(await isChatMember(message.chat_id, userId))) {
+                return;
+            }
 
             await executeQuery(
                 'DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?',
                 [messageId, userId, emoji]
             );
 
-            // Get chat ID
-            const message = await queryOne(
-                'SELECT chat_id FROM messages WHERE id = ?',
-                [messageId]
-            );
-
-            if (message) {
-                io.to(`chat_${message.chat_id}`).emit('reaction_removed', {
-                    messageId: messageId,
-                    userId: userId,
-                    emoji: emoji
-                });
-            }
+            io.to(`chat_${message.chat_id}`).emit('reaction_removed', {
+                messageId: messageId,
+                userId: userId,
+                emoji: emoji
+            });
         } catch (error) {
             console.error('Remove reaction error:', error);
         }
@@ -337,11 +372,17 @@ io.on('connection', (socket) => {
      * Typing indicator
      */
     socket.on('typing', (data) => {
-        const { chatId, userId, username, isTyping } = data;
+        const { chatId, isTyping } = data;
+
+        // Only members (who were joined to the room) can broadcast typing
+        if (!socket.rooms.has(`chat_${chatId}`)) {
+            return;
+        }
+
         socket.to(`chat_${chatId}`).emit('user_typing', {
             chatId,
-            userId,
-            username,
+            userId: socket.userId,
+            username: socket.username,
             isTyping
         });
     });
