@@ -47,6 +47,31 @@ const validateLogin = [
 ];
 
 /**
+ * Validation rules for requesting a password reset
+ */
+const validateForgotPassword = [
+    body('email')
+        .trim()
+        .isEmail()
+        .withMessage('Invalid email address')
+        .normalizeEmail()
+];
+
+/**
+ * Validation rules for resetting a password
+ */
+const validateResetPassword = [
+    body('token')
+        .isString()
+        .matches(/^[a-f0-9]{64}$/)
+        .withMessage('Invalid reset token'),
+
+    body('password')
+        .isLength({ min: 6 })
+        .withMessage('Password must be at least 6 characters long')
+];
+
+/**
  * Validation rules for sending messages
  */
 const validateMessage = [
@@ -124,6 +149,8 @@ function validateFileType(mimetype, allowedTypes) {
 module.exports = {
     validateRegistration,
     validateLogin,
+    validateForgotPassword,
+    validateResetPassword,
     validateMessage,
     validateCreateChat,
     checkValidation,

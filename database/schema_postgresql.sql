@@ -2,6 +2,7 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS password_resets CASCADE;
 DROP TABLE IF EXISTS message_reactions CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS group_members CASCADE;
@@ -39,6 +40,17 @@ CREATE TABLE users (
 
 CREATE INDEX idx_username ON users(username);
 CREATE INDEX idx_email ON users(email);
+
+-- Password reset tokens (only a SHA-256 hash of the token is stored)
+CREATE TABLE password_resets (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) UNIQUE NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_password_resets_user_id ON password_resets(user_id);
 
 -- Chats table (for both direct and group chats)
 CREATE TABLE chats (

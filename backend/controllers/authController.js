@@ -4,9 +4,21 @@
  */
 
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { executeQuery, queryOne } = require('../config/database');
 const { sanitizeHtml } = require('../utils/validation');
+const { sendPasswordResetEmail } = require('../utils/mailer');
+
+const RESET_TOKEN_TTL_MINUTES = 60;
+
+/**
+ * Hash a reset token - only the hash is stored, so a leaked
+ * database can't be used to reset anyone's password
+ */
+function hashResetToken(token) {
+    return crypto.createHash('sha256').update(token).digest('hex');
+}
 
 /**
  * Register a new user
@@ -223,10 +235,107 @@ async function updateProfile(req, res) {
     }
 }
 
+/**
+ * Request a password reset link
+ * Always responds the same way so the endpoint can't be used
+ * to discover which emails have accounts
+ */
+async function forgotPassword(req, res) {
+    const genericResponse = {
+        success: true,
+        message: 'If an account exists for that email, a password reset link has been sent.'
+    };
+
+    try {
+        const { email } = req.body;
+
+        const user = await queryOne(
+            'SELECT id, username, email FROM users WHERE email = ?',
+            [email]
+        );
+
+        if (!user) {
+            return res.json(genericResponse);
+        }
+
+        // Only one active reset link per user
+        await executeQuery('DELETE FROM password_resets WHERE user_id = ?', [user.id]);
+
+        const token = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+        await executeQuery(
+            'INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+            [user.id, hashResetToken(token), expiresAt]
+        );
+
+        const frontendUrl = (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:8080')
+            .replace(/\/+$/, '');
+        const resetUrl = `${frontendUrl}/reset-password.html?token=${token}`;
+
+        // Don't await - response time shouldn't reveal whether an email was sent
+        sendPasswordResetEmail(user.email, user.username, resetUrl, RESET_TOKEN_TTL_MINUTES)
+            .catch(error => console.error('Password reset email error:', error));
+
+        res.json(genericResponse);
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to process password reset request'
+        });
+    }
+}
+
+/**
+ * Reset password using a token from the reset email
+ */
+async function resetPassword(req, res) {
+    try {
+        const { token, password } = req.body;
+
+        const reset = await queryOne(
+            'SELECT id, user_id FROM password_resets WHERE token_hash = ? AND expires_at > ?',
+            [hashResetToken(token), new Date()]
+        );
+
+        if (!reset) {
+            return res.status(400).json({
+                success: false,
+                message: 'This reset link is invalid or has expired. Please request a new one.'
+            });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(password, salt);
+
+        await executeQuery(
+            'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [passwordHash, reset.user_id]
+        );
+
+        // Tokens are single-use
+        await executeQuery('DELETE FROM password_resets WHERE user_id = ?', [reset.user_id]);
+
+        res.json({
+            success: true,
+            message: 'Your password has been reset. You can now log in.'
+        });
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to reset password'
+        });
+    }
+}
+
 module.exports = {
     register,
     login,
     logout,
     getProfile,
-    updateProfile
+    updateProfile,
+    forgotPassword,
+    resetPassword
 };
