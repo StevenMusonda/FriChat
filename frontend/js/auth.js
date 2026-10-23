@@ -109,6 +109,36 @@ async function login(username, password) {
 }
 
 /**
+ * Request a password reset email
+ */
+async function requestPasswordReset(email) {
+    try {
+        return await apiRequest(CONFIG.ENDPOINTS.FORGOT_PASSWORD, {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        return { success: false, message: 'Failed to send reset link' };
+    }
+}
+
+/**
+ * Set a new password using a reset token
+ */
+async function resetPassword(token, password) {
+    try {
+        return await apiRequest(CONFIG.ENDPOINTS.RESET_PASSWORD, {
+            method: 'POST',
+            body: JSON.stringify({ token, password })
+        });
+    } catch (error) {
+        console.error('Reset password error:', error);
+        return { success: false, message: 'Failed to reset password' };
+    }
+}
+
+/**
  * Logout user
  */
 async function logout() {

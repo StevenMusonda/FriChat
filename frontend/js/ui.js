@@ -145,14 +145,56 @@ function initializeLogout() {
     
     if (!logoutBtn) return;
     
-    logoutBtn.addEventListener('click', async () => {
-        if (confirm('Are you sure you want to logout?')) {
-            // Disconnect WebSocket
-            disconnectWebSocket();
-            
-            // Logout
-            await logout();
+    const modal = document.getElementById('logoutModal');
+    const cancelBtn = document.getElementById('cancelLogout');
+    const confirmBtn = document.getElementById('confirmLogout');
+
+    const openModal = () => {
+        const user = getCurrentUser();
+        if (user) {
+            const name = user.fullName || user.username;
+            document.getElementById('logoutModalAvatar').textContent = name.charAt(0).toUpperCase();
+            document.getElementById('logoutModalName').textContent = name;
+            document.getElementById('logoutModalHandle').textContent = '@' + user.username;
         }
+
+        modal.hidden = false;
+        // Next frame so the opening transition runs
+        requestAnimationFrame(() => modal.classList.add('open'));
+        cancelBtn.focus();
+        document.addEventListener('keydown', onKeydown);
+    };
+
+    const closeModal = () => {
+        modal.classList.remove('open');
+        document.removeEventListener('keydown', onKeydown);
+        setTimeout(() => { modal.hidden = true; }, 200);
+        logoutBtn.focus();
+    };
+
+    const onKeydown = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+
+    logoutBtn.addEventListener('click', openModal);
+    cancelBtn.addEventListener('click', closeModal);
+
+    // Close when clicking the backdrop
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        cancelBtn.disabled = true;
+        confirmBtn.classList.add('loading');
+        confirmBtn.textContent = 'Logging out…';
+
+        // Disconnect WebSocket
+        disconnectWebSocket();
+
+        // Logout
+        await logout();
     });
 }
 

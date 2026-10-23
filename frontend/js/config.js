@@ -4,8 +4,13 @@
  */
 
 const CONFIG = {
-    API_BASE_URL: 'https://frichat-vfr1.onrender.com/api',
-    SOCKET_URL: 'https://frichat-vfr1.onrender.com',
+    API_BASE_URL: 'http://localhost:3000/api',
+    SOCKET_URL: 'http://localhost:3000',
+
+
+    //uncomment for render
+    //API_BASE_URL: 'https://frichat-vfr1.onrender.com/api',
+    //SOCKET_URL: 'https://frichat-vfr1.onrender.com',
     
     // API Endpoints
     ENDPOINTS: {
@@ -14,6 +19,8 @@ const CONFIG = {
         LOGIN: '/auth/login',
         LOGOUT: '/auth/logout',
         PROFILE: '/auth/profile',
+        FORGOT_PASSWORD: '/auth/forgot-password',
+        RESET_PASSWORD: '/auth/reset-password',
         
         // Chats
         CHATS: '/chats',
