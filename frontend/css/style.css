@@ -2102,3 +2102,268 @@ a:hover {
         transition: none;
     }
 }
+
+/* ===== Glassmorphism Theme =====
+ * Frosted, translucent surfaces layered over a soft gradient backdrop.
+ * Kept as an override layer so the base styles above stay untouched.
+ */
+:root {
+    --glass-blur: blur(20px) saturate(170%);
+    --glass-bg: rgba(255, 255, 255, 0.55);
+    --glass-bg-strong: rgba(255, 255, 255, 0.78);
+    --glass-bg-subtle: rgba(255, 255, 255, 0.32);
+    --glass-border: rgba(255, 255, 255, 0.65);
+    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    --glass-shadow: 0 8px 32px rgba(76, 61, 160, 0.16);
+
+    --app-backdrop:
+        radial-gradient(circle at 12% 18%, rgba(102, 126, 234, 0.55) 0, transparent 42%),
+        radial-gradient(circle at 88% 12%, rgba(236, 72, 153, 0.38) 0, transparent 40%),
+        radial-gradient(circle at 78% 85%, rgba(118, 75, 162, 0.5) 0, transparent 45%),
+        radial-gradient(circle at 20% 90%, rgba(56, 189, 248, 0.38) 0, transparent 40%),
+        linear-gradient(135deg, #eef1ff 0%, #f6efff 50%, #eaf6ff 100%);
+
+    --bg-primary: var(--glass-bg);
+    --bg-secondary: rgba(255, 255, 255, 0.4);
+    --bg-tertiary: rgba(255, 255, 255, 0.5);
+    --border-color: rgba(255, 255, 255, 0.55);
+
+    --message-sent-bg: rgba(102, 126, 234, 0.82);
+    --message-received-bg: rgba(255, 255, 255, 0.62);
+}
+
+body.dark-theme {
+    --glass-bg: rgba(20, 24, 45, 0.55);
+    --glass-bg-strong: rgba(20, 24, 45, 0.8);
+    --glass-bg-subtle: rgba(255, 255, 255, 0.06);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+    --app-backdrop:
+        radial-gradient(circle at 12% 18%, rgba(102, 126, 234, 0.45) 0, transparent 42%),
+        radial-gradient(circle at 88% 12%, rgba(236, 72, 153, 0.25) 0, transparent 40%),
+        radial-gradient(circle at 78% 85%, rgba(118, 75, 162, 0.45) 0, transparent 45%),
+        radial-gradient(circle at 20% 90%, rgba(56, 189, 248, 0.22) 0, transparent 40%),
+        linear-gradient(135deg, #0b0d1a 0%, #141029 50%, #0a1424 100%);
+
+    --bg-primary: var(--glass-bg);
+    --bg-secondary: rgba(255, 255, 255, 0.06);
+    --bg-tertiary: rgba(255, 255, 255, 0.1);
+    --border-color: rgba(255, 255, 255, 0.12);
+
+    --message-sent-bg: rgba(102, 126, 234, 0.7);
+    --message-received-bg: rgba(255, 255, 255, 0.08);
+}
+
+body {
+    background: var(--app-backdrop);
+    background-color: #eef1ff;
+    background-attachment: fixed;
+    min-height: 100vh;
+}
+
+body.dark-theme {
+    background-color: #0b0d1a;
+}
+
+.auth-container {
+    background: transparent;
+}
+
+/* Frosted panels */
+.auth-card,
+.chat-sidebar,
+.chat-header,
+.message-input-container,
+.typing-indicator,
+.pinned-messages-container,
+.modal-content,
+.emoji-picker,
+.message-action-dropdown,
+.pin-duration-content,
+.logout-modal-card {
+    background-color: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), var(--glass-highlight);
+}
+
+/* Floating surfaces need more opacity to stay readable over content */
+.modal-content,
+.emoji-picker,
+.message-action-dropdown,
+.pin-duration-content,
+.logout-modal-card {
+    background-color: var(--glass-bg-strong);
+}
+
+.auth-card {
+    border-radius: 20px;
+}
+
+/* Main chat area lets the backdrop show through */
+.chat-main {
+    background-color: transparent;
+}
+
+/* Edge panels only need their inner divider, not a full border */
+.chat-sidebar {
+    border-width: 0 1px 0 0;
+    box-shadow: none;
+}
+
+.chat-header {
+    border-width: 0 0 1px 0;
+    box-shadow: var(--glass-highlight);
+}
+
+.message-input-container,
+.typing-indicator {
+    border-width: 1px 0 0 0;
+    box-shadow: none;
+}
+
+.pinned-messages-container {
+    border-width: 0 0 1px 0;
+    box-shadow: none;
+    background-color: var(--glass-bg-subtle);
+}
+
+.modal-content {
+    border-radius: 18px;
+}
+
+/* Dim and blur whatever sits behind overlays */
+.modal,
+.pin-duration-modal {
+    background-color: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+/* Inputs */
+.form-group input,
+.sidebar-search input,
+.message-input-container input[type="text"] {
+    background-color: var(--glass-bg-subtle);
+    border-color: var(--glass-border);
+}
+
+.form-group input:focus,
+.sidebar-search input:focus,
+.message-input-container input[type="text"]:focus {
+    background-color: var(--glass-bg);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+/* Sidebar list */
+.sidebar-header,
+.sidebar-search {
+    border-color: var(--border-color);
+}
+
+.chat-item {
+    margin: 2px 8px;
+    border-radius: 12px;
+    border-left: none;
+}
+
+.chat-item:hover {
+    background-color: var(--glass-bg-subtle);
+}
+
+.chat-item.active {
+    background-color: var(--glass-bg);
+    box-shadow: inset 3px 0 0 var(--primary-color), var(--glass-highlight);
+}
+
+/* Message bubbles: translucent, without per-bubble blur to keep scrolling smooth */
+.message-bubble {
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 4px 14px rgba(76, 61, 160, 0.08);
+}
+
+.message.sent .message-bubble {
+    border-color: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 6px 18px rgba(102, 126, 234, 0.3);
+}
+
+.reaction,
+.member-item,
+.pinned-message,
+.logout-modal-user,
+.pin-duration-btn {
+    background-color: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+}
+
+.message-action-btn {
+    background-color: var(--glass-bg-strong);
+    border-color: var(--glass-border);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.btn-secondary {
+    background-color: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+}
+
+.btn-secondary:hover {
+    background-color: var(--glass-bg);
+}
+
+.icon-btn:hover {
+    background-color: var(--glass-bg-subtle);
+}
+
+/* Scrollbars that stay visible on translucent surfaces */
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(102, 126, 234, 0.35);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(102, 126, 234, 0.55);
+}
+
+@media (max-width: 768px) {
+    .chat-sidebar {
+        border-width: 0;
+    }
+}
+
+/* Browsers without backdrop-filter, or users who ask for less transparency */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+        --glass-bg: rgba(255, 255, 255, 0.92);
+        --glass-bg-strong: rgba(255, 255, 255, 0.97);
+    }
+
+    body.dark-theme {
+        --glass-bg: rgba(26, 32, 44, 0.94);
+        --glass-bg-strong: rgba(26, 32, 44, 0.98);
+    }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    :root {
+        --glass-bg: #ffffff;
+        --glass-bg-strong: #ffffff;
+        --glass-bg-subtle: #f7fafc;
+        --message-received-bg: #edf2f7;
+    }
+
+    body.dark-theme {
+        --glass-bg: #1a202c;
+        --glass-bg-strong: #1a202c;
+        --glass-bg-subtle: #2d3748;
+        --message-received-bg: #2d3748;
+    }
+}
