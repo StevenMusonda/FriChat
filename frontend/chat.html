@@ -82,11 +82,29 @@
                             <span id="chatInitial">C</span>
                         </div>
                         <div>
-                            <h3 id="chatName">Chat Name</h3>
+                            <h3 class="chat-title-row">
+                                <span id="chatName">Chat Name</span>
+                                <span class="chat-muted-icon" id="chatMutedIcon" title="Muted" aria-label="Muted" hidden>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                                        <path d="M18.63 13A17.89 17.89 0 0 1 18 8"></path>
+                                        <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"></path>
+                                        <path d="M18 8a6 6 0 0 0-9.33-5"></path>
+                                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                                    </svg>
+                                </span>
+                            </h3>
                             <span class="chat-status" id="chatStatus">Online</span>
                         </div>
                     </div>
                     <div class="chat-actions">
+                        <button class="icon-btn" id="chatOptionsBtn" title="Mute and archive" aria-haspopup="menu" aria-expanded="false" onclick="toggleChatOptionsMenu(event)">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="5" r="1"></circle>
+                                <circle cx="12" cy="12" r="1"></circle>
+                                <circle cx="12" cy="19" r="1"></circle>
+                            </svg>
+                        </button>
                         <button class="icon-btn" id="chatInfoBtn" title="Chat Info">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
@@ -103,8 +121,18 @@
                     </div>
                 </div>
 
-                <div class="messages-container" id="messagesContainer">
-                    <!-- Messages will be loaded here -->
+                <div class="messages-wrapper" id="messagesWrapper">
+                    <div class="messages-container" id="messagesContainer">
+                        <!-- Messages will be loaded here -->
+                    </div>
+
+                    <button type="button" class="jump-to-latest" id="jumpToLatestBtn" aria-label="Jump to latest" hidden>
+                        <span class="jump-to-latest-count"></span>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <polyline points="19 12 12 19 5 12"></polyline>
+                        </svg>
+                    </button>
                 </div>
 
                 <div class="typing-indicator" id="typingIndicator" style="display: none;">
@@ -364,18 +392,25 @@
             // Set up WebSocket event handlers
             onNewMessage((message) => {
                 const currentUser = getCurrentUser();
-                
-                // Add message to UI if it's for the current chat
+                let seen = message.sender_id === currentUser.userId;
+
+                // Add message to the open thread; it's read if the user is looking at the bottom
                 if (message.chat_id === currentChatId) {
-                    addMessageToUI(message);
-                    // Mark as read since user is viewing this chat
-                    markMessagesAsRead(currentChatId);
-                    // Update chat list to show latest message
-                    loadChats();
-                } else if (message.sender_id !== currentUser.userId) {
-                    // For other chats, reload chat list to update last message and unread count
-                    loadChats();
+                    seen = addMessageToUI(message) || seen;
                 }
+
+                // Update last message, order, unread badge and archive state in the sidebar
+                applyIncomingMessageToChatList(message, !seen);
+            });
+
+            // Read position changed here or in another tab
+            onReadPosition((data) => {
+                applyReadPosition(data);
+            });
+
+            // Mute/archive changed in another tab
+            onChatSettings((data) => {
+                applyChatSettings(data);
             });
 
             onMessageStatus((data) => {
@@ -405,6 +440,9 @@
             // Initialize message input
             initializeMessageInput();
 
+            // Older pages on scroll up, read state and jump button near the bottom
+            initializeMessageScroll();
+
             // Load user's chats
             await loadChats();
 
@@ -415,13 +453,8 @@
             }
 
             // Search functionality in sidebar
-            document.getElementById('chatSearch').addEventListener('input', (e) => {
-                const query = e.target.value.toLowerCase();
-                const filteredChats = allChats.filter(chat => {
-                    const chatName = chat.chat_name || '';
-                    return chatName.toLowerCase().includes(query);
-                });
-                renderChatList(filteredChats);
+            document.getElementById('chatSearch').addEventListener('input', () => {
+                refreshChatList();
             });
 
             console.log('FriChat initialized successfully');
@@ -436,14 +469,16 @@
                 // Page is visible again
                 console.log('Page visible');
                 
-                // Reconnect WebSocket if needed
+                // Reconnect WebSocket if needed, and catch up on anything missed while disconnected
                 if (!socket || !socket.connected) {
                     initializeWebSocket();
-                }
-                
-                // Reload chats
-                if (currentChatId) {
-                    loadMessages(currentChatId);
+                    loadChats();
+                    if (currentChatId) {
+                        loadMessages(currentChatId);
+                    }
+                } else {
+                    // Messages that arrived while the tab was hidden count as read once seen
+                    handleReachedLatest();
                 }
             }
         });

@@ -29,7 +29,10 @@ const CONFIG = {
         ADD_MEMBER: (chatId) => `/chats/${chatId}/members`,
         REMOVE_MEMBER: (chatId, userId) => `/chats/${chatId}/members/${userId}`,
         SEARCH_USERS: '/chats/search/users',
-        
+        MARK_READ: (chatId) => `/chats/${chatId}/read`,
+        MUTE_CHAT: (chatId) => `/chats/${chatId}/mute`,
+        ARCHIVE_CHAT: (chatId) => `/chats/${chatId}/archive`,
+
         // Messages
         MESSAGES: (chatId) => `/messages/chat/${chatId}`,
         SEND_MESSAGE: '/messages',
@@ -39,12 +42,16 @@ const CONFIG = {
         REMOVE_REACTION: (messageId) => `/messages/${messageId}/reactions`,
     },
     
+    // Messages fetched per page when opening a chat or scrolling up
+    MESSAGE_PAGE_SIZE: 30,
+
     // Storage Keys
     STORAGE_KEYS: {
         AUTH_TOKEN: 'authToken',
         USER_DATA: 'userData',
         THEME: 'theme',
-        CURRENT_CHAT: 'currentChat'
+        CURRENT_CHAT: 'currentChat',
+        ARCHIVED_EXPANDED: 'archivedExpanded'
     }
 };
 

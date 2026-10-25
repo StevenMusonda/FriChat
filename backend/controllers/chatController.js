@@ -5,6 +5,13 @@
 
 const { executeQuery, queryOne } = require('../config/database');
 const { sanitizeHtml } = require('../utils/validation');
+const {
+    MUTE_DURATIONS,
+    markChatRead,
+    getChatSettings,
+    setMute,
+    setArchived
+} = require('../utils/chatState');
 
 /**
  * Get all chats for current user
@@ -15,25 +22,40 @@ async function getUserChats(req, res) {
         
         console.log('Getting chats for user:', userId);
 
-        // Get basic chat information first (exclude deleted chats)
+        // Chat info plus this user's read/mute/archive state (exclude deleted chats)
         const chats = await executeQuery(`
-            SELECT DISTINCT
+            SELECT
                 c.id,
                 c.chat_type,
                 c.chat_name,
                 c.created_at,
-                c.updated_at
+                c.updated_at,
+                gm.last_read_message_id,
+                gm.muted_until,
+                CASE WHEN gm.muted_until IS NOT NULL AND gm.muted_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_muted,
+                gm.archived_at,
+                (
+                    SELECT COUNT(*)
+                    FROM messages um
+                    WHERE um.chat_id = c.id
+                    AND um.id > COALESCE(gm.last_read_message_id, 0)
+                    AND um.sender_id <> ?
+                    AND (um.deleted_for_everyone IS NULL OR um.deleted_for_everyone = FALSE)
+                ) AS unread_count
             FROM chats c
-            JOIN group_members gm ON c.id = gm.chat_id
+            JOIN group_members gm ON c.id = gm.chat_id AND gm.user_id = ?
             LEFT JOIN deleted_chats dc ON c.id = dc.chat_id AND dc.user_id = ?
-            WHERE gm.user_id = ? AND dc.id IS NULL
+            WHERE dc.id IS NULL
             ORDER BY c.updated_at DESC
-        `, [userId, userId]);
-        
+        `, [userId, userId, userId]);
+
         console.log('Found chats:', chats.length);
 
         // For each chat, get participants and last message
         for (let chat of chats) {
+            chat.unread_count = parseInt(chat.unread_count) || 0;
+            chat.is_muted = !!parseInt(chat.is_muted);
+
             // Get participants
             const participants = await executeQuery(`
                 SELECT 
@@ -70,18 +92,6 @@ async function getUserChats(req, res) {
             `, [chat.id]);
             
             chat.lastMessage = lastMessage.length > 0 ? JSON.stringify(lastMessage[0]) : null;
-            
-            // Get unread count for current user
-            const unreadCountResult = await executeQuery(`
-                SELECT COUNT(*) as count
-                FROM messages
-                WHERE chat_id = ?
-                AND sender_id != ?
-                AND status != 'read'
-            `, [chat.id, userId]);
-            
-            const unreadCountValue = unreadCountResult.length > 0 ? unreadCountResult[0].count : 0;
-            chat.unread_count = parseInt(unreadCountValue) || 0;
         }
 
         res.json({
@@ -283,10 +293,10 @@ async function addMember(req, res) {
             });
         }
 
-        // Add member
+        // Add member; earlier history starts out read so they don't join to a wall of unread
         await executeQuery(
-            'INSERT INTO group_members (chat_id, user_id, role) VALUES (?, ?, ?)',
-            [chatId, newUserId, 'member']
+            'INSERT INTO group_members (chat_id, user_id, role, last_read_message_id) VALUES (?, ?, ?, (SELECT MAX(id) FROM messages WHERE chat_id = ?))',
+            [chatId, newUserId, 'member', chatId]
         );
 
         res.json({
@@ -429,6 +439,125 @@ async function deleteChat(req, res) {
     }
 }
 
+/**
+ * Move the current user's read position forward
+ * Body: { messageId } (optional - defaults to the newest message)
+ */
+async function markRead(req, res) {
+    try {
+        const { chatId } = req.params;
+        const messageId = parseInt(req.body && req.body.messageId) || null;
+
+        const state = await markChatRead(req.io, chatId, req.user.id, messageId);
+
+        if (!state) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: state
+        });
+    } catch (error) {
+        console.error('Mark read error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update read position',
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Mute or unmute a chat for the current user
+ * Body: { duration: '8h' | '1w' | 'always' | 'off' }
+ */
+async function updateMute(req, res) {
+    try {
+        const { chatId } = req.params;
+        const { duration } = req.body || {};
+        const userId = req.user.id;
+
+        if (!MUTE_DURATIONS[duration] && duration !== 'always' && duration !== 'off') {
+            return res.status(400).json({
+                success: false,
+                message: "duration must be one of '8h', '1w', 'always', 'off'"
+            });
+        }
+
+        if (!(await getChatSettings(chatId, userId))) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        await setMute(chatId, userId, duration);
+        const settings = await getChatSettings(chatId, userId);
+
+        // Keep the user's other tabs in sync
+        req.io.to(`user_${userId}`).emit('chat_settings_updated', settings);
+
+        res.json({
+            success: true,
+            data: settings
+        });
+    } catch (error) {
+        console.error('Update mute error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update mute setting',
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Archive or unarchive a chat for the current user
+ * Body: { archived: true | false }
+ */
+async function updateArchive(req, res) {
+    try {
+        const { chatId } = req.params;
+        const { archived } = req.body || {};
+        const userId = req.user.id;
+
+        if (typeof archived !== 'boolean') {
+            return res.status(400).json({
+                success: false,
+                message: 'archived must be true or false'
+            });
+        }
+
+        if (!(await getChatSettings(chatId, userId))) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        await setArchived(chatId, userId, archived);
+        const settings = await getChatSettings(chatId, userId);
+
+        req.io.to(`user_${userId}`).emit('chat_settings_updated', settings);
+
+        res.json({
+            success: true,
+            data: settings
+        });
+    } catch (error) {
+        console.error('Update archive error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update archive setting',
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
     getUserChats,
     getChatById,
@@ -436,5 +565,8 @@ module.exports = {
     addMember,
     removeMember,
     searchUsers,
-    deleteChat
+    deleteChat,
+    markRead,
+    updateMute,
+    updateArchive
 };

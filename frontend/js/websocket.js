@@ -9,6 +9,9 @@ let statusHandlers = [];
 let reactionHandlers = [];
 let typingHandlers = [];
 let userStatusHandlers = [];
+let readPositionHandlers = [];
+let messagesReadHandlers = [];
+let chatSettingsHandlers = [];
 
 /**
  * Initialize WebSocket connection
@@ -83,7 +86,22 @@ function initializeWebSocket() {
         console.log('User status changed:', data);
         userStatusHandlers.forEach(handler => handler(data));
     });
-    
+
+    // Read position changed (this tab or another tab of the same user)
+    socket.on('read_position_updated', (data) => {
+        readPositionHandlers.forEach(handler => handler(data));
+    });
+
+    // Someone in a chat read up to a message (drives read receipts)
+    socket.on('messages_read', (data) => {
+        messagesReadHandlers.forEach(handler => handler(data));
+    });
+
+    // Mute/archive changed in another tab
+    socket.on('chat_settings_updated', (data) => {
+        chatSettingsHandlers.forEach(handler => handler(data));
+    });
+
     return socket;
 }
 
@@ -136,6 +154,21 @@ function updateMessageStatusViaSocket(messageId, status) {
         messageId: messageId,
         status: status,
         userId: user.userId
+    });
+}
+
+/**
+ * Move the read position for a chat forward to messageId
+ */
+function markReadViaSocket(chatId, messageId) {
+    if (!socket) {
+        console.error('WebSocket not initialized');
+        return;
+    }
+
+    socket.emit('mark_read', {
+        chatId: chatId,
+        messageId: messageId
     });
 }
 
@@ -227,6 +260,27 @@ function onUserStatus(handler) {
 }
 
 /**
+ * Register read position handler
+ */
+function onReadPosition(handler) {
+    readPositionHandlers.push(handler);
+}
+
+/**
+ * Register messages-read (receipt) handler
+ */
+function onMessagesRead(handler) {
+    messagesReadHandlers.push(handler);
+}
+
+/**
+ * Register mute/archive settings handler
+ */
+function onChatSettings(handler) {
+    chatSettingsHandlers.push(handler);
+}
+
+/**
  * Disconnect WebSocket
  */
 function disconnectWebSocket() {
@@ -240,5 +294,8 @@ function disconnectWebSocket() {
         reactionHandlers = [];
         typingHandlers = [];
         userStatusHandlers = [];
+        readPositionHandlers = [];
+        messagesReadHandlers = [];
+        chatSettingsHandlers = [];
     }
 }

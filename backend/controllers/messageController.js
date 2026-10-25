@@ -6,19 +6,26 @@
 const { executeQuery, queryOne } = require('../config/database');
 const { sanitizeHtml } = require('../utils/validation');
 const path = require('path');
+const { recordNewMessage } = require('../utils/chatState');
+
+const DEFAULT_PAGE_SIZE = 30;
+const MAX_PAGE_SIZE = 100;
 
 /**
- * Get messages for a chat
+ * Get a page of messages for a chat, newest first from the server's point of view
+ * Query: limit (default 30, max 100), before (message id cursor - returns messages older than it)
+ * Response data is oldest-first; pagination.nextCursor is passed back as `before` for the next older page
  */
 async function getMessages(req, res) {
     try {
         const { chatId } = req.params;
         const userId = req.user.id;
-        const { limit = 50, offset = 0 } = req.query;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+        const before = parseInt(req.query.before) || null;
 
         // Check if user is a member of this chat
         const membership = await queryOne(
-            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+            'SELECT id, last_read_message_id FROM group_members WHERE chat_id = ? AND user_id = ?',
             [chatId, userId]
         );
 
@@ -29,8 +36,17 @@ async function getMessages(req, res) {
             });
         }
 
-        // Get messages (exclude deleted messages)
-        const messages = await executeQuery(`
+        const params = [userId, chatId];
+        let cursorClause = '';
+        if (before) {
+            cursorClause = 'AND m.id < ?';
+            params.push(before);
+        }
+
+        // Ids only ever increase, so they make a stable cursor (timestamps can tie).
+        // Messages deleted "for me" are filtered here so they don't eat into the page.
+        // limit is a validated integer, inlined because mysql2 rejects a bound LIMIT on some servers.
+        const rows = await executeQuery(`
             SELECT 
                 m.id,
                 m.chat_id,
@@ -59,28 +75,56 @@ async function getMessages(req, res) {
             LEFT JOIN files f ON m.file_id = f.id
             LEFT JOIN deleted_messages dm ON m.id = dm.message_id AND dm.user_id = ?
             WHERE m.chat_id = ?
-            ORDER BY m.created_at DESC
-            LIMIT ? OFFSET ?
-        `, [userId, chatId, parseInt(limit), parseInt(offset)]);
+            ${cursorClause}
+            AND (dm.id IS NULL OR m.deleted_for_everyone = TRUE)
+            ORDER BY m.id DESC
+            LIMIT ${limit + 1}
+        `, params);
 
-        // Get reactions for each message
-        for (let message of messages) {
+        // The extra row only tells us whether an older page exists
+        const hasMore = rows.length > limit;
+        const messages = rows.slice(0, limit);
+
+        // Reactions for the whole page in one query
+        if (messages.length > 0) {
+            const ids = messages.map(m => m.id);
             const reactions = await executeQuery(`
-                SELECT 
-                    mr.user_id as userId,
+                SELECT
+                    mr.message_id,
+                    mr.user_id,
                     ru.username,
                     mr.emoji
                 FROM message_reactions mr
                 JOIN users ru ON mr.user_id = ru.id
-                WHERE mr.message_id = ?
-            `, [message.id]);
-            
-            message.reactions = reactions.length > 0 ? JSON.stringify(reactions) : null;
+                WHERE mr.message_id IN (${ids.map(() => '?').join(', ')})
+            `, ids);
+
+            // Keyed here rather than with a SQL alias - PostgreSQL would lowercase "userId"
+            const byMessage = {};
+            for (const reaction of reactions) {
+                (byMessage[reaction.message_id] = byMessage[reaction.message_id] || []).push({
+                    userId: reaction.user_id,
+                    username: reaction.username,
+                    emoji: reaction.emoji
+                });
+            }
+
+            for (const message of messages) {
+                message.reactions = byMessage[message.id] ? JSON.stringify(byMessage[message.id]) : null;
+            }
         }
+
+        messages.reverse(); // Oldest first
 
         res.json({
             success: true,
-            data: messages.reverse() // Reverse to show oldest first
+            data: messages,
+            pagination: {
+                hasMore: hasMore,
+                // Oldest message on this page; send as `before` to get the next older page
+                nextCursor: hasMore ? messages[0].id : null
+            },
+            lastReadMessageId: membership.last_read_message_id || null
         });
     } catch (error) {
         console.error('Get messages error:', error);
@@ -126,6 +170,9 @@ async function sendMessage(req, res) {
             'UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
             [chatId]
         );
+
+        // Un-archive for members who haven't muted it; sender has now read up to here
+        await recordNewMessage(req.io, chatId, userId, messageId || null);
 
         // Get the created message
         const message = await queryOne(`
@@ -250,6 +297,9 @@ async function uploadFile(req, res) {
             'UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
             [chatId]
         );
+
+        // Un-archive for members who haven't muted it; sender has now read up to here
+        await recordNewMessage(req.io, chatId, userId, messageId || null);
 
         // Get the created message
         const message = await queryOne(`

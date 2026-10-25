@@ -5,20 +5,45 @@
 
 let currentMessages = [];
 
+// Paging: the newest page is loaded on open, older pages as the user scrolls up
+let hasOlderMessages = false;
+let oldestMessageCursor = null;
+let loadingOlderMessages = false;
+let messagesLoadToken = 0; // bumps on every chat open so late responses for the old chat are dropped
+
+// Read position
+let lastReadAtOpen = null;   // server read position when the chat was opened (places the divider)
+let unreadDividerId = null;  // message the "New messages" line sits above
+let lastMarkedReadId = 0;    // newest id already sent to the server
+let newWhileScrolledUp = 0;  // arrivals the user hasn't scrolled down to yet
+
+const NEAR_BOTTOM_PX = 150;
+const LOAD_OLDER_THRESHOLD_PX = 120;
+
 /**
- * Load messages for a chat
+ * Load the newest page of messages for a chat
  */
-async function loadMessages(chatId, limit = 50, offset = 0) {
+async function loadMessages(chatId) {
+    const loadToken = ++messagesLoadToken;
+    resetThreadState();
+
     try {
-        const response = await apiRequest(`${CONFIG.ENDPOINTS.MESSAGES(chatId)}?limit=${limit}&offset=${offset}`);
-        
+        const response = await apiRequest(`${CONFIG.ENDPOINTS.MESSAGES(chatId)}?limit=${CONFIG.MESSAGE_PAGE_SIZE}`);
+
+        if (loadToken !== messagesLoadToken) return;
+
         if (response.success) {
             currentMessages = response.data || [];
+            hasOlderMessages = !!(response.pagination && response.pagination.hasMore);
+            oldestMessageCursor = response.pagination ? response.pagination.nextCursor : null;
+            lastReadAtOpen = response.lastReadMessageId || 0;
+            unreadDividerId = findFirstUnreadId(currentMessages, lastReadAtOpen);
+
             renderMessages(currentMessages);
-            scrollToBottom();
-            
-            // Mark unread messages as read
-            await markMessagesAsRead(chatId);
+            scrollToFirstUnreadOrBottom();
+            updateJumpButton();
+
+            markChatAsRead(chatId);
         }
     } catch (error) {
         console.error('Load messages error:', error);
@@ -26,64 +51,203 @@ async function loadMessages(chatId, limit = 50, offset = 0) {
 }
 
 /**
- * Mark messages as read
+ * Forget everything about the previously open thread
  */
-async function markMessagesAsRead(chatId) {
+function resetThreadState() {
+    currentMessages = [];
+    hasOlderMessages = false;
+    oldestMessageCursor = null;
+    loadingOlderMessages = false;
+    lastReadAtOpen = null;
+    unreadDividerId = null;
+    lastMarkedReadId = 0;
+    newWhileScrolledUp = 0;
+}
+
+/**
+ * Fetch the page before the oldest loaded message and prepend it without moving the view
+ */
+async function loadOlderMessages() {
+    if (!hasOlderMessages || loadingOlderMessages || !currentChatId) return;
+
+    const chatId = currentChatId;
+    const loadToken = messagesLoadToken;
+    loadingOlderMessages = true;
+    setLoaderSpinning(true);
+
     try {
-        const currentUser = getCurrentUser();
-        
-        // Find messages that are not sent by current user and are not already read
-        const unreadMessages = currentMessages.filter(msg => 
-            msg.sender_id !== currentUser.userId && 
-            msg.status !== 'read'
+        const response = await apiRequest(
+            `${CONFIG.ENDPOINTS.MESSAGES(chatId)}?limit=${CONFIG.MESSAGE_PAGE_SIZE}&before=${oldestMessageCursor}`
         );
-        
-        // Mark each unread message as read
-        for (const message of unreadMessages) {
-            await apiRequest(`/messages/${message.id}/status`, {
-                method: 'PUT',
-                body: { status: 'read' }
-            });
-            
-            // Notify via socket
-            updateMessageStatusViaSocket(message.id, 'read');
-            
-            // Update local message status
-            message.status = 'read';
-        }
-        
-        // Re-render to show updated status
-        if (unreadMessages.length > 0) {
-            renderMessages(currentMessages);
-            
-            // Update chat list to remove unread badge
-            updateChatUnreadCount(chatId, 0);
+
+        if (loadToken !== messagesLoadToken) return;
+
+        if (response.success) {
+            hasOlderMessages = !!(response.pagination && response.pagination.hasMore);
+            oldestMessageCursor = response.pagination ? response.pagination.nextCursor : null;
+            prependMessages(response.data || []);
         }
     } catch (error) {
-        console.error('Mark messages as read error:', error);
+        console.error('Load older messages error:', error);
+    } finally {
+        if (loadToken === messagesLoadToken) {
+            loadingOlderMessages = false;
+            setLoaderSpinning(false);
+        }
     }
 }
 
 /**
- * Update unread count badge in chat list
+ * Insert older messages above the current ones, keeping what the user sees in place
  */
-function updateChatUnreadCount(chatId, count) {
-    const chatItem = document.querySelector(`[data-chat-id="${chatId}"]`);
-    if (!chatItem) return;
-    
-    // Remove existing badge
-    const existingBadge = chatItem.querySelector('.unread-badge');
-    if (existingBadge) {
-        existingBadge.remove();
+function prependMessages(older) {
+    const container = document.getElementById('messagesContainer');
+    const loader = document.getElementById('messagesLoader');
+    if (!container || !loader) return;
+
+    // Keep the message at the top of the view exactly where it is
+    const anchor = container.querySelector('.message');
+    const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+
+    // Everything loaded so far is newer than the read position, so the first unread may be further up
+    if (unreadDividerId && currentMessages.length > 0 && currentMessages[0].id > lastReadAtOpen) {
+        const earlier = findFirstUnreadId(older, lastReadAtOpen);
+        if (earlier) {
+            const divider = document.getElementById('unreadDivider');
+            if (divider) divider.remove();
+            unreadDividerId = earlier;
+        }
     }
-    
-    // Add new badge if count > 0
-    if (count > 0) {
-        const badge = document.createElement('div');
-        badge.className = 'unread-badge';
-        badge.textContent = count;
-        chatItem.appendChild(badge);
+
+    currentMessages = older.concat(currentMessages);
+    loader.insertAdjacentHTML('afterend', renderMessagesHtml(older));
+    loader.style.display = hasOlderMessages ? '' : 'none';
+
+    if (anchor && anchor.isConnected) {
+        container.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
     }
+}
+
+/**
+ * First message from someone else newer than the read position
+ */
+function findFirstUnreadId(messages, lastReadId) {
+    const currentUser = getCurrentUser();
+    const unread = messages.find(m =>
+        m.id > (lastReadId || 0) &&
+        m.sender_id !== currentUser.userId &&
+        !m.deleted_for_everyone
+    );
+    return unread ? unread.id : null;
+}
+
+/**
+ * Tell the server the user has seen everything loaded (the newest page is always loaded)
+ */
+function markChatAsRead(chatId) {
+    if (!chatId || currentMessages.length === 0) return;
+
+    const newestId = currentMessages[currentMessages.length - 1].id;
+    if (newestId <= lastMarkedReadId) return;
+    lastMarkedReadId = newestId;
+
+    if (window.socket && window.socket.connected) {
+        markReadViaSocket(chatId, newestId);
+    } else {
+        apiRequest(CONFIG.ENDPOINTS.MARK_READ(chatId), {
+            method: 'POST',
+            body: JSON.stringify({ messageId: newestId })
+        }).catch(error => console.error('Mark read error:', error));
+    }
+
+    // The server confirms with read_position_updated; clear the badge now so it doesn't flicker
+    setChatUnreadCount(chatId, 0);
+}
+
+/**
+ * Distance check used for auto-scroll, auto-read and the jump button
+ */
+function isNearBottom() {
+    const container = document.getElementById('messagesContainer');
+    if (!container) return true;
+    return container.scrollHeight - container.scrollTop - container.clientHeight < NEAR_BOTTOM_PX;
+}
+
+/**
+ * Open a chat at the "New messages" line if there is one, otherwise at the bottom
+ */
+function scrollToFirstUnreadOrBottom() {
+    const container = document.getElementById('messagesContainer');
+    const divider = document.getElementById('unreadDivider');
+
+    if (container && divider) {
+        container.scrollTop += divider.getBoundingClientRect().top - container.getBoundingClientRect().top - 16;
+    } else {
+        scrollToBottom();
+    }
+}
+
+/**
+ * Show the floating button when scrolled away from the bottom, with a count of arrivals
+ */
+function updateJumpButton() {
+    const button = document.getElementById('jumpToLatestBtn');
+    if (!button) return;
+
+    const count = button.querySelector('.jump-to-latest-count');
+    button.hidden = isNearBottom();
+    button.classList.toggle('has-count', newWhileScrolledUp > 0);
+    count.textContent = newWhileScrolledUp > 0 ? `${newWhileScrolledUp > 99 ? '99+' : newWhileScrolledUp} new` : '';
+    button.setAttribute('aria-label', newWhileScrolledUp > 0
+        ? `Jump to latest, ${newWhileScrolledUp} new messages`
+        : 'Jump to latest');
+}
+
+/**
+ * The user is looking at the bottom of the thread: everything there counts as read
+ */
+function handleReachedLatest() {
+    if (!currentChatId || document.hidden || !isNearBottom()) return;
+
+    if (newWhileScrolledUp > 0) {
+        newWhileScrolledUp = 0;
+        updateJumpButton();
+    }
+    markChatAsRead(currentChatId);
+}
+
+/**
+ * Scroll handling for the thread: load older pages near the top, read state near the bottom
+ */
+function initializeMessageScroll() {
+    const container = document.getElementById('messagesContainer');
+    const jumpButton = document.getElementById('jumpToLatestBtn');
+
+    container.addEventListener('scroll', () => {
+        if (container.scrollTop < LOAD_OLDER_THRESHOLD_PX) {
+            loadOlderMessages();
+        }
+        updateJumpButton();
+        handleReachedLatest();
+    }, { passive: true });
+
+    jumpButton.addEventListener('click', () => {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    });
+}
+
+/**
+ * Receipts: someone else read up to a message, so our messages up to it are read
+ */
+function handleMessagesRead(data) {
+    const currentUser = getCurrentUser();
+    if (data.chatId !== currentChatId || data.readerId === currentUser.userId) return;
+
+    currentMessages.forEach(message => {
+        if (message.sender_id === currentUser.userId && message.id <= data.upToMessageId && message.status !== 'read') {
+            updateMessageStatusInUI(message.id, 'read');
+        }
+    });
 }
 
 /**
@@ -91,8 +255,7 @@ function updateChatUnreadCount(chatId, count) {
  */
 function renderMessages(messages) {
     const container = document.getElementById('messagesContainer');
-    const currentUser = getCurrentUser();
-    
+
     if (!messages || messages.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
@@ -102,88 +265,125 @@ function renderMessages(messages) {
         return;
     }
     
-    container.innerHTML = messages.map(message => {
-        const isSent = message.sender_id === currentUser.userId;
-        const senderInitial = (message.full_name || message.username).charAt(0).toUpperCase();
-        
-        // Parse reactions if they exist
-        let reactions = [];
-        if (message.reactions && typeof message.reactions === 'string') {
-            try {
-                reactions = JSON.parse(message.reactions) || [];
-            } catch (e) {
-                reactions = [];
-            }
-        } else if (Array.isArray(message.reactions)) {
-            reactions = message.reactions;
+    container.innerHTML = renderLoaderHtml() + renderMessagesHtml(messages);
+}
+
+/**
+ * Spinner row at the top of the thread; takes space only while older pages exist
+ */
+function renderLoaderHtml() {
+    return `
+        <div class="messages-loader" id="messagesLoader" style="${hasOlderMessages ? '' : 'display: none;'}" aria-hidden="true">
+            <span class="messages-loader-spinner"></span>
+        </div>
+    `;
+}
+
+/**
+ * Spin only while a request is in flight (visibility, so the layout doesn't shift)
+ */
+function setLoaderSpinning(spinning) {
+    const loader = document.getElementById('messagesLoader');
+    if (loader) loader.classList.toggle('loading', spinning);
+}
+
+/**
+ * HTML for a run of messages, with the "New messages" line where it belongs
+ */
+function renderMessagesHtml(messages) {
+    return messages.map(message => {
+        const divider = message.id === unreadDividerId
+            ? '<div class="unread-divider" id="unreadDivider" role="separator"><span>New messages</span></div>'
+            : '';
+        return divider + renderMessageHtml(message);
+    }).join('');
+}
+
+/**
+ * HTML for one message ('' when it was deleted for the current user only)
+ */
+function renderMessageHtml(message) {
+    const currentUser = getCurrentUser();
+    const isSent = message.sender_id === currentUser.userId;
+    const senderInitial = (message.full_name || message.username).charAt(0).toUpperCase();
+    
+    // Parse reactions if they exist
+    let reactions = [];
+    if (message.reactions && typeof message.reactions === 'string') {
+        try {
+            reactions = JSON.parse(message.reactions) || [];
+        } catch (e) {
+            reactions = [];
         }
-        
-        // Group reactions by emoji
-        const groupedReactions = {};
-        reactions.forEach(reaction => {
-            if (!groupedReactions[reaction.emoji]) {
-                groupedReactions[reaction.emoji] = [];
-            }
-            groupedReactions[reaction.emoji].push(reaction);
-        });
-        
-        // Check if message is deleted
-        const isDeleted = message.is_deleted || message.deleted_at;
-        
-        if (isDeleted && message.deleted_for_everyone) {
-            return `
-                <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
-                    <div class="message-avatar">${senderInitial}</div>
-                    <div class="message-content">
-                        ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
-                        <div class="message-bubble">
-                            <div class="message-deleted">🚫 This message was deleted</div>
-                        </div>
-                        <div class="message-footer">
-                            <span class="message-time">${formatTime(message.created_at)}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
+    } else if (Array.isArray(message.reactions)) {
+        reactions = message.reactions;
+    }
+    
+    // Group reactions by emoji
+    const groupedReactions = {};
+    reactions.forEach(reaction => {
+        if (!groupedReactions[reaction.emoji]) {
+            groupedReactions[reaction.emoji] = [];
         }
-        
-        // Don't show message if deleted for current user only
-        if (isDeleted) return '';
-        
+        groupedReactions[reaction.emoji].push(reaction);
+    });
+    
+    // Check if message is deleted
+    const isDeleted = message.is_deleted || message.deleted_at;
+    
+    if (isDeleted && message.deleted_for_everyone) {
         return `
             <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
-                <div class="message-actions">
-                    <button class="message-action-btn" onclick="showMessageActions(${message.id}, event)">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="1"></circle>
-                            <circle cx="19" cy="12" r="1"></circle>
-                            <circle cx="5" cy="12" r="1"></circle>
-                        </svg>
-                    </button>
-                </div>
                 <div class="message-avatar">${senderInitial}</div>
                 <div class="message-content">
                     ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
                     <div class="message-bubble">
-                        ${renderMessageContent(message)}
-                        ${renderMessageReactions(groupedReactions, message.id)}
+                        <div class="message-deleted">🚫 This message was deleted</div>
                     </div>
                     <div class="message-footer">
                         <span class="message-time">${formatTime(message.created_at)}</span>
-                        ${isSent ? `<span class="message-status">${getStatusIcon(message.status)}</span>` : ''}
-                        <button class="icon-btn message-react-btn" onclick="event.stopPropagation(); showEmojiPicker(${message.id})">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-                                <line x1="9" y1="9" x2="9.01" y2="9"></line>
-                                <line x1="15" y1="9" x2="15.01" y2="9"></line>
-                            </svg>
-                        </button>
                     </div>
                 </div>
             </div>
         `;
-    }).join('');
+    }
+    
+    // Don't show message if deleted for current user only
+    if (isDeleted) return '';
+    
+    return `
+        <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
+            <div class="message-actions">
+                <button class="message-action-btn" onclick="showMessageActions(${message.id}, event)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="1"></circle>
+                        <circle cx="19" cy="12" r="1"></circle>
+                        <circle cx="5" cy="12" r="1"></circle>
+                    </svg>
+                </button>
+            </div>
+            <div class="message-avatar">${senderInitial}</div>
+            <div class="message-content">
+                ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
+                <div class="message-bubble">
+                    ${renderMessageContent(message)}
+                    ${renderMessageReactions(groupedReactions, message.id)}
+                </div>
+                <div class="message-footer">
+                    <span class="message-time">${formatTime(message.created_at)}</span>
+                    ${isSent ? `<span class="message-status">${getStatusIcon(message.status)}</span>` : ''}
+                    <button class="icon-btn message-react-btn" onclick="event.stopPropagation(); showEmojiPicker(${message.id})">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+                            <line x1="9" y1="9" x2="9.01" y2="9"></line>
+                            <line x1="15" y1="9" x2="15.01" y2="9"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 /**
@@ -437,13 +637,58 @@ function scrollToBottom() {
 }
 
 /**
- * Add new message to UI
+ * Add an arriving message to the open thread.
+ * Returns true when the user has seen it (own message, or looking at the bottom of a visible tab).
  */
 function addMessageToUI(message) {
-    console.log('Adding message to UI:', message);
+    if (currentMessages.some(m => m.id === message.id)) return true;
+
+    const container = document.getElementById('messagesContainer');
+    const currentUser = getCurrentUser();
+    const isOwn = message.sender_id === currentUser.userId;
+    const wasNearBottom = isNearBottom();
+    const seen = isOwn || (wasNearBottom && !document.hidden);
+
+    // Mark where unseen messages start, if the line isn't already on screen
+    if (!seen && !unreadDividerId) {
+        unreadDividerId = message.id;
+    }
+
     currentMessages.push(message);
-    renderMessages(currentMessages);
-    scrollToBottom();
+
+    if (container.querySelector('.empty-state')) {
+        renderMessages(currentMessages);
+    } else {
+        container.insertAdjacentHTML('beforeend', renderMessagesHtml([message]));
+    }
+
+    if (isOwn || wasNearBottom) {
+        scrollToBottom();
+    }
+
+    if (seen) {
+        if (isOwn) {
+            // The server already moved our read position to our own message
+            lastMarkedReadId = Math.max(lastMarkedReadId, message.id);
+        } else {
+            markChatAsRead(currentChatId);
+        }
+    } else {
+        newWhileScrolledUp++;
+    }
+
+    updateJumpButton();
+    return seen;
+}
+
+/**
+ * Replace one message's element after its data changed (reactions)
+ */
+function rerenderMessage(message) {
+    const element = document.querySelector(`#messagesContainer [data-message-id="${message.id}"]`);
+    if (element) {
+        element.outerHTML = renderMessageHtml(message);
+    }
 }
 
 /**
@@ -589,6 +834,11 @@ if (typeof onMessageStatus === 'function') {
     onMessageStatus(handleMessageStatusUpdate);
 }
 
+// Register read receipt handler
+if (typeof onMessagesRead === 'function') {
+    onMessagesRead(handleMessagesRead);
+}
+
 /**
  * Handle reaction update from WebSocket
  */
@@ -633,9 +883,8 @@ function handleReactionUpdate(data, action) {
     message.reactions = reactions;
     console.log('Updated message reactions:', message.reactions);
     
-    // Re-render messages
-    console.log('Re-rendering messages after reaction update');
-    renderMessages(currentMessages);
+    // Re-render just this message
+    rerenderMessage(message);
 }
 
 // Make functions globally accessible

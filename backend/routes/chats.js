@@ -23,6 +23,11 @@ router.delete('/:chatId/members/:userId', chatController.removeMember);
 // User search
 router.get('/search/users', chatController.searchUsers);
 
+// Per-user read position, mute and archive
+router.post('/:chatId/read', chatController.markRead);
+router.put('/:chatId/mute', chatController.updateMute);
+router.put('/:chatId/archive', chatController.updateArchive);
+
 // Delete chat
 router.delete('/:chatId', chatController.deleteChat);
 

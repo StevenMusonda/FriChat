@@ -7,6 +7,17 @@ let currentChatId = null;
 let allChats = [];
 let selectedUsers = [];
 
+// Whether the sidebar's Archived section is open (remembered per browser)
+let archivedExpanded = false;
+try {
+    archivedExpanded = localStorage.getItem(CONFIG.STORAGE_KEYS.ARCHIVED_EXPANDED) === '1';
+} catch (e) {
+    // Storage unavailable: start collapsed
+}
+
+const MUTED_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"></path><path d="M18.63 13A17.89 17.89 0 0 1 18 8"></path><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"></path><path d="M18 8a6 6 0 0 0-9.33-5"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+const ARCHIVE_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>`;
+
 /**
  * Load all chats for current user
  */
@@ -24,7 +35,8 @@ async function loadChats() {
         if (response.success) {
             allChats = response.data || [];
             console.log('All chats loaded:', allChats.length, 'chats');
-            renderChatList(allChats);
+            refreshChatList();
+            updateChatHeaderState();
         } else {
             console.error('Failed to load chats:', response.message);
             // Show error to user
@@ -69,8 +81,8 @@ function renderChatList(chats) {
         `;
         return;
     }
-    
-    chatList.innerHTML = chats.map(chat => {
+
+    const renderChatItem = (chat) => {
         // Parse participants - they might be string or already parsed
         let participants = [];
         if (typeof chat.participants === 'string') {
@@ -147,22 +159,26 @@ function renderChatList(chats) {
             lastMessageTime = formatTime(createdAt);
         }
         
-        // Get unread count
+        // Get unread count (grey when muted)
         const unreadCount = chat.unread_count || 0;
-        
+        const unreadLabel = unreadCount > 99 ? '99+' : unreadCount;
+
         return `
-            <div class="chat-item ${chat.id === currentChatId ? 'active' : ''}" data-chat-id="${chat.id}">
+            <div class="chat-item ${chat.id === currentChatId ? 'active' : ''} ${chat.is_muted ? 'muted' : ''}" data-chat-id="${chat.id}">
                 <div class="chat-item-avatar">
                     ${displayInitial}
                 </div>
                 <div class="chat-item-content">
                     <div class="chat-item-header">
-                        <span class="chat-item-name">${escapeHtml(displayName)}</span>
+                        <span class="chat-item-title">
+                            <span class="chat-item-name">${escapeHtml(displayName)}</span>
+                            ${chat.is_muted ? `<span class="chat-item-muted" title="Muted" aria-label="Muted">${MUTED_ICON_SVG}</span>` : ''}
+                        </span>
                         <span class="chat-item-time">${lastMessageTime}</span>
                     </div>
                     <div class="chat-item-preview">${escapeHtml(lastMessageText)}</div>
                 </div>
-                ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
+                ${unreadCount > 0 ? `<div class="unread-badge ${chat.is_muted ? 'muted' : ''}" aria-label="${unreadCount} unread">${unreadLabel}</div>` : ''}
                 <button class="chat-delete-btn" onclick="event.stopPropagation(); deleteChat(${chat.id})">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="3 6 5 6 21 6"></polyline>
@@ -171,8 +187,33 @@ function renderChatList(chats) {
                 </button>
             </div>
         `;
-    }).join('');
-    
+    };
+
+    // Archived chats live in their own collapsible section under the main list
+    const activeChats = chats.filter(chat => !chat.archived_at);
+    const archivedChats = chats.filter(chat => chat.archived_at);
+
+    let html = activeChats.length > 0
+        ? activeChats.map(renderChatItem).join('')
+        : '<div class="empty-state"><p>No active chats</p></div>';
+
+    if (archivedChats.length > 0) {
+        const archivedUnread = archivedChats.reduce((sum, chat) => sum + (chat.unread_count || 0), 0);
+        html += `
+            <button type="button" class="archived-toggle" id="archivedToggle" aria-expanded="${archivedExpanded}" aria-controls="archivedChatList">
+                ${ARCHIVE_ICON_SVG}
+                <span class="archived-toggle-label">Archived</span>
+                <span class="archived-toggle-count">${archivedChats.length}${archivedUnread > 0 ? ` · ${archivedUnread} unread` : ''}</span>
+                <svg class="archived-toggle-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div class="archived-chat-list" id="archivedChatList" ${archivedExpanded ? '' : 'hidden'}>
+                ${archivedChats.map(renderChatItem).join('')}
+            </div>
+        `;
+    }
+
+    chatList.innerHTML = html;
+
     // Add click listeners
     document.querySelectorAll('.chat-item').forEach(item => {
         item.addEventListener('click', () => {
@@ -180,6 +221,236 @@ function renderChatList(chats) {
             openChat(chatId);
         });
     });
+
+    const archivedToggle = document.getElementById('archivedToggle');
+    if (archivedToggle) {
+        archivedToggle.addEventListener('click', () => {
+            archivedExpanded = !archivedExpanded;
+            try {
+                localStorage.setItem(CONFIG.STORAGE_KEYS.ARCHIVED_EXPANDED, archivedExpanded ? '1' : '0');
+            } catch (e) {
+                // Remembering the section state is only a convenience
+            }
+            archivedToggle.setAttribute('aria-expanded', archivedExpanded);
+            document.getElementById('archivedChatList').hidden = !archivedExpanded;
+        });
+    }
+}
+
+/**
+ * Re-render the sidebar from allChats, keeping the search filter
+ */
+function refreshChatList() {
+    const search = document.getElementById('chatSearch');
+    const query = search ? search.value.toLowerCase() : '';
+
+    renderChatList(query
+        ? allChats.filter(chat => (chat.chat_name || '').toLowerCase().includes(query))
+        : allChats);
+}
+
+/**
+ * Set a chat's badge
+ */
+function setChatUnreadCount(chatId, count) {
+    const chat = allChats.find(c => c.id === chatId);
+    if (!chat || chat.unread_count === count) return;
+
+    chat.unread_count = count;
+    refreshChatList();
+}
+
+/**
+ * Update the sidebar for an arriving message without refetching every chat
+ */
+function applyIncomingMessageToChatList(message, countAsUnread) {
+    const chat = allChats.find(c => c.id === message.chat_id);
+    if (!chat) {
+        // A chat we don't know about yet
+        loadChats();
+        return;
+    }
+
+    chat.lastMessage = message;
+    chat.updated_at = message.created_at;
+    if (countAsUnread) {
+        chat.unread_count = (chat.unread_count || 0) + 1;
+    }
+    // Same rule the server applies: a new message brings an archived chat back unless it's muted
+    if (chat.archived_at && !chat.is_muted) {
+        chat.archived_at = null;
+    }
+
+    // Most recent first
+    allChats = [chat, ...allChats.filter(c => c !== chat)];
+    refreshChatList();
+}
+
+/**
+ * Server-confirmed read position (from this tab or another one)
+ */
+function applyReadPosition(data) {
+    const chat = allChats.find(c => c.id === data.chatId);
+    if (!chat) return;
+
+    chat.last_read_message_id = data.lastReadMessageId;
+    if (data.chatId === currentChatId) {
+        lastMarkedReadId = Math.max(lastMarkedReadId, data.lastReadMessageId || 0);
+    }
+
+    chat.unread_count = data.unreadCount;
+    refreshChatList();
+}
+
+/**
+ * Server-confirmed mute/archive state (from this tab or another one)
+ */
+function applyChatSettings(data) {
+    const chat = allChats.find(c => c.id === data.chatId);
+    if (!chat) return;
+
+    chat.muted_until = data.mutedUntil;
+    chat.is_muted = data.isMuted;
+    chat.archived_at = data.archivedAt;
+
+    refreshChatList();
+    if (chat.id === currentChatId) {
+        updateChatHeaderState();
+    }
+}
+
+/**
+ * Show the muted icon in the open chat's header
+ */
+function updateChatHeaderState() {
+    const mutedIcon = document.getElementById('chatMutedIcon');
+    const chat = allChats.find(c => c.id === currentChatId);
+    if (mutedIcon) {
+        mutedIcon.hidden = !(chat && chat.is_muted);
+    }
+}
+
+/**
+ * "Muted until ..." text for the options menu
+ */
+function getMuteStatusText(chat) {
+    const until = new Date(chat.muted_until);
+    if (isNaN(until) || until.getFullYear() >= 9999) {
+        return 'Muted until you unmute';
+    }
+    return `Muted until ${until.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+}
+
+/**
+ * Header menu with mute and archive options for the open chat
+ */
+function toggleChatOptionsMenu(event) {
+    event.stopPropagation();
+
+    if (document.getElementById('chatOptionsMenu')) {
+        closeChatOptionsMenu();
+        return;
+    }
+
+    const chat = allChats.find(c => c.id === currentChatId);
+    if (!chat) return;
+
+    const item = (action, label) =>
+        `<button type="button" class="message-action-item" role="menuitem" data-action="${action}">${label}</button>`;
+
+    const menu = document.createElement('div');
+    menu.id = 'chatOptionsMenu';
+    menu.className = 'message-action-dropdown chat-options-dropdown';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = (chat.is_muted
+        ? `<div class="chat-options-note">${escapeHtml(getMuteStatusText(chat))}</div>` + item('mute:off', 'Unmute')
+        : item('mute:8h', 'Mute for 8 hours') + item('mute:1w', 'Mute for 1 week') + item('mute:always', 'Mute always'))
+        + '<div class="chat-options-separator" role="separator"></div>'
+        + (chat.archived_at ? item('archive:off', 'Unarchive chat') : item('archive:on', 'Archive chat'));
+
+    menu.addEventListener('click', (e) => {
+        const button = e.target.closest('[data-action]');
+        if (!button) return;
+
+        const [kind, value] = button.dataset.action.split(':');
+        closeChatOptionsMenu();
+        if (kind === 'mute') {
+            setChatMute(chat.id, value);
+        } else {
+            setChatArchived(chat.id, value === 'on');
+        }
+    });
+
+    document.getElementById('chatOptionsBtn').setAttribute('aria-expanded', 'true');
+    document.querySelector('.chat-actions').appendChild(menu);
+    menu.querySelector('[data-action]').focus();
+
+    setTimeout(() => {
+        document.addEventListener('click', closeChatOptionsMenuOnOutsideClick);
+        document.addEventListener('keydown', closeChatOptionsMenuOnEscape);
+    }, 0);
+}
+
+function closeChatOptionsMenu() {
+    const menu = document.getElementById('chatOptionsMenu');
+    if (menu) menu.remove();
+
+    const button = document.getElementById('chatOptionsBtn');
+    if (button) button.setAttribute('aria-expanded', 'false');
+
+    document.removeEventListener('click', closeChatOptionsMenuOnOutsideClick);
+    document.removeEventListener('keydown', closeChatOptionsMenuOnEscape);
+}
+
+function closeChatOptionsMenuOnOutsideClick(e) {
+    const menu = document.getElementById('chatOptionsMenu');
+    if (menu && !menu.contains(e.target)) closeChatOptionsMenu();
+}
+
+function closeChatOptionsMenuOnEscape(e) {
+    if (e.key === 'Escape') {
+        closeChatOptionsMenu();
+        document.getElementById('chatOptionsBtn').focus();
+    }
+}
+
+/**
+ * duration: '8h' | '1w' | 'always' | 'off'
+ */
+async function setChatMute(chatId, duration) {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.MUTE_CHAT(chatId), {
+            method: 'PUT',
+            body: JSON.stringify({ duration })
+        });
+
+        if (response.success) {
+            applyChatSettings(response.data);
+        } else {
+            showNotification(response.message || 'Failed to update mute setting', 'error');
+        }
+    } catch (error) {
+        console.error('Mute chat error:', error);
+        showNotification('Failed to update mute setting', 'error');
+    }
+}
+
+async function setChatArchived(chatId, archived) {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.ARCHIVE_CHAT(chatId), {
+            method: 'PUT',
+            body: JSON.stringify({ archived })
+        });
+
+        if (response.success) {
+            applyChatSettings(response.data);
+        } else {
+            showNotification(response.message || 'Failed to update archive setting', 'error');
+        }
+    } catch (error) {
+        console.error('Archive chat error:', error);
+        showNotification('Failed to update archive setting', 'error');
+    }
 }
 
 /**
@@ -188,6 +459,8 @@ function renderChatList(chats) {
 async function openChat(chatId) {
     currentChatId = chatId;
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
+    closeChatOptionsMenu();
+    updateChatHeaderState();
     
     // Update UI to show active chat
     document.querySelectorAll('.chat-item').forEach(item => {

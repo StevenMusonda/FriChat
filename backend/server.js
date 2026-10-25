@@ -20,6 +20,7 @@ const messageRoutes = require('./routes/messages');
 // Import utilities
 const { executeQuery, queryOne } = require('./config/database');
 const { startScheduler } = require('./utils/scheduler');
+const { markChatRead, recordNewMessage } = require('./utils/chatState');
 
 // Initialize Express app
 const app = express();
@@ -116,6 +117,9 @@ async function isChatMember(chatId, userId) {
 
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
+
+    // Every tab of this user joins one room, so read/mute/archive changes reach all of them
+    socket.join(`user_${socket.userId}`);
 
     /**
      * User authentication and online status
@@ -221,6 +225,9 @@ io.on('connection', (socket) => {
                 [chatId]
             );
 
+            // Un-archive for members who haven't muted it; sender has now read up to here
+            await recordNewMessage(io, chatId, senderId, messageId);
+
             // Get complete message data
             const message = await queryOne(`
                 SELECT 
@@ -257,6 +264,21 @@ io.on('connection', (socket) => {
         } catch (error) {
             console.error('Send message error:', error);
             socket.emit('error', { message: 'Failed to send message' });
+        }
+    });
+
+    /**
+     * Move this user's read position forward (sent while a chat is open and scrolled to new messages)
+     */
+    socket.on('mark_read', async (data) => {
+        try {
+            const chatId = parseInt(data && data.chatId);
+            const messageId = parseInt(data && data.messageId) || null;
+            if (!chatId) return;
+
+            await markChatRead(io, chatId, socket.userId, messageId);
+        } catch (error) {
+            console.error('Mark read error:', error);
         }
     });
 

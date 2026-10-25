@@ -190,8 +190,8 @@ function renderPinnedMessages(pinnedMessages) {
         container.className = 'pinned-messages-container';
         
         const activeChat = document.getElementById('activeChat');
-        const messagesContainer = document.getElementById('messagesContainer');
-        activeChat.insertBefore(container, messagesContainer);
+        const messagesWrapper = document.getElementById('messagesWrapper');
+        activeChat.insertBefore(container, messagesWrapper);
     }
     
     if (!pinnedMessages || pinnedMessages.length === 0) {
