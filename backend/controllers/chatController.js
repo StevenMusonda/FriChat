@@ -51,14 +51,17 @@ async function getUserChats(req, res) {
 
         console.log('Found chats:', chats.length);
 
-        // For each chat, get participants and last message
-        for (let chat of chats) {
-            chat.unread_count = parseInt(chat.unread_count) || 0;
-            chat.is_muted = !!parseInt(chat.is_muted);
+        // Participants and last message for every chat in one query each
+        const participantsByChat = {};
+        const lastMessageByChat = {};
 
-            // Get participants
-            const participants = await executeQuery(`
-                SELECT 
+        if (chats.length > 0) {
+            const chatIds = chats.map(chat => chat.id);
+            const placeholders = chatIds.map(() => '?').join(', ');
+
+            const participantRows = await executeQuery(`
+                SELECT
+                    gm.chat_id,
                     u.id as userId,
                     u.username,
                     u.full_name as fullName,
@@ -67,14 +70,20 @@ async function getUserChats(req, res) {
                     gm.role
                 FROM group_members gm
                 JOIN users u ON gm.user_id = u.id
-                WHERE gm.chat_id = ?
-            `, [chat.id]);
-            
-            chat.participants = JSON.stringify(participants);
+                WHERE gm.chat_id IN (${placeholders})
+                ORDER BY gm.chat_id, gm.id
+            `, chatIds);
 
-            // Get last message
-            const lastMessage = await executeQuery(`
-                SELECT 
+            for (const row of participantRows) {
+                const chatId = row.chat_id;
+                delete row.chat_id; // Grouping key only - not part of the response
+                (participantsByChat[chatId] = participantsByChat[chatId] || []).push(row);
+            }
+
+            // Newest message per chat (id breaks created_at ties)
+            const lastMessageRows = await executeQuery(`
+                SELECT
+                    c.id as chat_id,
                     m.id,
                     m.content,
                     m.message_type as messageType,
@@ -83,15 +92,31 @@ async function getUserChats(req, res) {
                     m.status,
                     m.created_at as createdAt,
                     f.original_name as fileName
-                FROM messages m
+                FROM chats c
+                JOIN messages m ON m.id = (
+                    SELECT m2.id
+                    FROM messages m2
+                    WHERE m2.chat_id = c.id
+                    ORDER BY m2.created_at DESC, m2.id DESC
+                    LIMIT 1
+                )
                 JOIN users sender ON m.sender_id = sender.id
                 LEFT JOIN files f ON m.file_id = f.id
-                WHERE m.chat_id = ?
-                ORDER BY m.created_at DESC
-                LIMIT 1
-            `, [chat.id]);
-            
-            chat.lastMessage = lastMessage.length > 0 ? JSON.stringify(lastMessage[0]) : null;
+                WHERE c.id IN (${placeholders})
+            `, chatIds);
+
+            for (const row of lastMessageRows) {
+                const chatId = row.chat_id;
+                delete row.chat_id;
+                lastMessageByChat[chatId] = row;
+            }
+        }
+
+        for (const chat of chats) {
+            chat.unread_count = parseInt(chat.unread_count) || 0;
+            chat.is_muted = !!parseInt(chat.is_muted);
+            chat.participants = JSON.stringify(participantsByChat[chat.id] || []);
+            chat.lastMessage = lastMessageByChat[chat.id] ? JSON.stringify(lastMessageByChat[chat.id]) : null;
         }
 
         res.json({

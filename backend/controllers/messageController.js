@@ -3,7 +3,7 @@
  * Handles message retrieval, sending, and reactions
  */
 
-const { executeQuery, queryOne } = require('../config/database');
+const { executeQuery, queryOne, insertAndGetId } = require('../config/database');
 const { sanitizeHtml } = require('../utils/validation');
 const path = require('path');
 const { recordNewMessage } = require('../utils/chatState');
@@ -158,12 +158,10 @@ async function sendMessage(req, res) {
         }
 
         // Insert message
-        const result = await executeQuery(
+        const messageId = await insertAndGetId(
             'INSERT INTO messages (chat_id, sender_id, message_type, content, status) VALUES (?, ?, ?, ?, ?)',
             [chatId, userId, messageType, sanitizeHtml(content), 'sent']
         );
-
-        const messageId = result.insertId || result[0]?.id;
 
         // Update chat updated_at
         await executeQuery(
@@ -192,6 +190,11 @@ async function sendMessage(req, res) {
             JOIN users u ON m.sender_id = u.id
             WHERE m.id = ?
         `, [messageId]);
+
+        // Emit message via WebSocket to all chat members
+        if (req.io && message) {
+            req.io.to(`chat_${chatId}`).emit('new_message', message);
+        }
 
         res.status(201).json({
             success: true,

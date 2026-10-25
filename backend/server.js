@@ -18,7 +18,7 @@ const chatRoutes = require('./routes/chats');
 const messageRoutes = require('./routes/messages');
 
 // Import utilities
-const { executeQuery, queryOne } = require('./config/database');
+const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
 const { startScheduler } = require('./utils/scheduler');
 const { markChatRead, recordNewMessage } = require('./utils/chatState');
 
@@ -196,8 +196,8 @@ io.on('connection', (socket) => {
 
             // Handle file if present
             if (fileData) {
-                const fileResult = await executeQuery(
-                    'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                fileId = await insertAndGetId(
+                    'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     [
                         fileData.originalName,
                         fileData.storedName,
@@ -208,16 +208,13 @@ io.on('connection', (socket) => {
                         senderId
                     ]
                 );
-                fileId = fileResult.insertId || fileResult[0]?.id || fileResult.id;
             }
 
             // Insert message
-            const result = await executeQuery(
-                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, status) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+            const messageId = await insertAndGetId(
+                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, status) VALUES (?, ?, ?, ?, ?, ?)',
                 [chatId, senderId, messageType, content, fileId, 'sent']
             );
-
-            const messageId = result.insertId || result[0]?.id || result.id;
 
             // Update chat timestamp
             await executeQuery(

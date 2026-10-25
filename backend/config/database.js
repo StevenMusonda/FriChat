@@ -97,9 +97,26 @@ async function queryOne(query, params = []) {
     return results.length > 0 ? results[0] : null;
 }
 
+/**
+ * Run an INSERT and return the new row's id on either database
+ * (PostgreSQL needs RETURNING id; MySQL rejects it and reports insertId instead)
+ * @param {string} query - INSERT statement without a RETURNING clause
+ * @param {Array} params - Query parameters
+ * @returns {Promise<number|null>} Inserted id
+ */
+async function insertAndGetId(query, params = []) {
+    if (dbType === 'postgresql') {
+        const rows = await executeQuery(`${query} RETURNING id`, params);
+        return rows.length > 0 ? rows[0].id : null;
+    }
+    const result = await executeQuery(query, params);
+    return result.insertId || null;
+}
+
 module.exports = {
     db,
     executeQuery,
     queryOne,
+    insertAndGetId,
     dbType
 };
