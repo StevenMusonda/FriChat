@@ -5,7 +5,7 @@
  * API responses are never cached.
  */
 
-const CACHE_VERSION = 'frichat-shell-v1';
+const CACHE_VERSION = 'frichat-shell-v2';
 
 const APP_SHELL = [
     'chat.html',

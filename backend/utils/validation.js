@@ -2,8 +2,9 @@
  * Input Validation and Sanitization Utilities
  */
 
-const { body, validationResult } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
 const { isValidTimezone } = require('./notificationSettings');
+const { MAX_MESSAGE_LENGTH, MAX_FORWARD_MESSAGES, MAX_FORWARD_CHATS } = require('../config/messages');
 
 /**
  * Validation rules for user registration
@@ -87,8 +88,92 @@ const validateMessage = [
     body('content')
         .optional()
         .trim()
-        .isLength({ max: 5000 })
-        .withMessage('Message content too long')
+        .isLength({ max: MAX_MESSAGE_LENGTH })
+        .withMessage('Message content too long'),
+
+    body('replyToMessageId')
+        .optional({ values: 'null' })
+        .isInt({ min: 1 })
+        .withMessage('Invalid reply target')
+        .toInt()
+];
+
+/**
+ * Optional reply target on a file upload (multipart field)
+ */
+const validateUploadReply = [
+    body('replyToMessageId')
+        .optional({ values: 'falsy' })
+        .isInt({ min: 1 })
+        .withMessage('Invalid reply target')
+        .toInt()
+];
+
+const messageIdParamRule = param('messageId')
+    .isInt({ min: 1 })
+    .withMessage('Invalid message ID')
+    .toInt();
+
+/**
+ * Validation rules for routes that only take :messageId (star/unstar)
+ */
+const validateMessageIdParam = [
+    messageIdParamRule
+];
+
+/**
+ * Validation rules for editing a message
+ */
+const validateEditMessage = [
+    messageIdParamRule,
+
+    body('content')
+        .isString()
+        .withMessage('Message content is required')
+        .bail()
+        .trim()
+        .isLength({ min: 1, max: MAX_MESSAGE_LENGTH })
+        .withMessage(`Message must be between 1 and ${MAX_MESSAGE_LENGTH} characters`)
+];
+
+/**
+ * Validation rules for forwarding messages
+ */
+const validateForward = [
+    body('messageIds')
+        .isArray({ min: 1, max: MAX_FORWARD_MESSAGES })
+        .withMessage(`Select between 1 and ${MAX_FORWARD_MESSAGES} messages`),
+
+    body('messageIds.*')
+        .isInt({ min: 1 })
+        .withMessage('Invalid message ID')
+        .toInt(),
+
+    body('chatIds')
+        .isArray({ min: 1, max: MAX_FORWARD_CHATS })
+        .withMessage(`Select between 1 and ${MAX_FORWARD_CHATS} chats`),
+
+    body('chatIds.*')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt()
+];
+
+/**
+ * Validation rules for listing starred messages
+ */
+const validateStarredQuery = [
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: 100 })
+        .withMessage('limit must be between 1 and 100')
+        .toInt(),
+
+    query('before')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid cursor')
+        .toInt()
 ];
 
 /**
@@ -233,6 +318,11 @@ module.exports = {
     validateForgotPassword,
     validateResetPassword,
     validateMessage,
+    validateUploadReply,
+    validateMessageIdParam,
+    validateEditMessage,
+    validateForward,
+    validateStarredQuery,
     validateCreateChat,
     validatePushSubscription,
     validatePushUnsubscribe,

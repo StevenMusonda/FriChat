@@ -23,6 +23,7 @@ const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
 const { startScheduler } = require('./utils/scheduler');
 const { markChatRead, recordNewMessage } = require('./utils/chatState');
 const { notifyNewMessage } = require('./utils/push');
+const { getMessageById, checkReplyTarget } = require('./utils/messageQueries');
 
 // Initialize Express app
 const app = express();
@@ -199,10 +200,28 @@ io.on('connection', (socket) => {
             const { chatId, messageType, content, fileData } = data;
             const senderId = socket.userId;
 
+            // Optional quote; must be a positive integer id in this same chat
+            let replyToMessageId = null;
+            if (data.replyToMessageId !== undefined && data.replyToMessageId !== null) {
+                replyToMessageId = Number(data.replyToMessageId);
+                if (!Number.isInteger(replyToMessageId) || replyToMessageId < 1) {
+                    socket.emit('error', { message: 'Invalid reply target' });
+                    return;
+                }
+            }
+
             // Verify sender is a member
             if (!(await isChatMember(chatId, senderId))) {
                 socket.emit('error', { message: 'Access denied' });
                 return;
+            }
+
+            if (replyToMessageId) {
+                const replyError = await checkReplyTarget(chatId, replyToMessageId);
+                if (replyError) {
+                    socket.emit('error', { message: replyError });
+                    return;
+                }
             }
 
             let fileId = null;
@@ -225,8 +244,8 @@ io.on('connection', (socket) => {
 
             // Insert message
             const messageId = await insertAndGetId(
-                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, status) VALUES (?, ?, ?, ?, ?, ?)',
-                [chatId, senderId, messageType, content, fileId, 'sent']
+                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [chatId, senderId, messageType, content, fileId, replyToMessageId, 'sent']
             );
 
             // Update chat timestamp
@@ -238,29 +257,8 @@ io.on('connection', (socket) => {
             // Un-archive for members who haven't muted it; sender has now read up to here
             await recordNewMessage(io, chatId, senderId, messageId);
 
-            // Get complete message data
-            const message = await queryOne(`
-                SELECT 
-                    m.id,
-                    m.chat_id,
-                    m.sender_id,
-                    u.username,
-                    u.full_name,
-                    u.avatar_url,
-                    m.message_type,
-                    m.content,
-                    m.file_id,
-                    f.original_name as file_name,
-                    f.file_type,
-                    f.file_size,
-                    f.upload_path,
-                    m.status,
-                    m.created_at
-                FROM messages m
-                JOIN users u ON m.sender_id = u.id
-                LEFT JOIN files f ON m.file_id = f.id
-                WHERE m.id = ?
-            `, [messageId]);
+            // Get complete message data (with the quoted original for replies)
+            const message = await getMessageById(messageId);
 
             if (!message) {
                 console.error('Failed to retrieve message after insert:', messageId);

@@ -460,6 +460,9 @@ async function setChatArchived(chatId, archived) {
  * Open a specific chat
  */
 async function openChat(chatId) {
+    // Reply/edit/selection belong to the chat being left (messageActions.js)
+    resetMessageActionState();
+
     currentChatId = chatId;
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();

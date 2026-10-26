@@ -350,9 +350,11 @@ function renderMessageHtml(message) {
     
     // Don't show message if deleted for current user only
     if (isDeleted) return '';
+
+    const isSelected = typeof selectedMessageIds !== 'undefined' && selectedMessageIds.has(message.id);
     
     return `
-        <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
+        <div class="message ${isSent ? 'sent' : 'received'} ${isSelected ? 'selected' : ''}" data-message-id="${message.id}">
             <div class="message-actions">
                 <button class="message-action-btn" onclick="showMessageActions(${message.id}, event)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -366,10 +368,14 @@ function renderMessageHtml(message) {
             <div class="message-content">
                 ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
                 <div class="message-bubble">
+                    ${message.is_forwarded ? `<div class="message-forwarded">${FORWARD_ICON_SVG}<span>Forwarded</span></div>` : ''}
+                    ${renderReplyQuote(message.reply_to)}
                     ${renderMessageContent(message)}
                     ${renderMessageReactions(groupedReactions, message.id)}
                 </div>
                 <div class="message-footer">
+                    ${message.is_starred ? `<span class="message-starred" title="Starred" aria-label="Starred"><svg class="message-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></span>` : ''}
+                    ${message.edited_at ? `<span class="message-edited" title="Edited ${escapeHtml(new Date(message.edited_at).toLocaleString())}">edited</span>` : ''}
                     <span class="message-time">${formatTime(message.created_at)}</span>
                     ${isSent ? `<span class="message-status">${getStatusIcon(message.status)}</span>` : ''}
                     <button class="icon-btn message-react-btn" onclick="event.stopPropagation(); showEmojiPicker(${message.id})">
@@ -383,6 +389,41 @@ function renderMessageHtml(message) {
                 </div>
             </div>
         </div>
+    `;
+}
+
+/**
+ * One-line description of a message for quotes, the reply bar and the starred list
+ * (media shows an icon and label instead of content)
+ */
+function getMessagePreviewText(messageType, text, fileName) {
+    switch (messageType) {
+        case 'image':
+            return '📷 Photo';
+        case 'video':
+            return '🎥 Video';
+        case 'file':
+            return `📎 ${fileName || 'File'}`;
+        default:
+            return text || '';
+    }
+}
+
+/**
+ * Compact quote above a reply's content; clicking it jumps to the original
+ */
+function renderReplyQuote(replyTo) {
+    if (!replyTo) return '';
+
+    if (replyTo.deleted) {
+        return '<div class="message-quote deleted">Original message deleted</div>';
+    }
+
+    return `
+        <button type="button" class="message-quote" data-reply-id="${parseInt(replyTo.id)}" aria-label="Go to the original message">
+            <span class="message-quote-sender">${escapeHtml(replyTo.sender_name || 'Unknown')}</span>
+            <span class="message-quote-text">${escapeHtml(getMessagePreviewText(replyTo.message_type, replyTo.snippet, replyTo.file_name))}</span>
+        </button>
     `;
 }
 
@@ -538,14 +579,15 @@ function formatFileSize(bytes) {
 /**
  * Send a text message
  */
-async function sendTextMessage(chatId, content) {
+async function sendTextMessage(chatId, content, replyToMessageId = null) {
     try {
         const response = await apiRequest(CONFIG.ENDPOINTS.SEND_MESSAGE, {
             method: 'POST',
             body: JSON.stringify({
                 chatId: chatId,
                 messageType: 'text',
-                content: content
+                content: content,
+                replyToMessageId: replyToMessageId
             })
         });
         
@@ -564,11 +606,14 @@ async function sendTextMessage(chatId, content) {
 /**
  * Upload and send file
  */
-async function uploadFile(chatId, file) {
+async function uploadFile(chatId, file, replyToMessageId = null) {
     try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('chatId', chatId);
+        if (replyToMessageId) {
+            formData.append('replyToMessageId', replyToMessageId);
+        }
         
         const token = localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN);
         
@@ -752,6 +797,10 @@ function initializeMessageInput() {
     // File input
     fileInput.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files);
+
+        // An open reply applies to the first file only
+        let replyToMessageId = getReplyTargetId();
+        if (replyToMessageId) clearComposerContext();
         
         for (const file of files) {
             if (!currentChatId) {
@@ -773,7 +822,8 @@ function initializeMessageInput() {
             scrollToBottom();
             
             // Upload file
-            const result = await uploadFile(currentChatId, file);
+            const result = await uploadFile(currentChatId, file, replyToMessageId);
+            replyToMessageId = null;
             
             // Remove uploading indicator
             uploadingMessage.remove();
@@ -798,15 +848,27 @@ async function sendMessage() {
     if (!content || !currentChatId) {
         return;
     }
+
+    // The composer is editing an existing message (messageActions.js)
+    if (isEditingMessage()) {
+        await submitMessageEdit(content);
+        return;
+    }
+
+    const replyToMessageId = getReplyTargetId();
     
-    // Clear input
+    // Clear input and the reply bar
     messageInput.value = '';
+    clearComposerContext();
     
     // Send via WebSocket (faster) or API
     if (window.socket && window.socket.connected) {
-        sendMessageViaSocket(currentChatId, 'text', content);
+        sendMessageViaSocket(currentChatId, 'text', content, null, replyToMessageId);
     } else {
-        await sendTextMessage(currentChatId, content);
+        const result = await sendTextMessage(currentChatId, content, replyToMessageId);
+        if (result && result.success === false) {
+            showNotification(result.message || 'Failed to send message', 'error');
+        }
     }
 }
 

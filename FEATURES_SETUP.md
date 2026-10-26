@@ -300,4 +300,84 @@ All require `Authorization: Bearer <token>` and are rate limited to 30 requests 
 
 ---
 
+## Phase 3: Reply, edit, forward and starred messages
+
+All four actions live in the message's **⋯** menu (`frontend/js/messageActions.js`). They work the same in direct and group chats.
+
+- **Reply**: shows a "Replying to …" bar above the composer (✕ or Esc cancels). The sent message shows a compact quote: the sender's name and a snippet, or 📷/🎥/📎 for media. Clicking the quote scrolls to the original and flashes it, loading older pages if needed. If the original was later deleted for everyone, the quote reads *Original message deleted* and its content is never sent to clients. File uploads sent while the reply bar is open reply too (first file only).
+- **Edit**: offered only on your own text messages for **15 minutes** after sending (`EDIT_WINDOW_MINUTES` in `backend/config/messages.js`; the frontend mirrors it as `MESSAGE_EDIT_WINDOW_MINUTES` in `frontend/js/config.js` only to decide whether to show the menu item). The text is loaded into the composer; Enter saves and Esc cancels, giving back whatever you were typing before. Edited messages show an *edited* label, and quotes of them update live. Media, forwarded and deleted messages can't be edited.
+- **Forward**: **Forward** sends one message. **Select** starts multi-select (tap messages, up to **5**), then **Forward** in the bar at the bottom. Pick up to 10 chats you're a member of (searchable). Copies show a *Forwarded* label, appear live in each chat, and reuse the original file. Nothing is re-uploaded.
+- **Starred messages**: **Star**/**Unstar** is per user (a small ★ appears in the message footer). The ☆ button next to the chat search opens the *Starred messages* panel. Click an entry to open that chat at the message, or click ★ to unstar. Only chats you're still a member of are listed, and deleted messages drop out.
+
+### Setup
+
+No new packages or env variables. Run the migration on an existing database:
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_message_actions.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_message_actions_postgresql.sql
+```
+
+It adds `messages.reply_to_message_id` (FK, `ON DELETE SET NULL`), `messages.edited_at`, `messages.is_forwarded` and the `starred_messages` table. Fresh installs get these from `schema.sql` / `schema_postgresql.sql`. `frontend/sw.js` `CACHE_VERSION` is bumped to `frichat-shell-v2` so installed apps fetch the new files.
+
+### New and changed API endpoints
+
+All require `Authorization: Bearer <token>`. Every action checks server-side that the caller is a member of the message's chat (and of each target chat for forwards).
+
+| Method | Endpoint | Body / query | Notes |
+|---|---|---|---|
+| POST | `/api/messages` | adds optional `replyToMessageId` | Must be a message in the same chat that isn't deleted for everyone, else `400` |
+| POST | `/api/messages/upload` | adds optional multipart `replyToMessageId` | Same rule |
+| PATCH | `/api/messages/:messageId` | `{ content }` (1–5000 chars) | Sender only (`403`). `400` for deleted, media or forwarded messages, or when the edit window has passed. Non-member: `404`. Broadcasts `message_edited`. |
+| POST | `/api/messages/forward` | `{ messageIds: [1–5 ids], chatIds: [1–10 ids] }` | `404` if a source message isn't visible to you or a target chat isn't yours. `400` for deleted messages. Returns the new messages. |
+| POST | `/api/messages/:messageId/star` | – | Idempotent. Non-member: `404`. Deleted: `400`. |
+| DELETE | `/api/messages/:messageId/star` | – | Removes only your own star. `404` if it isn't starred. |
+| GET | `/api/messages/starred` | `?limit=1–100&before=<starId>` | Newest star first, with `chat_display_name` and `pagination.nextCursor` |
+
+Message objects (`GET /api/messages/chat/:id`, `new_message`) now also carry `edited_at`, `is_forwarded`, `reply_to` (`{ id, deleted, sender_id, sender_name, message_type, snippet, file_name }` or `null`), and, in history only, `is_starred` for the requesting user.
+
+Rate limits (per IP): edit, star and the starred list share 60/min. Forward is 10/min, because one forward can create up to 50 messages.
+
+Status codes: an expired edit window returns `400` and a forward to a chat you're not in returns `404`, both on purpose. The frontend's `apiRequest` logs the user out on any `403`, and both cases can happen during normal use.
+
+### New and changed Socket.IO events
+
+| Event | Direction | Payload | Notes |
+|---|---|---|---|
+| `send_message` | client → server | adds optional `replyToMessageId` | Validated like the REST field. Invalid targets emit `error` and nothing is stored. |
+| `message_edited` | server → `chat_<id>` room | `{ messageId, chatId, content, editedAt }` | Only emitted by the edit endpoint after its checks |
+| `message_star_updated` | server → the user's own tabs (`user_<id>`) | `{ messageId, chatId, starred }` | Other chat members never see your stars |
+
+Forwarded copies arrive through the existing `new_message` event in each target chat.
+
+### Manual test checklist
+
+Use two browsers (A and B) in the same group, plus a direct chat between them.
+
+- [ ] A: ⋯ → Reply on B's message. The bar shows "Replying to B" and the text. Send. Both A and B see the quote block live.
+- [ ] Click the quote: it scrolls to the original and flashes it. The same works for an original several pages up.
+- [ ] Reply to a photo: the quote shows "📷 Photo"
+- [ ] B deletes (for everyone, within 1 minute) a message A replied to. After reload, A's reply shows *Original message deleted*.
+- [ ] A: ⋯ → Edit on own text message. Change it and press Enter. B sees the new text and *edited* live. Esc during an edit restores what A was typing before.
+- [ ] No Edit item on B's messages, on photos, on forwarded messages, or on messages older than 15 minutes
+- [ ] A: ⋯ → Select, tap a second message (a sixth one shows an error), Forward, search, pick the direct chat and a group. Copies show *Forwarded* live for B in both chats, and the forwarded photo opens without a new upload.
+- [ ] A: ⋯ → Star. A ★ appears for A, B sees nothing. The ☆ panel lists it with the chat name. Clicking it opens that chat at the message. Unstar from the panel removes it, and the change shows in A's other tab too.
+- [ ] Toggle the dark theme: quote blocks, bars and dialogs stay readable
+- [ ] At a phone width (360px) the reply bar sits right above the composer, the selection bar covers the composer, the ☆ button fits next to search, and the dialogs fit
+
+### Tests
+
+`cd backend && npm test`. `test/messageActions.test.js` runs on both fake drivers. It covers reply targets (same chat, deleted, other chat) over REST and the socket event, the reply quote shape, the edit rules and the SQL edit window, forward membership and file reuse, stars and the starred list, and validation for all new inputs.
+
+### Known limitations
+
+- Deleting a message for everyone still isn't broadcast live (as before Phase 3), so quotes of it only switch to *Original message deleted* on the next load
+- A reply rejected on the socket path (for example, the original was deleted while the reply bar was open) comes back as a socket `error` event, which the frontend doesn't display yet. The message isn't sent.
+- The sidebar preview shows a forwarded or edited last message as plain text, with no label
+- Rate limits are per IP and in memory (same as Phase 2)
+
+---
+
 **Enjoy the new features! 🎉**

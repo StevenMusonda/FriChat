@@ -13,6 +13,8 @@ let readPositionHandlers = [];
 let messagesReadHandlers = [];
 let chatSettingsHandlers = [];
 let notificationSettingsHandlers = [];
+let messageEditedHandlers = [];
+let starHandlers = [];
 
 /**
  * Initialize WebSocket connection
@@ -111,6 +113,16 @@ function initializeWebSocket() {
         notificationSettingsHandlers.forEach(handler => handler(data));
     });
 
+    // Someone in a chat edited a message
+    socket.on('message_edited', (data) => {
+        messageEditedHandlers.forEach(handler => handler(data));
+    });
+
+    // Star added/removed (this tab or another tab of the same user)
+    socket.on('message_star_updated', (data) => {
+        starHandlers.forEach(handler => handler(data));
+    });
+
     return socket;
 }
 
@@ -133,7 +145,7 @@ function joinChat(chatId) {
 /**
  * Send a message via WebSocket
  */
-function sendMessageViaSocket(chatId, messageType, content, fileData = null) {
+function sendMessageViaSocket(chatId, messageType, content, fileData = null, replyToMessageId = null) {
     if (!socket) {
         console.error('WebSocket not initialized');
         return;
@@ -145,7 +157,8 @@ function sendMessageViaSocket(chatId, messageType, content, fileData = null) {
         senderId: user.userId,
         messageType: messageType,
         content: content,
-        fileData: fileData
+        fileData: fileData,
+        replyToMessageId: replyToMessageId
     });
 }
 
@@ -308,6 +321,20 @@ function onNotificationSettings(handler) {
 }
 
 /**
+ * Register message edited handler
+ */
+function onMessageEdited(handler) {
+    messageEditedHandlers.push(handler);
+}
+
+/**
+ * Register star changed handler
+ */
+function onStarUpdate(handler) {
+    starHandlers.push(handler);
+}
+
+/**
  * Disconnect WebSocket
  */
 function disconnectWebSocket() {
@@ -325,5 +352,7 @@ function disconnectWebSocket() {
         messagesReadHandlers = [];
         chatSettingsHandlers = [];
         notificationSettingsHandlers = [];
+        messageEditedHandlers = [];
+        starHandlers = [];
     }
 }

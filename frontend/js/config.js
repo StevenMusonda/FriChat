@@ -40,6 +40,10 @@ const CONFIG = {
         UPDATE_STATUS: (messageId) => `/messages/${messageId}/status`,
         ADD_REACTION: (messageId) => `/messages/${messageId}/reactions`,
         REMOVE_REACTION: (messageId) => `/messages/${messageId}/reactions`,
+        EDIT_MESSAGE: (messageId) => `/messages/${messageId}`,
+        STAR_MESSAGE: (messageId) => `/messages/${messageId}/star`,
+        STARRED_MESSAGES: '/messages/starred',
+        FORWARD_MESSAGES: '/messages/forward',
 
         // Notifications
         PUSH_CONFIG: '/notifications/push-config',
@@ -49,6 +53,11 @@ const CONFIG = {
     
     // Messages fetched per page when opening a chat or scrolling up
     MESSAGE_PAGE_SIZE: 30,
+
+    // Mirrors EDIT_WINDOW_MINUTES / MAX_FORWARD_* in backend/config/messages.js (the server enforces them)
+    MESSAGE_EDIT_WINDOW_MINUTES: 15,
+    MAX_FORWARD_MESSAGES: 5,
+    MAX_FORWARD_CHATS: 10,
 
     // Storage Keys
     STORAGE_KEYS: {

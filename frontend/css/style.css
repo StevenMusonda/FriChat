@@ -2859,3 +2859,453 @@ body.dark-theme .quiet-hours-times input[type="time"] {
         transition: none;
     }
 }
+
+/* ===== Phase 3: reply, edit, forward, starred ===== */
+
+/* Quote block inside a reply */
+.message-quote {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    max-width: 320px;
+    margin-bottom: 6px;
+    padding: 6px 10px;
+    border: none;
+    border-left: 3px solid var(--primary-color);
+    border-radius: 6px;
+    background-color: rgba(102, 126, 234, 0.12);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.message.sent .message-quote {
+    border-left-color: rgba(255, 255, 255, 0.85);
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.message-quote:hover {
+    background-color: rgba(102, 126, 234, 0.2);
+}
+
+.message.sent .message-quote:hover {
+    background-color: rgba(255, 255, 255, 0.26);
+}
+
+.message-quote:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.message-quote-sender {
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.message-quote-text {
+    font-size: 0.82rem;
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.message-quote.deleted {
+    font-size: 0.82rem;
+    font-style: italic;
+    opacity: 0.75;
+    cursor: default;
+}
+
+/* "Forwarded" label */
+.message-forwarded {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+    font-size: 0.75rem;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+.message-forwarded svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* Footer markers */
+.message-edited {
+    font-style: italic;
+}
+
+.message-starred {
+    display: inline-flex;
+    color: var(--warning-color);
+}
+
+.message-starred svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* Brief flash after jumping to a message */
+.message.message-highlight .message-bubble {
+    animation: messageHighlight 2s ease;
+}
+
+@keyframes messageHighlight {
+    0%, 30% {
+        box-shadow: 0 0 0 3px var(--warning-color);
+    }
+    100% {
+        box-shadow: 0 0 0 3px transparent;
+    }
+}
+
+/* Multi-select mode */
+.messages-container.selecting .message {
+    cursor: pointer;
+}
+
+.messages-container.selecting .message-actions,
+.messages-container.selecting .message-react-btn {
+    display: none;
+}
+
+.message.selected .message-bubble {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.message.selected::before {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background-color: var(--primary-color);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.message.sent.selected::before {
+    left: -30px;
+}
+
+.message.received.selected::before {
+    right: -30px;
+}
+
+/* Reply / edit bar above the composer */
+.composer-context {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 8px 20px;
+    background-color: var(--bg-primary);
+    border-top: 1px solid var(--border-color);
+    border-left: 4px solid var(--primary-color);
+    box-shadow: var(--shadow-md);
+}
+
+.composer-context.editing {
+    border-left-color: var(--warning-color);
+}
+
+/* Room for the bar so the newest message can still be scrolled into view */
+.messages-container.with-composer-context {
+    padding-bottom: 76px;
+}
+
+.composer-context[hidden],
+.selection-bar[hidden],
+.starred-load-more[hidden] {
+    display: none;
+}
+
+.composer-context-icon {
+    display: flex;
+    color: var(--primary-color);
+}
+
+.composer-context.editing .composer-context-icon {
+    color: var(--warning-color);
+}
+
+.composer-context-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.composer-context-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.composer-context-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.composer-context-text {
+    font-size: 0.85rem;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Selection bar covers the composer while selecting */
+.selection-bar {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 20px;
+    background-color: var(--bg-primary);
+}
+
+/* The composer's own controls hide while the selection bar is up */
+.message-input-container.selecting > :not(.selection-bar) {
+    visibility: hidden;
+    /* .btn/.icon-btn use `transition: all`, which would delay hiding by 0.3s */
+    transition: none;
+}
+
+.selection-count {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.selection-bar .btn {
+    min-height: 40px;
+    padding: 8px 16px;
+    font-size: 0.9rem;
+}
+
+.message-input-container .selection-forward-btn {
+    width: auto;
+    height: auto;
+    min-width: 0;
+    border-radius: 20px;
+    padding: 8px 18px;
+}
+
+.selection-forward-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Starred button next to the chat search */
+.sidebar-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sidebar-search input {
+    flex: 1;
+    min-width: 0;
+}
+
+.starred-btn {
+    flex-shrink: 0;
+}
+
+/* Forward dialog */
+.forward-chat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 45vh;
+    overflow-y: auto;
+}
+
+.forward-chat-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.forward-chat-item:hover {
+    background-color: var(--glass-bg-subtle, var(--bg-secondary));
+}
+
+.forward-chat-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    accent-color: var(--primary-color);
+}
+
+.forward-chat-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #fff;
+    font-weight: 600;
+}
+
+.forward-chat-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.forward-chat-type {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+
+.forward-empty,
+.starred-empty {
+    padding: 20px 0;
+    text-align: center;
+    color: var(--text-tertiary);
+}
+
+#forwardSubmitBtn {
+    width: auto;
+}
+
+#forwardSubmitBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Starred panel */
+.starred-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.starred-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--glass-border, var(--border-color));
+    border-radius: 12px;
+    background-color: var(--glass-bg-subtle, var(--bg-secondary));
+}
+
+.starred-item-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 12px;
+}
+
+.starred-item-open:hover {
+    background-color: var(--glass-bg, var(--bg-tertiary));
+}
+
+.starred-item-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.8rem;
+}
+
+.starred-item-chat {
+    font-weight: 600;
+    color: var(--primary-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.starred-item-time {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+}
+
+.starred-item-text {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+}
+
+.starred-item-unstar {
+    color: var(--warning-color);
+    margin-right: 6px;
+}
+
+.starred-item-unstar svg {
+    fill: currentColor;
+}
+
+.starred-load-more {
+    width: 100%;
+    margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+    .composer-context {
+        padding-left: 14px;
+    }
+
+    /* The composer is fixed to the bottom here, so add its height too */
+    .messages-container.with-composer-context {
+        padding-bottom: 136px;
+    }
+
+    .selection-bar {
+        padding: 0 12px;
+    }
+
+    /* No room beside bubbles on narrow screens; the outline marks the selection */
+    .message.selected::before {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .message.message-highlight .message-bubble {
+        animation: none;
+        box-shadow: 0 0 0 3px var(--warning-color);
+    }
+}

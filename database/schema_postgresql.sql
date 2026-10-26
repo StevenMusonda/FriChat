@@ -2,6 +2,7 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS starred_messages CASCADE;
 DROP TABLE IF EXISTS notification_settings CASCADE;
 DROP TABLE IF EXISTS push_subscriptions CASCADE;
 DROP TABLE IF EXISTS password_resets CASCADE;
@@ -128,6 +129,9 @@ CREATE TABLE messages (
     content TEXT, -- For text messages
     file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
     status message_status DEFAULT 'sent',
+    reply_to_message_id INTEGER NULL REFERENCES messages(id) ON DELETE SET NULL, -- The message this one quotes
+    edited_at TIMESTAMP NULL, -- NULL = never edited
+    is_forwarded BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -147,6 +151,17 @@ CREATE TABLE message_reactions (
 );
 
 CREATE INDEX idx_reaction_message_id ON message_reactions(message_id);
+
+-- Per-user starred messages
+CREATE TABLE starred_messages (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, message_id)
+);
+
+CREATE INDEX idx_starred_message_id ON starred_messages(message_id);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

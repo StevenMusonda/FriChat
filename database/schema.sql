@@ -2,6 +2,7 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS starred_messages;
 DROP TABLE IF EXISTS notification_settings;
 DROP TABLE IF EXISTS push_subscriptions;
 DROP TABLE IF EXISTS password_resets;
@@ -117,11 +118,15 @@ CREATE TABLE messages (
     content TEXT, -- For text messages
     file_id INT, -- Reference to files table for media/file messages
     status ENUM('sent', 'delivered', 'read') DEFAULT 'sent',
+    reply_to_message_id INT NULL, -- The message this one quotes
+    edited_at TIMESTAMP NULL DEFAULT NULL, -- NULL = never edited
+    is_forwarded BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE SET NULL,
+    CONSTRAINT fk_messages_reply_to FOREIGN KEY (reply_to_message_id) REFERENCES messages(id) ON DELETE SET NULL,
     INDEX idx_chat_id (chat_id),
     INDEX idx_sender_id (sender_id),
     INDEX idx_created_at (created_at)
@@ -138,6 +143,18 @@ CREATE TABLE message_reactions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY unique_user_message_emoji (message_id, user_id, emoji),
     INDEX idx_message_id (message_id)
+);
+
+-- Per-user starred messages
+CREATE TABLE starred_messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    message_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_star (user_id, message_id),
+    INDEX idx_starred_message_id (message_id)
 );
 
 -- Create a view for easy message retrieval with user info
