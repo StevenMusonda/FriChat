@@ -247,6 +247,9 @@ function refreshChatList() {
     renderChatList(query
         ? allChats.filter(chat => (chat.chat_name || '').toLowerCase().includes(query))
         : allChats);
+
+    // App icon badge and tab title (notifications.js)
+    updateUnreadIndicators(allChats);
 }
 
 /**

@@ -203,4 +203,101 @@ Soft delete approach:
 
 ---
 
+## Phase 2: Installable app, push notifications and do-not-disturb
+
+FriChat can be installed as an app and sends push notifications when the tab is closed or in the background.
+
+- **Install**: Chrome/Edge show an install icon in the address bar, and the bell (🔔) settings panel has an **Install app** button when the browser offers it. On iPhone/iPad the panel explains *Share → Add to Home Screen*.
+- **Offline**: a service worker (`frontend/sw.js`) caches the app shell (HTML, CSS, JS, icons) and shows `offline.html` for pages it doesn't have. API responses are never cached; offline API calls get a JSON `503`.
+- **Push notifications**: turn on **Enable notifications** in the bell panel. The browser asks for permission only after that click. A notification shows the sender, a short preview (photo/video/file messages show generic text), and opens or focuses the chat when clicked.
+- **Who gets a push**: every chat member except the sender, unless they have muted the chat, have deleted it, have do-not-disturb on, or have a visible FriChat tab on that chat.
+- **Unread badge**: the unread total (muted chats excluded) appears on the installed app icon where the Badging API is supported, and in the tab title, e.g. `(3) FriChat - Chat`.
+- **Do not disturb**: the moon button in the sidebar header pauses all pushes. The bell panel also has daily **quiet hours** (start/end time in your timezone; a window like 22:00–07:00 crosses midnight).
+- **Logout** removes this browser's subscription from the server and unsubscribes it in the browser.
+
+### Setup
+
+1. Install the new package:
+   ```bash
+   cd backend
+   npm install
+   ```
+2. Run the migration on an existing database:
+   ```bash
+   # MySQL
+   mysql -u root -p frichat < database/add_push_notifications.sql
+   # PostgreSQL
+   psql -U postgres -d frichat -f database/add_push_notifications_postgresql.sql
+   ```
+   Fresh installs get the tables from `schema.sql` / `schema_postgresql.sql`. The migration is safe to run more than once.
+3. Generate VAPID keys **once** and paste the output into `backend/.env`:
+   ```bash
+   cd backend
+   npm run vapid:generate
+   ```
+   | Variable | Purpose |
+   |---|---|
+   | `VAPID_PUBLIC_KEY` | Sent to browsers so they can subscribe |
+   | `VAPID_PRIVATE_KEY` | Signs pushes. Keep it secret. |
+   | `VAPID_SUBJECT` | Contact for push services: a `mailto:` address or `https://` URL |
+
+   Without keys, push is off and everything else keeps working. Changing the keys invalidates every existing subscription; users then have to turn notifications on again.
+4. Restart the backend. Serve the frontend over **HTTPS** (or `http://localhost`): service workers and push don't work on plain HTTP.
+
+When deploying frontend changes, bump `CACHE_VERSION` in `frontend/sw.js` so installed apps fetch the new files.
+
+### New API endpoints
+
+All require `Authorization: Bearer <token>` and are rate limited to 30 requests per minute per IP.
+
+| Method | Endpoint | Body | Notes |
+|---|---|---|---|
+| GET | `/api/notifications/push-config` | – | `{ enabled, publicKey }` |
+| POST | `/api/notifications/subscriptions` | `{ endpoint, keys: { p256dh, auth } }` | Upserts by endpoint. HTTPS endpoints only, no IPs/localhost. `503` if VAPID isn't configured. |
+| DELETE | `/api/notifications/subscriptions` | `{ endpoint }` | Removes only the caller's own row |
+| GET | `/api/notifications/settings` | – | `{ dndEnabled, quietHoursEnabled, quietStart, quietEnd, timezone, dndActive }` |
+| PUT | `/api/notifications/settings` | Any of `dndEnabled`, `quietHoursEnabled` (booleans), `quietStart`, `quietEnd` (`HH:MM`), `timezone` (IANA name) | Only the fields sent change |
+
+### New Socket.IO events
+
+| Event | Direction | Payload | Notes |
+|---|---|---|---|
+| `presence` | client → server | `{ visible: boolean }` | Sent on connect and on every tab visibility change. It only describes the sending socket, so no chat membership is involved. A socket counts as visible until it says otherwise. |
+| `notification_settings_updated` | server → the user's own tabs | same shape as `GET /settings` | Keeps the moon button and settings panel in sync across tabs |
+
+### Push payload (`frontend/sw.js` reads this)
+
+`{ type: 'message', chatId, messageId, senderName, title, body, url: 'chat.html?chat=<id>', badge }`. For group chats the title is the group name and the body is `Sender: preview`. `badge` is the recipient's unread total.
+
+### Manual test checklist
+
+- [ ] Chrome: the address bar shows the install icon; installing opens FriChat in its own window with the chat-bubble icon
+- [ ] The bell panel's **Install app** button opens the install dialog (Chrome/Edge). On iOS Safari the Add to Home Screen note appears instead.
+- [ ] Turning on **Enable notifications** shows the permission prompt only after the click. Opening the page alone never prompts.
+- [ ] User B enables notifications and closes the tab. User A sends a message, and B gets a notification with A's name and the text.
+- [ ] A photo/file message shows "📷 Photo" / "📎 File", not the file name
+- [ ] Clicking the notification with no FriChat window open opens the chat. With a window open, it focuses that window and switches to the chat.
+- [ ] B has the chat open and visible: no push. B switches to another tab: a push arrives.
+- [ ] B mutes the chat: no push. Unmute: pushes again.
+- [ ] B turns on the moon (DND): no push, and the moon is highlighted in B's other tabs too
+- [ ] Quiet hours covering the current time: no push. Move the window away from now: pushes again.
+- [ ] The tab title shows `(N)` unread. The installed app icon shows a badge (Windows/macOS/ChromeOS/Android). Muted chats don't count.
+- [ ] Logging out removes the row from `push_subscriptions`, and no more pushes arrive in that browser
+- [ ] Offline (DevTools → Network → Offline): reloading still shows the app shell, and an uncached page shows the offline page
+- [ ] The light/dark theme still toggles, and the browser's title-bar color follows it
+- [ ] At a phone width (360px) all sidebar header buttons fit and the settings panel is usable
+
+### Tests
+
+`cd backend && npm test`. `test/push.test.js` covers quiet-hours math (timezones, overnight windows), previews, recipient filtering (mute, DND, quiet hours, visible/hidden tabs), deleting `404`/`410` subscriptions, settings upserts on both databases, input validation and the `presence` event.
+
+### Known limitations
+
+- iOS supports Web Push only for the installed Home Screen app (iOS 16.4+), and it doesn't support `beforeinstallprompt`.
+- FriChat has no in-app sounds yet. DND suppresses pushes, and with them the system notification sound.
+- Push sending runs in the web process (no queue), and presence lives in memory, so it's single-server only, like the rate limiter.
+- Endpoint validation blocks `http://`, IP addresses and `localhost`, but a public hostname that resolves to a private IP would still pass. For stricter hosting, add an allowlist of push-service hosts.
+
+---
+
 **Enjoy the new features! 🎉**

@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FriChat - Chat</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#667eea" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a202c" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="icons/favicon-32.png" type="image/png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="FriChat">
+    <script src="js/pwa.js" defer></script>
     <link rel="stylesheet" href="css/style.css">
     <!-- <script src="js/protect.js"></script> -->
 </head>
@@ -25,6 +33,17 @@
                     <button class="icon-btn" id="newChatBtn" title="New Chat">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn dnd-toggle" id="dndQuickToggle" title="Do not disturb" aria-label="Do not disturb" aria-pressed="false">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="settingsBtn" title="Notifications and app settings" aria-label="Notifications and app settings">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                         </svg>
                     </button>
                     <button class="icon-btn" id="themeToggle" title="Toggle Theme">
@@ -244,6 +263,70 @@
         </div>
     </div>
 
+    <!-- Notifications & App Settings Modal -->
+    <div class="modal" id="settingsModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+        <div class="modal-content settings-modal">
+            <div class="modal-header">
+                <h3 id="settingsModalTitle">Notifications &amp; app</h3>
+                <button class="modal-close" id="closeSettingsModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <section class="settings-section" aria-labelledby="settingsNotificationsHeading">
+                    <h4 id="settingsNotificationsHeading">Notifications</h4>
+                    <label class="settings-row" for="pushToggle">
+                        <span class="settings-row-text">
+                            <span class="settings-row-title">Enable notifications</span>
+                            <span class="settings-row-hint" id="pushStatus" role="status">Get notified about new messages when FriChat is closed.</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="pushToggle">
+                    </label>
+                </section>
+
+                <section class="settings-section" aria-labelledby="settingsDndHeading">
+                    <h4 id="settingsDndHeading">Do not disturb</h4>
+                    <label class="settings-row" for="dndToggle">
+                        <span class="settings-row-text">
+                            <span class="settings-row-title">Pause notifications</span>
+                            <span class="settings-row-hint">No pushes or sounds until you turn this off.</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="dndToggle">
+                    </label>
+                    <label class="settings-row" for="quietHoursToggle">
+                        <span class="settings-row-text">
+                            <span class="settings-row-title">Quiet hours</span>
+                            <span class="settings-row-hint">Every day, in your timezone (<span id="quietHoursZone"></span>).</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="quietHoursToggle">
+                    </label>
+                    <div class="quiet-hours-times" id="quietHoursTimes" hidden>
+                        <label for="quietStart">From
+                            <input type="time" id="quietStart" value="22:00" required>
+                        </label>
+                        <label for="quietEnd">To
+                            <input type="time" id="quietEnd" value="07:00" required>
+                        </label>
+                    </div>
+                    <p class="settings-status" id="dndStatus" role="status"></p>
+                </section>
+
+                <section class="settings-section" aria-labelledby="settingsAppHeading">
+                    <h4 id="settingsAppHeading">App</h4>
+                    <div class="settings-row">
+                        <span class="settings-row-text">
+                            <span class="settings-row-title">Install FriChat</span>
+                            <span class="settings-row-hint" id="installHint"></span>
+                        </span>
+                        <button type="button" class="btn btn-secondary settings-install-btn" id="installAppBtn" hidden>Install app</button>
+                    </div>
+                    <p class="settings-note" id="iosInstallNote" hidden>
+                        On iPhone or iPad: tap the Share button in Safari, then <strong>Add to Home Screen</strong>.
+                        Open FriChat from the Home Screen to turn on notifications (iOS 16.4 or later).
+                    </p>
+                </section>
+            </div>
+        </div>
+    </div>
+
     <!-- Chat Info Modal -->
     <div class="modal" id="chatInfoModal" style="display: none;">
         <div class="modal-content">
@@ -372,6 +455,7 @@
     <script src="js/messages.js"></script>
     <script src="js/messageActions.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/notifications.js"></script>
     
     <script>
         // Initialize chat application
@@ -384,6 +468,9 @@
 
             // Initialize UI components
             initializeUI();
+
+            // Settings panel, do-not-disturb, push subscription and notification clicks
+            initializeNotifications();
             
             // Initialize WebSocket connection
             const ws = initializeWebSocket();
@@ -446,9 +533,12 @@
             // Load user's chats
             await loadChats();
 
-            // Load last opened chat if exists
+            // A clicked notification (chat.html?chat=ID) wins over the last opened chat
+            const requestedChatId = takeRequestedChatId();
             const lastChatId = localStorage.getItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT);
-            if (lastChatId) {
+            if (requestedChatId && allChats.some(chat => chat.id === requestedChatId)) {
+                openChat(requestedChatId);
+            } else if (lastChatId) {
                 openChat(parseInt(lastChatId));
             }
 
@@ -462,6 +552,11 @@
 
         // Handle page visibility change
         document.addEventListener('visibilitychange', () => {
+            // Hidden tabs get push notifications, visible ones don't
+            if (typeof sendPresence === 'function') {
+                sendPresence();
+            }
+
             if (document.hidden) {
                 // Page is hidden
                 console.log('Page hidden');

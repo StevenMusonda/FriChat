@@ -34,6 +34,9 @@ function setupFakeDb(dbType, handler) {
     };
 
     process.env.DB_TYPE = dbType;
+    // Push stays off unless a test sets keys (dotenv never overrides a key that already exists)
+    process.env.VAPID_PUBLIC_KEY = '';
+    process.env.VAPID_PRIVATE_KEY = '';
     clearAppModules();
 
     stubModule('mysql2/promise', {

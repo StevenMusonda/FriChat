@@ -16,11 +16,13 @@ const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chats');
 const messageRoutes = require('./routes/messages');
+const notificationRoutes = require('./routes/notifications');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
 const { startScheduler } = require('./utils/scheduler');
 const { markChatRead, recordNewMessage } = require('./utils/chatState');
+const { notifyNewMessage } = require('./utils/push');
 
 // Initialize Express app
 const app = express();
@@ -62,6 +64,7 @@ app.use('/uploads', cors({
 app.use('/api/auth', authRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -120,6 +123,16 @@ io.on('connection', (socket) => {
 
     // Every tab of this user joins one room, so read/mute/archive changes reach all of them
     socket.join(`user_${socket.userId}`);
+
+    // Until the tab reports otherwise it counts as visible (no push while it might be on screen)
+    socket.data.visible = true;
+
+    /**
+     * Tab visibility, so pushes go out while the tab is hidden. Only describes this socket.
+     */
+    socket.on('presence', (data) => {
+        socket.data.visible = !(data && data.visible === false);
+    });
 
     /**
      * User authentication and online status
@@ -257,6 +270,9 @@ io.on('connection', (socket) => {
 
             // Broadcast to all users in the chat
             io.to(`chat_${chatId}`).emit('new_message', message);
+
+            // Push to members who aren't watching (not awaited - never delays or fails the send)
+            notifyNewMessage(io, message);
 
         } catch (error) {
             console.error('Send message error:', error);

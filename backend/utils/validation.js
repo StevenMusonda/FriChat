@@ -3,6 +3,7 @@
  */
 
 const { body, validationResult } = require('express-validator');
+const { isValidTimezone } = require('./notificationSettings');
 
 /**
  * Validation rules for user registration
@@ -109,6 +110,86 @@ const validateCreateChat = [
         .withMessage('At least one participant is required')
 ];
 
+// Push service endpoints are public HTTPS URLs; refuse anything that points the server at itself
+// or at a raw IP, since the server will POST to this URL
+function isPushEndpoint(value) {
+    let url;
+    try {
+        url = new URL(value);
+    } catch (e) {
+        return false;
+    }
+    const host = url.hostname.toLowerCase();
+    return url.protocol === 'https:'
+        && host !== 'localhost'
+        && !host.endsWith('.localhost')
+        && !/^[\d.]+$/.test(host)
+        && !host.includes(':')
+        && !host.startsWith('[');
+}
+
+const pushEndpointRule = body('endpoint')
+    .isString()
+    .isLength({ min: 10, max: 2048 })
+    .custom(isPushEndpoint)
+    .withMessage('Invalid push endpoint');
+
+// Base64url, as produced by PushSubscription.toJSON()
+const PUSH_KEY_PATTERN = /^[A-Za-z0-9_-]+={0,2}$/;
+
+/**
+ * Validation rules for saving a push subscription
+ */
+const validatePushSubscription = [
+    pushEndpointRule,
+
+    body('keys.p256dh')
+        .isString()
+        .isLength({ min: 16, max: 255 })
+        .matches(PUSH_KEY_PATTERN)
+        .withMessage('Invalid p256dh key'),
+
+    body('keys.auth')
+        .isString()
+        .isLength({ min: 8, max: 255 })
+        .matches(PUSH_KEY_PATTERN)
+        .withMessage('Invalid auth key')
+];
+
+/**
+ * Validation rules for removing a push subscription
+ */
+const validatePushUnsubscribe = [
+    pushEndpointRule
+];
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Validation rules for do-not-disturb settings (every field optional, only sent fields change)
+ */
+const validateNotificationSettings = [
+    body('dndEnabled')
+        .optional()
+        .isBoolean({ strict: true })
+        .withMessage('dndEnabled must be true or false'),
+
+    body('quietHoursEnabled')
+        .optional()
+        .isBoolean({ strict: true })
+        .withMessage('quietHoursEnabled must be true or false'),
+
+    body(['quietStart', 'quietEnd'])
+        .optional({ values: 'null' })
+        .matches(TIME_PATTERN)
+        .withMessage('Times must be HH:MM (24-hour)'),
+
+    body('timezone')
+        .optional()
+        .custom(isValidTimezone)
+        .withMessage('Unknown timezone')
+];
+
 /**
  * Middleware to check validation results
  */
@@ -153,6 +234,9 @@ module.exports = {
     validateResetPassword,
     validateMessage,
     validateCreateChat,
+    validatePushSubscription,
+    validatePushUnsubscribe,
+    validateNotificationSettings,
     checkValidation,
     sanitizeHtml,
     validateFileType

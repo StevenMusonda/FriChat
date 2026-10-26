@@ -91,6 +91,7 @@ for (const dbType of ['mysql', 'postgresql']) {
                 const socket = {
                     id: 'test-socket',
                     userId: SENDER_ID,
+                    data: {},
                     join() {},
                     on(event, fn) { handlers[event] = fn; },
                     emit(event, payload) { if (event === 'error') socketErrors.push(payload); }

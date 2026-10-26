@@ -7,6 +7,7 @@ const { executeQuery, queryOne, insertAndGetId } = require('../config/database')
 const { sanitizeHtml } = require('../utils/validation');
 const path = require('path');
 const { recordNewMessage } = require('../utils/chatState');
+const { notifyNewMessage } = require('../utils/push');
 
 const DEFAULT_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 100;
@@ -196,6 +197,9 @@ async function sendMessage(req, res) {
             req.io.to(`chat_${chatId}`).emit('new_message', message);
         }
 
+        // Push to members who aren't watching (not awaited - never delays or fails the send)
+        notifyNewMessage(req.io, message);
+
         res.status(201).json({
             success: true,
             message: 'Message sent successfully',
@@ -331,6 +335,9 @@ async function uploadFile(req, res) {
         if (req.io && message) {
             req.io.to(`chat_${chatId}`).emit('new_message', message);
         }
+
+        // Push to members who aren't watching (not awaited - never delays or fails the send)
+        notifyNewMessage(req.io, message);
 
         res.status(201).json({
             success: true,

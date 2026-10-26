@@ -2,6 +2,8 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS notification_settings CASCADE;
+DROP TABLE IF EXISTS push_subscriptions CASCADE;
 DROP TABLE IF EXISTS password_resets CASCADE;
 DROP TABLE IF EXISTS message_reactions CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
@@ -51,6 +53,31 @@ CREATE TABLE password_resets (
 );
 
 CREATE INDEX idx_password_resets_user_id ON password_resets(user_id);
+
+-- Web Push subscriptions, one row per browser/device that allowed notifications
+CREATE TABLE push_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL,
+    endpoint_hash CHAR(64) NOT NULL UNIQUE,
+    p256dh VARCHAR(255) NOT NULL,
+    auth VARCHAR(255) NOT NULL,
+    user_agent VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_push_user_id ON push_subscriptions(user_id);
+
+-- Per-user do-not-disturb (no row = notifications on, no quiet hours)
+CREATE TABLE notification_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    dnd_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    quiet_hours_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    quiet_start CHAR(5) NULL, -- 'HH:MM' in the user's timezone; start > end crosses midnight
+    quiet_end CHAR(5) NULL,
+    timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', -- IANA name, e.g. 'Europe/Berlin'
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Chats table (for both direct and group chats)
 CREATE TABLE chats (

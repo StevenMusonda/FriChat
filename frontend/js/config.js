@@ -40,6 +40,11 @@ const CONFIG = {
         UPDATE_STATUS: (messageId) => `/messages/${messageId}/status`,
         ADD_REACTION: (messageId) => `/messages/${messageId}/reactions`,
         REMOVE_REACTION: (messageId) => `/messages/${messageId}/reactions`,
+
+        // Notifications
+        PUSH_CONFIG: '/notifications/push-config',
+        PUSH_SUBSCRIPTIONS: '/notifications/subscriptions',
+        NOTIFICATION_SETTINGS: '/notifications/settings',
     },
     
     // Messages fetched per page when opening a chat or scrolling up

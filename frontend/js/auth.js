@@ -142,6 +142,11 @@ async function resetPassword(token, password) {
  * Logout user
  */
 async function logout() {
+    // Stop pushes to this browser before the token goes away (pwa.js; absent on pages without it)
+    if (typeof cleanupPushOnLogout === 'function') {
+        await cleanupPushOnLogout();
+    }
+
     try {
         await apiRequest(CONFIG.ENDPOINTS.LOGOUT, {
             method: 'POST'

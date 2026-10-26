@@ -12,6 +12,7 @@ let userStatusHandlers = [];
 let readPositionHandlers = [];
 let messagesReadHandlers = [];
 let chatSettingsHandlers = [];
+let notificationSettingsHandlers = [];
 
 /**
  * Initialize WebSocket connection
@@ -43,6 +44,9 @@ function initializeWebSocket() {
         
         // Go online and join chat rooms (identity comes from the handshake token)
         socket.emit('authenticate');
+
+        // The server pushes notifications only while no visible tab is watching
+        sendPresence();
     });
     
     socket.on('disconnect', () => {
@@ -100,6 +104,11 @@ function initializeWebSocket() {
     // Mute/archive changed in another tab
     socket.on('chat_settings_updated', (data) => {
         chatSettingsHandlers.forEach(handler => handler(data));
+    });
+
+    // Do-not-disturb changed in another tab
+    socket.on('notification_settings_updated', (data) => {
+        notificationSettingsHandlers.forEach(handler => handler(data));
     });
 
     return socket;
@@ -169,6 +178,17 @@ function markReadViaSocket(chatId, messageId) {
     socket.emit('mark_read', {
         chatId: chatId,
         messageId: messageId
+    });
+}
+
+/**
+ * Tell the server whether this tab is on screen (hidden tabs still get push notifications)
+ */
+function sendPresence() {
+    if (!socket) return;
+
+    socket.emit('presence', {
+        visible: !document.hidden
     });
 }
 
@@ -281,6 +301,13 @@ function onChatSettings(handler) {
 }
 
 /**
+ * Register do-not-disturb settings handler
+ */
+function onNotificationSettings(handler) {
+    notificationSettingsHandlers.push(handler);
+}
+
+/**
  * Disconnect WebSocket
  */
 function disconnectWebSocket() {
@@ -297,5 +324,6 @@ function disconnectWebSocket() {
         readPositionHandlers = [];
         messagesReadHandlers = [];
         chatSettingsHandlers = [];
+        notificationSettingsHandlers = [];
     }
 }

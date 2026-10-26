@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FriChat - Offline</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#667eea" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a202c" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="icons/favicon-32.png" type="image/png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>FriChat</h1>
+                <p>You're offline. Check your connection - FriChat will reload when you're back.</p>
+            </div>
+            <button type="button" class="btn btn-primary" id="retryBtn">Try again</button>
+        </div>
+    </div>
+
+    <script>
+        try {
+            if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark-theme');
+        } catch (e) {
+            // Storage unavailable: light theme
+        }
+        document.getElementById('retryBtn').addEventListener('click', () => location.reload());
+        window.addEventListener('online', () => location.reload());
+    </script>
+</body>
+</html>

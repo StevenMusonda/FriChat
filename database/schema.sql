@@ -2,6 +2,8 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS notification_settings;
+DROP TABLE IF EXISTS push_subscriptions;
 DROP TABLE IF EXISTS password_resets;
 DROP TABLE IF EXISTS message_reactions;
 DROP TABLE IF EXISTS messages;
@@ -35,6 +37,34 @@ CREATE TABLE password_resets (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_password_resets_user_id (user_id)
+);
+
+-- Web Push subscriptions, one row per browser/device that allowed notifications
+-- (endpoint is hashed so it can carry a UNIQUE index under InnoDB's key size limit)
+CREATE TABLE push_subscriptions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    endpoint TEXT NOT NULL,
+    endpoint_hash CHAR(64) NOT NULL,
+    p256dh VARCHAR(255) NOT NULL,
+    auth VARCHAR(255) NOT NULL,
+    user_agent VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_push_endpoint (endpoint_hash),
+    INDEX idx_push_user_id (user_id)
+);
+
+-- Per-user do-not-disturb (no row = notifications on, no quiet hours)
+CREATE TABLE notification_settings (
+    user_id INT PRIMARY KEY,
+    dnd_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    quiet_hours_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    quiet_start CHAR(5) NULL, -- 'HH:MM' in the user's timezone; start > end crosses midnight
+    quiet_end CHAR(5) NULL,
+    timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', -- IANA name, e.g. 'Europe/Berlin'
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Chats table (for both direct and group chats)
