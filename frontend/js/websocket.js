@@ -15,6 +15,8 @@ let chatSettingsHandlers = [];
 let notificationSettingsHandlers = [];
 let messageEditedHandlers = [];
 let starHandlers = [];
+let messageDeletedHandlers = [];
+let socketErrorHandlers = [];
 
 /**
  * Initialize WebSocket connection
@@ -121,6 +123,17 @@ function initializeWebSocket() {
     // Star added/removed (this tab or another tab of the same user)
     socket.on('message_star_updated', (data) => {
         starHandlers.forEach(handler => handler(data));
+    });
+
+    // Someone in a chat deleted a message for everyone
+    socket.on('message_deleted', (data) => {
+        messageDeletedHandlers.forEach(handler => handler(data));
+    });
+
+    // A request this socket made was refused (e.g. send_message: not a member, bad reply target)
+    socket.on('error', (data) => {
+        console.error('Socket error:', data);
+        socketErrorHandlers.forEach(handler => handler(data || {}));
     });
 
     return socket;
@@ -335,6 +348,20 @@ function onStarUpdate(handler) {
 }
 
 /**
+ * Register message deleted (for everyone) handler
+ */
+function onMessageDeleted(handler) {
+    messageDeletedHandlers.push(handler);
+}
+
+/**
+ * Register handler for errors the server reports on this socket
+ */
+function onSocketError(handler) {
+    socketErrorHandlers.push(handler);
+}
+
+/**
  * Disconnect WebSocket
  */
 function disconnectWebSocket() {
@@ -354,5 +381,7 @@ function disconnectWebSocket() {
         notificationSettingsHandlers = [];
         messageEditedHandlers = [];
         starHandlers = [];
+        messageDeletedHandlers = [];
+        socketErrorHandlers = [];
     }
 }

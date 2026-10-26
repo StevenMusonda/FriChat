@@ -130,24 +130,16 @@ async function deleteMessage(messageId, deleteForEveryone) {
         });
         
         if (response.success) {
-            // Remove message from UI
-            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-            if (messageElement) {
-                if (response.deletedForEveryone) {
-                    // Replace with "This message was deleted"
-                    const bubble = messageElement.querySelector('.message-bubble');
-                    bubble.innerHTML = '<div class="message-deleted">🚫 This message was deleted</div>';
-                    messageElement.querySelectorAll('.message-actions, .message-footer').forEach(el => el.remove());
-                } else {
-                    // Just remove from view
-                    messageElement.remove();
-                }
+            if (response.deletedForEveryone) {
+                // Same update every open client gets from the message_deleted broadcast
+                applyMessageDeleted({ messageId, chatId: currentChatId, deletedForEveryone: true });
+            } else {
+                // Just remove from view
+                const messageElement = document.querySelector(`#messagesContainer [data-message-id="${messageId}"]`);
+                if (messageElement) messageElement.remove();
             }
-            
-            // Notify via socket if deleted for everyone
-            if (response.deletedForEveryone && window.emitMessageDeleted) {
-                window.emitMessageDeleted(messageId, currentChatId);
-            }
+        } else {
+            showNotification(response.message || 'Failed to delete message', 'error');
         }
     } catch (error) {
         console.error('Delete message error:', error);
@@ -254,7 +246,7 @@ function renderPinnedMessages(pinnedMessages) {
     container.innerHTML = pinnedMessages.map(pin => {
         const timeLeft = getTimeUntil(pin.pinned_until);
         return `
-            <div class="pinned-message" data-pin-id="${pin.id}">
+            <div class="pinned-message" data-pin-id="${parseInt(pin.id)}" data-pinned-message-id="${parseInt(pin.message_id)}">
                 <div class="pinned-message-content">
                     <div class="pinned-message-header">
                         <svg class="pinned-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -562,6 +554,74 @@ function applyMessageEdit(data) {
             chat.lastMessage = last;
             refreshChatList();
         }
+    }
+}
+
+/**
+ * A message was deleted for everyone (broadcast, or this tab's own delete): show the placeholder,
+ * blank quotes of it, and drop it from the sidebar preview, composer, selection, pins and stars.
+ * Safe to run twice for the same message.
+ */
+function applyMessageDeleted(data) {
+    if (!data || !data.deletedForEveryone) return;
+    const messageId = data.messageId;
+
+    if (data.chatId === currentChatId) {
+        const message = currentMessages.find(m => m.id === messageId);
+        if (message) {
+            message.deleted_for_everyone = true;
+            message.is_deleted = true;
+            message.content = null;
+            message.reply_to = null;
+            rerenderMessage(message);
+        }
+
+        // Replies keep their quote block, but only as "Original message deleted"
+        currentMessages.forEach(m => {
+            if (m.reply_to && m.reply_to.id === messageId && !m.reply_to.deleted) {
+                m.reply_to = { id: messageId, deleted: true };
+                rerenderMessage(m);
+            }
+        });
+
+        if (composerContext && composerContext.messageId === messageId) {
+            const wasEditing = isEditingMessage();
+            cancelComposerContext();
+            showNotification(wasEditing ? 'The message you were editing was deleted' : 'The message you were replying to was deleted', 'error');
+        }
+
+        if (selectedMessageIds.has(messageId)) {
+            selectedMessageIds.delete(messageId);
+            updateSelectionBar();
+        }
+
+        if (document.querySelector(`#pinnedMessagesContainer [data-pinned-message-id="${parseInt(messageId)}"]`)) {
+            loadPinnedMessages(currentChatId);
+        }
+    }
+
+    const chat = allChats.find(c => c.id === data.chatId);
+    if (chat && chat.lastMessage) {
+        let last = chat.lastMessage;
+        if (typeof last === 'string') {
+            try {
+                last = JSON.parse(last);
+            } catch (e) {
+                last = null;
+            }
+        }
+        if (last && last.id === messageId) {
+            last.content = null;
+            last.deleted = true;
+            chat.lastMessage = last;
+            refreshChatList();
+        }
+    }
+
+    const starredItem = document.querySelector(`#starredModal [data-starred-id="${parseInt(messageId)}"]`);
+    if (starredItem) {
+        starredItem.remove();
+        if (!document.querySelector('#starredModal .starred-item')) renderStarredEmpty();
     }
 }
 

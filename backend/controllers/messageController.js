@@ -4,7 +4,7 @@
  */
 
 const { executeQuery, queryOne, insertAndGetId } = require('../config/database');
-const { sanitizeHtml } = require('../utils/validation');
+const { cleanMessageText } = require('../utils/messageText');
 const path = require('path');
 const { recordNewMessage } = require('../utils/chatState');
 const { notifyNewMessage } = require('../utils/push');
@@ -150,6 +150,15 @@ async function sendMessage(req, res) {
         const replyToMessageId = req.body.replyToMessageId || null;
         const userId = req.user.id;
 
+        // Stored raw (clients escape on render), same rule as every other send path
+        const cleaned = cleanMessageText(content, { required: messageType === 'text' });
+        if (!cleaned.ok) {
+            return res.status(400).json({
+                success: false,
+                message: cleaned.error
+            });
+        }
+
         // Check if user is a member of this chat
         const membership = await queryOne(
             'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
@@ -176,7 +185,7 @@ async function sendMessage(req, res) {
         // Insert message
         const messageId = await insertAndGetId(
             'INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [chatId, userId, messageType, sanitizeHtml(content), replyToMessageId, 'sent']
+            [chatId, userId, messageType, cleaned.text, replyToMessageId, 'sent']
         );
 
         // Update chat updated_at
@@ -496,6 +505,19 @@ async function deleteMessage(req, res) {
             });
         }
 
+        // Still a member: a deletion for everyone is broadcast into the chat
+        const membership = await queryOne(
+            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
+            [message.chat_id, userId]
+        );
+
+        if (!membership) {
+            return res.status(404).json({
+                success: false,
+                message: 'Message not found'
+            });
+        }
+
         // Calculate time difference
         const messageTime = new Date(message.created_at);
         const currentTime = new Date();
@@ -507,6 +529,15 @@ async function deleteMessage(req, res) {
                 'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?, deleted_for_everyone = TRUE WHERE id = ?',
                 [userId, messageId]
             );
+
+            // Open clients swap in the placeholder and blank quotes of it
+            if (req.io) {
+                req.io.to(`chat_${message.chat_id}`).emit('message_deleted', {
+                    messageId: message.id,
+                    chatId: message.chat_id,
+                    deletedForEveryone: true
+                });
+            }
 
             return res.json({
                 success: true,
@@ -732,6 +763,7 @@ async function getPinnedMessages(req, res) {
             JOIN users sender ON m.sender_id = sender.id
             JOIN users pinner ON pm.pinned_by = pinner.id
             WHERE pm.chat_id = ? AND pm.pinned_until > CURRENT_TIMESTAMP
+            AND (m.deleted_for_everyone IS NULL OR m.deleted_for_everyone = FALSE)
             ORDER BY pm.created_at DESC
         `, [chatId]);
 
@@ -756,8 +788,16 @@ async function getPinnedMessages(req, res) {
 async function editMessage(req, res) {
     try {
         const { messageId } = req.params;
-        const content = req.body.content;
         const userId = req.user.id;
+
+        const cleaned = cleanMessageText(req.body.content, { required: true });
+        if (!cleaned.ok) {
+            return res.status(400).json({
+                success: false,
+                message: cleaned.error
+            });
+        }
+        const content = cleaned.text;
 
         // Membership is part of the lookup: someone who left the chat can't edit in it
         const message = await queryOne(`
@@ -804,8 +844,7 @@ async function editMessage(req, res) {
             });
         }
 
-        // 400 rather than 403: the frontend's apiRequest logs out on any 403, and this is reachable
-        // by simply waiting too long with the edit bar open
+        // 400: reachable by simply waiting too long with the edit bar open
         if (!toBool(message.within_window)) {
             return res.status(400).json({
                 success: false,
@@ -813,7 +852,7 @@ async function editMessage(req, res) {
             });
         }
 
-        // Stored as typed, like messages sent over the socket; clients escape on render
+        // Stored raw (cleanMessageText); clients escape on render
         await executeQuery(
             `UPDATE messages SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND sender_id = ?`,
             [content, messageId, userId]
@@ -895,13 +934,24 @@ async function forwardMessages(req, res) {
             [userId, ...chatIds]
         );
 
-        // 404 (not 403): to a non-member the chat doesn't exist, and apiRequest logs out on 403
-        // (reachable if the user is removed from a group while the forward dialog is open)
+        // 404: to a non-member the chat doesn't exist
         if (memberships.length !== chatIds.length) {
             return res.status(404).json({
                 success: false,
                 message: 'One or more chats were not found. You can only forward to chats you are a member of.'
             });
+        }
+
+        // Copies go through the same text rule as new messages
+        for (const source of sources) {
+            const cleaned = cleanMessageText(source.content, { required: false });
+            if (!cleaned.ok) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'One or more messages cannot be forwarded'
+                });
+            }
+            source.content = cleaned.text;
         }
 
         // Keep the original order

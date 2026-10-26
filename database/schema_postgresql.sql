@@ -132,13 +132,18 @@ CREATE TABLE messages (
     reply_to_message_id INTEGER NULL REFERENCES messages(id) ON DELETE SET NULL, -- The message this one quotes
     edited_at TIMESTAMP NULL, -- NULL = never edited
     is_forwarded BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL, -- Delete for everyone
+    deleted_by INTEGER NULL,
+    deleted_for_everyone BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_messages_deleted_by FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_msg_chat_id ON messages(chat_id);
 CREATE INDEX idx_msg_sender_id ON messages(sender_id);
 CREATE INDEX idx_msg_created_at ON messages(created_at);
+CREATE INDEX idx_messages_deleted_at ON messages(deleted_at);
 
 -- Message reactions table
 CREATE TABLE message_reactions (

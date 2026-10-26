@@ -291,7 +291,9 @@ const checkValidation = (req, res, next) => {
 };
 
 /**
- * Sanitize HTML to prevent XSS
+ * Legacy HTML escaping on write, still used for profile full names only.
+ * Never use it for message text or chat names: those are stored raw (utils/messageText.js)
+ * and escaped by the frontend at render time.
  */
 function sanitizeHtml(text) {
     if (!text) return text;

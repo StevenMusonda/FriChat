@@ -144,7 +144,9 @@ function renderChatList(chats) {
             const fileName = lastMessage.fileName || lastMessage.file_name || lastMessage.filename;
             const createdAt = lastMessage.createdAt || lastMessage.created_at || lastMessage.createdat;
             
-            if (messageType === 'text') {
+            if (lastMessage.deleted === true || lastMessage.deleted === 1) {
+                lastMessageText = '🚫 This message was deleted';
+            } else if (messageType === 'text') {
                 lastMessageText = content || 'Message';
             } else if (messageType === 'image') {
                 lastMessageText = '📷 Photo';
@@ -166,7 +168,7 @@ function renderChatList(chats) {
         return `
             <div class="chat-item ${chat.id === currentChatId ? 'active' : ''} ${chat.is_muted ? 'muted' : ''}" data-chat-id="${chat.id}">
                 <div class="chat-item-avatar">
-                    ${displayInitial}
+                    ${escapeHtml(displayInitial)}
                 </div>
                 <div class="chat-item-content">
                     <div class="chat-item-header">
@@ -632,14 +634,19 @@ function formatTime(timestamp) {
 }
 
 /**
- * Escape HTML to prevent XSS
+ * The one HTML-escaping helper for user content inserted with innerHTML/template strings.
+ * The server stores text raw, so everything user-written must pass through here (or textContent).
+ * Escapes quotes too, so the result is also safe inside quoted attributes.
  */
 function escapeHtml(text) {
-    if (!text) return '';
-    
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || text === undefined) return '';
+
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 /**

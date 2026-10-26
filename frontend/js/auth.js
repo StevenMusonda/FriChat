@@ -29,8 +29,10 @@ async function apiRequest(endpoint, options = {}) {
         const response = await fetch(`${CONFIG.API_BASE_URL}${endpoint}`, mergedOptions);
         const data = await response.json();
         
-        // Handle unauthorized
-        if (response.status === 401 || response.status === 403) {
+        // Only 401 means the token is missing, invalid or expired. 403 is "not allowed to do this"
+        // (e.g. not a member of a chat) and is returned to the caller like any other error.
+        // Without a token (login page) a 401 is just "wrong credentials".
+        if (response.status === 401 && token) {
             logout();
             window.location.href = 'login.html';
             throw new Error('Unauthorized');

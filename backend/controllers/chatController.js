@@ -4,7 +4,7 @@
  */
 
 const { executeQuery, queryOne } = require('../config/database');
-const { sanitizeHtml } = require('../utils/validation');
+const { stripControlChars } = require('../utils/messageText');
 const {
     MUTE_DURATIONS,
     markChatRead,
@@ -85,7 +85,8 @@ async function getUserChats(req, res) {
                 SELECT
                     c.id as chat_id,
                     m.id,
-                    m.content,
+                    CASE WHEN m.deleted_for_everyone = TRUE THEN NULL ELSE m.content END as content,
+                    m.deleted_for_everyone as deleted,
                     m.message_type as messageType,
                     m.sender_id as senderId,
                     sender.username as senderName,
@@ -203,8 +204,13 @@ async function getChatById(req, res) {
  */
 async function createChat(req, res) {
     try {
-        const { chatType, chatName, participants } = req.body;
+        const { chatType, participants } = req.body;
         const userId = req.user.id;
+
+        // Stored raw like message text (validated to 100 chars); clients escape on render
+        const chatName = chatType === 'group' && typeof req.body.chatName === 'string'
+            ? (stripControlChars(req.body.chatName).trim() || null)
+            : null;
 
         // For direct chats, check if chat already exists
         if (chatType === 'direct') {
@@ -242,13 +248,13 @@ async function createChat(req, res) {
         if (process.env.DB_TYPE === 'postgresql') {
             const result = await executeQuery(
                 'INSERT INTO chats (chat_type, chat_name, created_by) VALUES (?, ?, ?) RETURNING id',
-                [chatType, chatType === 'group' ? sanitizeHtml(chatName) : null, userId]
+                [chatType, chatName, userId]
             );
             chatId = result[0]?.id;
         } else {
             const result = await executeQuery(
                 'INSERT INTO chats (chat_type, chat_name, created_by) VALUES (?, ?, ?)',
-                [chatType, chatType === 'group' ? sanitizeHtml(chatName) : null, userId]
+                [chatType, chatName, userId]
             );
             chatId = result.insertId;
         }

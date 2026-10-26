@@ -24,8 +24,9 @@ async function authenticateToken(req, res, next) {
 
         // Verify token
         jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+            // 401 (not 403): the frontend logs out only on 401, so a bad token must use it
             if (err) {
-                return res.status(403).json({ 
+                return res.status(401).json({ 
                     success: false, 
                     message: 'Invalid or expired token' 
                 });
@@ -37,8 +38,9 @@ async function authenticateToken(req, res, next) {
                 [decoded.userId]
             );
 
+            // Token for an account that no longer exists: treat as signed out
             if (!user) {
-                return res.status(404).json({ 
+                return res.status(401).json({ 
                     success: false, 
                     message: 'User not found' 
                 });

@@ -77,8 +77,10 @@ describe('notification preview', () => {
         assert.equal(buildPreview({ message_type: 'file' }), '📎 File');
     });
 
-    test('text is unescaped, collapsed and truncated', () => {
-        assert.equal(buildPreview({ message_type: 'text', content: 'Tom &amp; Jerry &lt;3' }), 'Tom & Jerry <3');
+    test('raw text passes through as typed, collapsed and truncated', () => {
+        assert.equal(buildPreview({ message_type: 'text', content: 'Tom & Jerry <3' }), 'Tom & Jerry <3');
+        // Stored raw, so a literal entity someone typed is shown as typed, not decoded
+        assert.equal(buildPreview({ message_type: 'text', content: 'write &amp; for &' }), 'write &amp; for &');
         assert.equal(buildPreview({ message_type: 'text', content: 'a\n\n  b' }), 'a b');
         const long = buildPreview({ message_type: 'text', content: 'x'.repeat(500) });
         assert.equal(long.length, 120);
@@ -110,7 +112,7 @@ for (const dbType of ['mysql', 'postgresql']) {
                     return SUBSCRIPTIONS.filter(s => params.includes(s.user_id)).map(s => ({ ...s }));
                 }
                 if (/^SELECT gm.user_id, COUNT\(m.id\) AS unread/.test(sql)) return [{ user_id: 2, unread: '4' }];
-                if (/^SELECT chat_type, chat_name FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team &amp; Co' }];
+                if (/^SELECT chat_type, chat_name FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team & Co' }];
                 if (/^DELETE FROM push_subscriptions WHERE id = /.test(sql)) return dbType === 'mysql' ? { affectedRows: 1 } : [];
                 throw new Error(`Unexpected query: ${sql}`);
             });
@@ -139,7 +141,7 @@ for (const dbType of ['mysql', 'postgresql']) {
             return { ...fake, sent, io, push: fake.load('utils/push.js') };
         }
 
-        const MESSAGE = { id: 99, chat_id: CHAT_ID, sender_id: SENDER_ID, username: 'alice', full_name: 'Alice', message_type: 'text', content: 'hi &amp; bye' };
+        const MESSAGE = { id: 99, chat_id: CHAT_ID, sender_id: SENDER_ID, username: 'alice', full_name: 'Alice', message_type: 'text', content: 'hi & bye' };
 
         test('pushes only to members who are not muted, not in DND and not watching', async () => {
             const { sent, io, push, calls } = setup();

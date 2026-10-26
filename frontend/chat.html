@@ -587,6 +587,16 @@
                 applyStarUpdate(data);
             });
 
+            // A message was deleted for everyone (placeholder, quotes, sidebar preview)
+            onMessageDeleted((data) => {
+                applyMessageDeleted(data);
+            });
+
+            // send_message (and reply) failures would otherwise be silent
+            onSocketError((data) => {
+                showNotification(data.message || 'Something went wrong', 'error');
+            });
+
             onTyping((data) => {
                 // Show/hide typing indicator
                 handleTypingIndicator(data);

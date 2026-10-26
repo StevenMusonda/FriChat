@@ -121,15 +121,20 @@ CREATE TABLE messages (
     reply_to_message_id INT NULL, -- The message this one quotes
     edited_at TIMESTAMP NULL DEFAULT NULL, -- NULL = never edited
     is_forwarded BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL DEFAULT NULL, -- Delete for everyone
+    deleted_by INT NULL,
+    deleted_for_everyone BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE SET NULL,
     CONSTRAINT fk_messages_reply_to FOREIGN KEY (reply_to_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+    CONSTRAINT fk_messages_deleted_by FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_chat_id (chat_id),
     INDEX idx_sender_id (sender_id),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_messages_deleted_at (deleted_at)
 );
 
 -- Message reactions table

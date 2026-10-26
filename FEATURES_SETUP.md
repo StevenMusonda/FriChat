@@ -340,7 +340,7 @@ Message objects (`GET /api/messages/chat/:id`, `new_message`) now also carry `ed
 
 Rate limits (per IP): edit, star and the starred list share 60/min. Forward is 10/min, because one forward can create up to 50 messages.
 
-Status codes: an expired edit window returns `400` and a forward to a chat you're not in returns `404`, both on purpose. The frontend's `apiRequest` logs the user out on any `403`, and both cases can happen during normal use.
+Status codes: an expired edit window returns `400` and a forward to a chat you're not in returns `404`, both on purpose. (Since the cleanup below, `apiRequest` logs out only on `401`, so a `403` no longer ends the session either.)
 
 ### New and changed Socket.IO events
 
@@ -373,10 +373,123 @@ Use two browsers (A and B) in the same group, plus a direct chat between them.
 
 ### Known limitations
 
-- Deleting a message for everyone still isn't broadcast live (as before Phase 3), so quotes of it only switch to *Original message deleted* on the next load
-- A reply rejected on the socket path (for example, the original was deleted while the reply bar was open) comes back as a socket `error` event, which the frontend doesn't display yet. The message isn't sent.
+- ~~Deleting a message for everyone isn't broadcast live~~ and ~~socket `error` events aren't shown~~: both fixed in the cleanup below
 - The sidebar preview shows a forwarded or edited last message as plain text, with no label
 - Rate limits are per IP and in memory (same as Phase 2)
+
+---
+
+## Cleanup before Phase 4: one text rule, live deletes, socket errors, 401 logout
+
+### One text rule for messages
+
+Message text is stored **raw** on every write path: REST `POST /api/messages`, socket `send_message`, `PATCH /api/messages/:id` (edit) and `POST /api/messages/forward`. All of them go through one function, `cleanMessageText()` in `backend/utils/messageText.js`. Use it for any future path too, such as webhooks. It:
+
+- strips control characters (C0 except tab/newline, DEL, C1) and turns `\r\n` / `\r` into `\n`
+- trims, then rejects empty text (for text messages and edits) and anything over 5000 characters (`MAX_MESSAGE_LENGTH`)
+- rejects anything that isn't a string
+- **never HTML-escapes**
+
+Group chat names from `POST /api/chats` are stored raw too. They get the same control-character strip, and the existing 100-character validator applies. `createChat` has no first-message option, so there was no message path there to change. Profile full names still use the old `sanitizeHtml` on write. They are out of scope here.
+
+Escaping happens only at render time in the frontend: `escapeHtml()` in `frontend/js/chat.js` for template strings (it now also escapes `"` and `'`, so it's safe in attributes), or `textContent`. This covers message bodies, reply quotes and the reply/edit bar, the chat list preview, the starred panel, pinned messages, reactions (emoji and names were previously inserted unescaped) and file names. Push notification text is plain text by nature and no longer HTML-decodes message text or chat names. There is no message search feature yet. The sidebar search only filters chat names in memory.
+
+#### Fixing rows stored escaped by the old REST path
+
+Before this change, REST sends and group names were saved through `sanitizeHtml` (`&amp; &lt; &gt; &quot; &#x27; &#x2F;`). Since the frontend escapes too, those rows showed up as `&amp;` etc. Socket sends were always raw, so old data is mixed. The one-off script `backend/scripts/unescape-legacy-messages.js` fixes it on either engine:
+
+```bash
+cd backend
+# 1. Back up the database first.
+# 2. Dry run: prints every row it would change, writes nothing
+node scripts/unescape-legacy-messages.js --before "<deploy time, e.g. 2026-10-26T18:00:00Z>" --chat-names
+# 3. Apply, ONCE, and keep the output
+node scripts/unescape-legacy-messages.js --before "<same time>" --chat-names --apply
+```
+
+The script only changes a row when all of these hold:
+- it was created before `--before`
+- it is a text message that was never edited (edits were always stored raw) or a group name
+- it looks exactly like `sanitizeHtml` output: it has at least one of those six entities, no raw `< > " ' /`, and no other `&`
+
+**Do not run it twice.** Un-escaping isn't idempotent. Text that someone originally typed as `&lt;b&gt;` was stored as `&amp;lt;b&amp;gt;`. The first run correctly restores `&lt;b&gt;`, but that result still looks escaped, so a second run would turn it into `<b>`. The same goes for a raw socket message from before the cutoff that consists only of entity text. Such text is rare, and it is always shown as text, never run as HTML. `--before` stops it from ever touching messages written after the deploy. Applying the script also bumps `messages.updated_at` / `chats.updated_at` on the rows it changes.
+
+### Delete-for-everyone columns on MySQL
+
+`messages.deleted_at`, `deleted_by` (FK to `users`, `ON DELETE SET NULL`) and `deleted_for_everyone` were only created by a PostgreSQL-only migration. They are now in both `schema.sql` and `schema_postgresql.sql`, with a migration for each engine:
+
+```bash
+# MySQL (safe to run more than once)
+mysql -u root -p frichat < database/add_message_delete_columns.sql
+# PostgreSQL (safe to run more than once; a no-op if add_message_columns_postgresql.sql was run)
+psql -U postgres -d frichat -f database/add_message_delete_columns_postgresql.sql
+```
+
+### Live "delete for everyone"
+
+`DELETE /api/messages/:messageId` now also checks that the sender is still a member of the chat (`404` if not). When the message is deleted for everyone, the server broadcasts it, and every open client:
+
+- swaps the message for *This message was deleted*
+- turns quotes of it into *Original message deleted*
+- updates the sidebar preview
+- drops it from the reply/edit bar (with a toast), the selection, the pinned bar and the starred panel
+
+The chat list preview and the pinned list no longer return the content of messages deleted for everyone.
+
+### Socket errors are shown
+
+Every `error` the server emits for `send_message` now carries `event: 'send_message'`. This covers an invalid type, empty or oversized text, not being a member, a bad or deleted reply target and server failures. The frontend shows each one as an error toast.
+
+### Logout only on 401
+
+`apiRequest` (`frontend/js/auth.js`) logs out only on `401`, and only when a token was sent, so a wrong password on the login page isn't treated as an expired session. A `403` is returned to the caller like any other error. The auth middleware used to answer an invalid or expired token with `403`, and a token for a deleted user with `404`. Both now return `401`. That was the only case that relied on the old 403-logout.
+
+### Endpoints and events
+
+| Change | Details |
+|---|---|
+| `POST /api/messages`, `PATCH /api/messages/:id`, `POST /api/messages/forward` | Text stored raw via `cleanMessageText`. `400` for empty, non-string or over 5000 characters. |
+| `POST /api/chats` | `chatName` stored raw (control characters stripped) |
+| `DELETE /api/messages/:id` | Non-member: `404`. Broadcasts `message_deleted` when deleted for everyone. |
+| `GET /api/chats` | `lastMessage.content` is `null` and `lastMessage.deleted` is set for messages deleted for everyone |
+| `GET /api/messages/chat/:id/pinned` | Leaves out messages deleted for everyone |
+| Any authenticated endpoint | Invalid/expired token or deleted user: `401` (was `403` / `404`) |
+| `message_deleted` (server → `chat_<id>`) | `{ messageId, chatId, deletedForEveryone: true }` |
+| `error` (server → socket) | `{ event: 'send_message', message }` |
+
+No new env variables or npm packages. `frontend/sw.js` `CACHE_VERSION` is now `frichat-shell-v3`.
+
+### Manual test checklist
+
+- [ ] Send `<script>alert(1)</script>` and `<img src=x onerror=alert(1)>` with the socket connected, and again with the backend's socket blocked (REST fallback). Both show as literal text, with no alert, for sender and receiver.
+- [ ] Edit a message to one of the payloads, and forward one. It shows as text in the thread, in quotes, in the sidebar preview, in the starred panel and when pinned.
+- [ ] Send `Tom & Jerry "1/2"` over REST and reload. It shows exactly as typed, not `&amp;`.
+- [ ] Create a group named `A & B <test>`. The sidebar, header and chat info show it as typed.
+- [ ] A and B in one chat: A deletes a fresh message for everyone. B sees the placeholder live without reloading. B's reply to it switches to *Original message deleted*. The sidebar preview updates.
+- [ ] B has the reply bar open on a message that A then deletes. The bar closes and a toast says so.
+- [ ] Reply via the socket to a message that was just deleted (open two tabs and delete in the other). An error toast appears and nothing is sent.
+- [ ] Trigger a `403` (for example, `PATCH` someone else's message from devtools with `apiRequest`). You stay logged in. Corrupt the token in localStorage and reload: you are sent to the login page.
+- [ ] A wrong password on the login page shows the error message and doesn't reload the page
+- [ ] Dark theme and 360px width: toasts and the deleted placeholder stay readable
+
+### Tests
+
+`test/textRule.test.js` (both fake drivers) covers:
+- `cleanMessageText`
+- `<script>` and `<img onerror>` payloads stored raw through REST send, socket `send_message`, edit and forward
+- the real frontend `escapeHtml` and message renderers (loaded from `frontend/js`) showing those payloads as inert text in bodies, quotes, file names and reactions
+- the un-escape script's detection, including the run-twice risk
+- the `message_deleted` broadcast and its authorization
+- socket error payloads
+- `401` from the auth middleware
+- `apiRequest` logging out only on `401`
+
+### Known limitations
+
+- Profile full names are still escaped on write (and decoded for push titles). Unifying them is left for later.
+- Socket `send_message` still accepts a client-supplied `fileData` record (pre-existing, unrelated to text)
+- Bidi/format characters (for example U+202E) aren't stripped. Only control characters are.
+- The un-escape script was dry-run on PostgreSQL only, not on a live MySQL server
 
 ---
 

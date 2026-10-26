@@ -305,7 +305,7 @@ function renderMessagesHtml(messages) {
 function renderMessageHtml(message) {
     const currentUser = getCurrentUser();
     const isSent = message.sender_id === currentUser.userId;
-    const senderInitial = (message.full_name || message.username).charAt(0).toUpperCase();
+    const senderInitial = escapeHtml((message.full_name || message.username).charAt(0).toUpperCase());
     
     // Parse reactions if they exist
     let reactions = [];
@@ -539,9 +539,10 @@ function renderMessageReactions(groupedReactions, messageId) {
         
         return `
             <span class="reaction ${hasUserReacted ? 'user-reacted' : ''}" 
-                  onclick="toggleReaction(${messageId}, '${emoji}')"
-                  title="${users.map(u => u.username).join(', ')}">
-                ${emoji} ${users.length}
+                  data-emoji="${escapeHtml(emoji)}"
+                  onclick="toggleReaction(${messageId}, this.dataset.emoji)"
+                  title="${escapeHtml(users.map(u => u.username).join(', '))}">
+                ${escapeHtml(emoji)} ${users.length}
             </span>
         `;
     }).join('');

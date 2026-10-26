@@ -24,6 +24,9 @@ const { startScheduler } = require('./utils/scheduler');
 const { markChatRead, recordNewMessage } = require('./utils/chatState');
 const { notifyNewMessage } = require('./utils/push');
 const { getMessageById, checkReplyTarget } = require('./utils/messageQueries');
+const { cleanMessageText } = require('./utils/messageText');
+
+const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
 // Initialize Express app
 const app = express();
@@ -197,29 +200,43 @@ io.on('connection', (socket) => {
      */
     socket.on('send_message', async (data) => {
         try {
-            const { chatId, messageType, content, fileData } = data;
+            data = data || {};
+            const { chatId, messageType, fileData } = data;
             const senderId = socket.userId;
+
+            if (!MESSAGE_TYPES.includes(messageType)) {
+                socket.emit('error', { event: 'send_message', message: 'Invalid message type' });
+                return;
+            }
+
+            // Stored raw (clients escape on render), same rule as every other send path
+            const cleaned = cleanMessageText(data.content, { required: messageType === 'text' });
+            if (!cleaned.ok) {
+                socket.emit('error', { event: 'send_message', message: cleaned.error });
+                return;
+            }
+            const content = cleaned.text;
 
             // Optional quote; must be a positive integer id in this same chat
             let replyToMessageId = null;
             if (data.replyToMessageId !== undefined && data.replyToMessageId !== null) {
                 replyToMessageId = Number(data.replyToMessageId);
                 if (!Number.isInteger(replyToMessageId) || replyToMessageId < 1) {
-                    socket.emit('error', { message: 'Invalid reply target' });
+                    socket.emit('error', { event: 'send_message', message: 'Invalid reply target' });
                     return;
                 }
             }
 
             // Verify sender is a member
             if (!(await isChatMember(chatId, senderId))) {
-                socket.emit('error', { message: 'Access denied' });
+                socket.emit('error', { event: 'send_message', message: 'Access denied' });
                 return;
             }
 
             if (replyToMessageId) {
                 const replyError = await checkReplyTarget(chatId, replyToMessageId);
                 if (replyError) {
-                    socket.emit('error', { message: replyError });
+                    socket.emit('error', { event: 'send_message', message: replyError });
                     return;
                 }
             }
@@ -262,7 +279,7 @@ io.on('connection', (socket) => {
 
             if (!message) {
                 console.error('Failed to retrieve message after insert:', messageId);
-                socket.emit('error', { message: 'Message created but could not be retrieved' });
+                socket.emit('error', { event: 'send_message', message: 'Message created but could not be retrieved' });
                 return;
             }
 
@@ -274,7 +291,7 @@ io.on('connection', (socket) => {
 
         } catch (error) {
             console.error('Send message error:', error);
-            socket.emit('error', { message: 'Failed to send message' });
+            socket.emit('error', { event: 'send_message', message: 'Failed to send message' });
         }
     });
 

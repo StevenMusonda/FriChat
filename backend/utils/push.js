@@ -96,7 +96,8 @@ async function deleteSubscription(userId, endpoint) {
 }
 
 /**
- * Stored text is HTML-escaped (sanitizeHtml); notifications show plain text
+ * Profile names are still HTML-escaped on write (sanitizeHtml in authController); notifications
+ * show plain text. Message text and chat names are stored raw and must NOT go through this.
  */
 function decodeEntities(text) {
     return text
@@ -114,7 +115,8 @@ function decodeEntities(text) {
 function buildPreview(message) {
     if (MEDIA_PREVIEWS[message.message_type]) return MEDIA_PREVIEWS[message.message_type];
 
-    const text = decodeEntities(String(message.content || '')).replace(/\s+/g, ' ').trim();
+    // Raw text (utils/messageText.js); the notification API shows it as plain text
+    const text = String(message.content || '').replace(/\s+/g, ' ').trim();
     if (!text) return 'New message';
     return text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH - 1)}…` : text;
 }
@@ -241,7 +243,7 @@ async function notifyNewMessage(io, message) {
             chatId: message.chat_id,
             messageId: message.id,
             senderName,
-            title: isGroup ? decodeEntities(String(chat.chat_name)) : senderName,
+            title: isGroup ? String(chat.chat_name) : senderName,
             body: isGroup ? `${senderName}: ${preview}` : preview,
             url: `chat.html?chat=${message.chat_id}`,
             badge: unreadTotals[subscription.user_id] || 0
