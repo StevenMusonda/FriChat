@@ -25,6 +25,7 @@ const { markChatRead, recordNewMessage } = require('./utils/chatState');
 const { notifyNewMessage } = require('./utils/push');
 const { getMessageById, checkReplyTarget } = require('./utils/messageQueries');
 const { cleanMessageText } = require('./utils/messageText');
+const { claimUploadedFile, releaseUploadedFile, guardStaticPath } = require('./utils/uploads');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
@@ -58,11 +59,12 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve uploaded files with CORS headers
+// Serve uploaded files with CORS headers; never anything that resolves outside the uploads folder
+const UPLOADS_STATIC_ROOT = path.join(__dirname, 'uploads');
 app.use('/uploads', cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
     credentials: true
-}), express.static(path.join(__dirname, 'uploads')));
+}), guardStaticPath(UPLOADS_STATIC_ROOT), express.static(UPLOADS_STATIC_ROOT));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -201,7 +203,8 @@ io.on('connection', (socket) => {
     socket.on('send_message', async (data) => {
         try {
             data = data || {};
-            const { chatId, messageType, fileData } = data;
+            const { chatId } = data;
+            let { messageType } = data;
             const senderId = socket.userId;
 
             if (!MESSAGE_TYPES.includes(messageType)) {
@@ -209,8 +212,19 @@ io.on('connection', (socket) => {
                 return;
             }
 
+            // Files are referenced only by the id POST /api/messages/upload returned; no client-side file records
+            if (data.fileData !== undefined && data.fileData !== null) {
+                socket.emit('error', { event: 'send_message', message: 'Attach files by fileId from the upload endpoint' });
+                return;
+            }
+            const hasFile = data.fileId !== undefined && data.fileId !== null;
+            if (!hasFile && messageType !== 'text') {
+                socket.emit('error', { event: 'send_message', message: 'A file is required for this message type' });
+                return;
+            }
+
             // Stored raw (clients escape on render), same rule as every other send path
-            const cleaned = cleanMessageText(data.content, { required: messageType === 'text' });
+            const cleaned = cleanMessageText(data.content, { required: !hasFile });
             if (!cleaned.ok) {
                 socket.emit('error', { event: 'send_message', message: cleaned.error });
                 return;
@@ -241,29 +255,29 @@ io.on('connection', (socket) => {
                 }
             }
 
+            // Claimed last, so a send that fails a check above leaves the upload usable
             let fileId = null;
-
-            // Handle file if present
-            if (fileData) {
-                fileId = await insertAndGetId(
-                    'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [
-                        fileData.originalName,
-                        fileData.storedName,
-                        fileData.fileType,
-                        fileData.fileSize,
-                        fileData.mimeType,
-                        fileData.uploadPath,
-                        senderId
-                    ]
-                );
+            if (hasFile) {
+                const claim = await claimUploadedFile(data.fileId, senderId);
+                if (claim.error) {
+                    socket.emit('error', { event: 'send_message', message: claim.error });
+                    return;
+                }
+                fileId = claim.file.id;
+                messageType = claim.file.messageType; // from the server's upload record, not the client
             }
 
             // Insert message
-            const messageId = await insertAndGetId(
-                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [chatId, senderId, messageType, content, fileId, replyToMessageId, 'sent']
-            );
+            let messageId;
+            try {
+                messageId = await insertAndGetId(
+                    'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [chatId, senderId, messageType, content, fileId, replyToMessageId, 'sent']
+                );
+            } catch (error) {
+                if (fileId) await releaseUploadedFile(fileId);
+                throw error;
+            }
 
             // Update chat timestamp
             await executeQuery(

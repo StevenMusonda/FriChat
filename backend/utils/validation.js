@@ -95,13 +95,27 @@ const validateMessage = [
         .optional({ values: 'null' })
         .isInt({ min: 1 })
         .withMessage('Invalid reply target')
+        .toInt(),
+
+    // Id from POST /api/messages/upload; the server takes every file detail from its own record
+    body('fileId')
+        .optional({ values: 'null' })
+        .isInt({ min: 1 })
+        .withMessage('Invalid file reference')
         .toInt()
 ];
 
 /**
- * Optional reply target on a file upload (multipart field)
+ * Optional chat and reply target on a file upload (multipart fields).
+ * No chatId = upload only; the response's fileId is attached by a later send.
  */
 const validateUploadReply = [
+    body('chatId')
+        .optional({ values: 'falsy' })
+        .isInt({ min: 1 })
+        .withMessage('Valid chat ID is required')
+        .toInt(),
+
     body('replyToMessageId')
         .optional({ values: 'falsy' })
         .isInt({ min: 1 })

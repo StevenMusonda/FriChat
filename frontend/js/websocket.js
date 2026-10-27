@@ -157,8 +157,9 @@ function joinChat(chatId) {
 
 /**
  * Send a message via WebSocket
+ * fileId: the id POST /messages/upload (without chatId) returned; the server never accepts file details
  */
-function sendMessageViaSocket(chatId, messageType, content, fileData = null, replyToMessageId = null) {
+function sendMessageViaSocket(chatId, messageType, content, fileId = null, replyToMessageId = null) {
     if (!socket) {
         console.error('WebSocket not initialized');
         return;
@@ -170,7 +171,7 @@ function sendMessageViaSocket(chatId, messageType, content, fileData = null, rep
         senderId: user.userId,
         messageType: messageType,
         content: content,
-        fileData: fileData,
+        fileId: fileId,
         replyToMessageId: replyToMessageId
     });
 }

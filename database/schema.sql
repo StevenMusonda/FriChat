@@ -105,6 +105,7 @@ CREATE TABLE files (
     upload_path VARCHAR(500) NOT NULL,
     uploaded_by INT,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    attached_at TIMESTAMP NULL DEFAULT NULL, -- NULL = uploaded, not attached to a message yet
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_uploaded_by (uploaded_by)
 );

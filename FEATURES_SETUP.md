@@ -487,9 +487,74 @@ No new env variables or npm packages. `frontend/sw.js` `CACHE_VERSION` is now `f
 ### Known limitations
 
 - Profile full names are still escaped on write (and decoded for push titles). Unifying them is left for later.
-- Socket `send_message` still accepts a client-supplied `fileData` record (pre-existing, unrelated to text)
+- ~~Socket `send_message` still accepts a client-supplied `fileData` record~~ (fixed in the next section)
 - Bidi/format characters (for example U+202E) aren't stripped. Only control characters are.
 - The un-escape script was dry-run on PostgreSQL only, not on a live MySQL server
+
+
+## Security fix: files are attached by upload id only
+
+Before this fix, socket `send_message` accepted a `fileData` record from the client and inserted a `files` row with whatever `uploadPath`, name, mime type and size the client sent. A message could therefore point at any path on the server, for example `../../.env`.
+
+Now:
+- A client can only reference a file by the `fileId` returned by `POST /api/messages/upload`.
+- On every send, the server checks that the file row exists, was uploaded by the same user, is not attached to a message yet, and has a stored path that resolves inside the uploads folder. A conditional `UPDATE` then claims it, so the same id can't be attached twice even if two sends race.
+- The message type (`image`/`video`/`file`) comes from the mime type the server recorded at upload. Path, name and size also come only from that row.
+- `fileData` on `send_message` is rejected outright.
+- These rules apply to socket `send_message` and to `POST /api/messages`.
+- Forwarding still reuses the source message's file. The source file row must exist and have a path inside the uploads folder, and the copy's type follows the stored mime type.
+- `/uploads/*` requests are decoded and resolved first, and anything that resolves outside the uploads folder gets a `404` before `express.static` sees it. This blocks encoded `../`, backslashes and NUL.
+- No code path deletes uploaded files today. If one is added, check it with `resolveUploadPath()` from `backend/utils/uploads.js`.
+
+### Migration
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_file_attachment_claim.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_file_attachment_claim_postgresql.sql
+```
+
+The migration adds `files.attached_at` and marks every existing row as attached, so no older file can be claimed by a new send. Run it before starting the new code: uploads and file sends fail until the column exists.
+
+### Endpoints and events
+
+| Endpoint / event | Change |
+|---|---|
+| `POST /api/messages/upload` | Without `chatId`, the file is only stored and the response is `201 { data: { fileId, messageType, originalName, fileSize } }`. With `chatId`, it uploads and sends as before. Now rate limited to 30 per minute per IP. |
+| `POST /api/messages` | Optional `fileId` (integer). Without it, `messageType` must be `text`. |
+| `send_message` (socket) | `fileData` is rejected. Optional `fileId`. Without it, `messageType` must be `text`. Errors arrive as `error { event: 'send_message', message }`. |
+| `POST /api/messages/forward` | Refuses sources whose file row is missing or points outside the uploads folder (`400`) |
+
+There are no new env variables or npm packages. `UPLOAD_PATH` (already in `.env.example`) is the folder the containment check uses. It is resolved against the server's working directory, the same way multer uses it.
+
+### Manual test checklist
+
+- [ ] Send an image and a PDF from the UI. Both show for the sender and the receiver, as before.
+- [ ] In devtools: `socket.emit('send_message', { chatId: <id>, messageType: 'file', fileData: { uploadPath: '../../.env' } })`. An error toast appears and nothing is sent.
+- [ ] Upload with `chatId` left out, using `fetch` with a `FormData` that has only `file`. The response contains a `fileId`. Send `send_message` with `{ chatId, messageType: 'text', fileId }`. The file message appears, typed from the real file.
+- [ ] Send the same `fileId` again. The error says "File is already attached to a message".
+- [ ] As user B, send user A's unattached `fileId`. The error says "File not found".
+- [ ] Open `http://localhost:3000/uploads/..%2f..%2f.env` and `/uploads/..%5c.env`. Both return `404`.
+- [ ] Forward an image message. It arrives as an image.
+
+### Tests
+
+`test/fileAttach.test.js` (both fake drivers) covers:
+- forged `fileData`, another user's id, an already used id, an outside path, and bad ids, on the socket and over REST
+- upload-only followed by send, including a second send of the same id
+- upload with `chatId` stored as attached
+- `resolveUploadPath`
+- the static guard, as a unit test and over real HTTP against `server.js`
+
+`test/messageActions.test.js` adds a forward of an attachment whose stored path is outside the uploads folder.
+
+### Known limitations
+
+- Files uploaded without a `chatId` and never sent stay on disk and in `files`. Nothing cleans them up yet.
+- Rejected uploads (for example, from a non-member) are also left on disk.
+- The static route serves `backend/uploads`, while multer writes to `UPLOAD_PATH` relative to the working directory. These match when the server runs from `backend/` with the default setting, as `start.bat` and `npm start` do. The mismatch existed before this fix and is unchanged.
+- The frontend still uploads and sends in one request. Upload-only plus `fileId` is available, but the UI doesn't use it yet.
 
 ---
 

@@ -23,6 +23,7 @@ function baseMessages() {
         13: { id: 13, chat_id: MY_CHAT, sender_id: ME, message_type: 'text', content: 'old', file_id: null, within_window: 0 },
         14: { id: 14, chat_id: MY_CHAT, sender_id: ME, message_type: 'text', content: 'gone', file_id: null, within_window: 1, deleted_for_everyone: 1 },
         15: { id: 15, chat_id: MY_CHAT, sender_id: ME, message_type: 'text', content: 'fwd', file_id: null, within_window: 1, is_forwarded: 1 },
+        16: { id: 16, chat_id: MY_CHAT, sender_id: ME, message_type: 'image', content: null, file_id: 78, file_name: '.env', within_window: 1 },
         20: { id: 20, chat_id: FOREIGN_CHAT, sender_id: OTHER, message_type: 'text', content: 'secret', file_id: null, within_window: 1 }
     };
 }
@@ -36,6 +37,10 @@ function createWorld(dbType) {
         messages: baseMessages(),
         memberships: new Set([MY_CHAT, SECOND_CHAT]),
         stars: new Set(),
+        files: {
+            77: { id: 77, mime_type: 'image/png', upload_path: path.join('uploads', 'images', 'cat.png') },
+            78: { id: 78, mime_type: 'image/png', upload_path: '../../.env' } // written from a client path before the fix
+        },
         nextId: 100
     };
     const bool = (v) => pg ? !!v : (v ? 1 : 0);
@@ -103,10 +108,16 @@ function createWorld(dbType) {
         }
 
         // Forward
-        if (/^SELECT m.id, m.message_type, m.content, m.file_id, m.deleted_for_everyone FROM messages m JOIN group_members gm/.test(sql)) {
+        if (/^SELECT m.id, m.message_type, m.content, m.file_id, m.deleted_for_everyone, f.id AS file_row_id, f.mime_type AS file_mime_type, f.upload_path AS file_upload_path FROM messages m JOIN group_members gm/.test(sql)) {
             return params.slice(2).map(id => world.messages[id])
                 .filter(m => m && isMember(m.chat_id))
-                .map(m => ({ id: m.id, message_type: m.message_type, content: m.content, file_id: m.file_id, deleted_for_everyone: bool(m.deleted_for_everyone) }));
+                .map(m => {
+                    const f = m.file_id ? world.files[m.file_id] : null;
+                    return {
+                        id: m.id, message_type: m.message_type, content: m.content, file_id: m.file_id, deleted_for_everyone: bool(m.deleted_for_everyone),
+                        file_row_id: f ? f.id : null, file_mime_type: f ? f.mime_type : null, file_upload_path: f ? f.upload_path : null
+                    };
+                });
         }
 
         // Stars
@@ -362,6 +373,14 @@ for (const dbType of ['mysql', 'postgresql']) {
                 const { controller } = setup(dbType);
                 const { res } = await call(controller.forwardMessages, { body: { messageIds: [10, 20], chatIds: [SECOND_CHAT] } });
                 assert.equal(res.statusCode, 404);
+            });
+
+            test('an attachment whose stored path leaves the uploads folder is not forwarded', async () => {
+                const { world, controller } = setup(dbType);
+                const { res, io } = await call(controller.forwardMessages, { body: { messageIds: [16], chatIds: [SECOND_CHAT] } });
+                assert.equal(res.statusCode, 400);
+                assert.equal(io.emitted.length, 0);
+                assert.equal(world.nextId, 100);
             });
 
             test('deleted messages cannot be forwarded', async () => {

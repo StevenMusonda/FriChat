@@ -8,6 +8,7 @@ const { cleanMessageText } = require('../utils/messageText');
 const path = require('path');
 const { recordNewMessage } = require('../utils/chatState');
 const { notifyNewMessage } = require('../utils/push');
+const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
 const {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
@@ -142,16 +143,25 @@ async function getMessages(req, res) {
 }
 
 /**
- * Send a text message
+ * Send a text message, or attach a file uploaded earlier (body.fileId from POST /upload without chatId)
  */
 async function sendMessage(req, res) {
     try {
-        const { chatId, content, messageType = 'text' } = req.body;
+        const { chatId, content } = req.body;
+        let { messageType = 'text' } = req.body;
         const replyToMessageId = req.body.replyToMessageId || null;
         const userId = req.user.id;
+        const hasFile = req.body.fileId !== undefined && req.body.fileId !== null;
+
+        if (!hasFile && messageType !== 'text') {
+            return res.status(400).json({
+                success: false,
+                message: 'A file is required for this message type'
+            });
+        }
 
         // Stored raw (clients escape on render), same rule as every other send path
-        const cleaned = cleanMessageText(content, { required: messageType === 'text' });
+        const cleaned = cleanMessageText(content, { required: !hasFile });
         if (!cleaned.ok) {
             return res.status(400).json({
                 success: false,
@@ -182,11 +192,31 @@ async function sendMessage(req, res) {
             }
         }
 
+        // Claimed last, so a send that fails a check above leaves the upload usable
+        let fileId = null;
+        if (hasFile) {
+            const claim = await claimUploadedFile(req.body.fileId, userId);
+            if (claim.error) {
+                return res.status(400).json({
+                    success: false,
+                    message: claim.error
+                });
+            }
+            fileId = claim.file.id;
+            messageType = claim.file.messageType; // from the server's upload record, not the client
+        }
+
         // Insert message
-        const messageId = await insertAndGetId(
-            'INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [chatId, userId, messageType, cleaned.text, replyToMessageId, 'sent']
-        );
+        let messageId;
+        try {
+            messageId = await insertAndGetId(
+                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [chatId, userId, messageType, cleaned.text, fileId, replyToMessageId, 'sent']
+            );
+        } catch (error) {
+            if (fileId) await releaseUploadedFile(fileId);
+            throw error;
+        }
 
         // Update chat updated_at
         await executeQuery(
@@ -224,7 +254,9 @@ async function sendMessage(req, res) {
 }
 
 /**
- * Upload and send a file/image/video message
+ * Upload and send a file/image/video message.
+ * Without chatId the file is only stored: the response carries its fileId, which a later
+ * send (REST or socket) attaches to a message. Every file field comes from multer, never the client.
  */
 async function uploadFile(req, res) {
     try {
@@ -238,6 +270,32 @@ async function uploadFile(req, res) {
         const { chatId } = req.body;
         const replyToMessageId = req.body.replyToMessageId || null;
         const userId = req.user.id;
+
+        if (!chatId) {
+            const fileId = await insertAndGetId(
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    req.file.originalname,
+                    req.file.filename,
+                    path.extname(req.file.originalname),
+                    req.file.size,
+                    req.file.mimetype,
+                    req.file.path,
+                    userId
+                ]
+            );
+
+            return res.status(201).json({
+                success: true,
+                message: 'File uploaded',
+                data: {
+                    fileId,
+                    messageType: messageTypeForMime(req.file.mimetype),
+                    originalName: req.file.originalname,
+                    fileSize: req.file.size
+                }
+            });
+        }
 
         // Check if user is a member of this chat
         const membership = await queryOne(
@@ -263,18 +321,13 @@ async function uploadFile(req, res) {
         }
 
         // Determine message type based on file mimetype
-        let messageType = 'file';
-        if (req.file.mimetype.startsWith('image/')) {
-            messageType = 'image';
-        } else if (req.file.mimetype.startsWith('video/')) {
-            messageType = 'video';
-        }
+        const messageType = messageTypeForMime(req.file.mimetype);
 
         // Save file metadata to database
         let fileId;
         if (process.env.DB_TYPE === 'postgresql') {
             const fileResult = await executeQuery(
-                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) RETURNING id',
                 [
                     req.file.originalname,
                     req.file.filename,
@@ -288,7 +341,7 @@ async function uploadFile(req, res) {
             fileId = fileResult[0]?.id;
         } else {
             const fileResult = await executeQuery(
-                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
                 [
                     req.file.originalname,
                     req.file.filename,
@@ -899,9 +952,11 @@ async function forwardMessages(req, res) {
 
         // Only messages the user can currently see: member of their chat, not deleted for them
         const sources = await executeQuery(`
-            SELECT m.id, m.message_type, m.content, m.file_id, m.deleted_for_everyone
+            SELECT m.id, m.message_type, m.content, m.file_id, m.deleted_for_everyone,
+                   f.id AS file_row_id, f.mime_type AS file_mime_type, f.upload_path AS file_upload_path
             FROM messages m
             JOIN group_members gm ON gm.chat_id = m.chat_id AND gm.user_id = ?
+            LEFT JOIN files f ON f.id = m.file_id
             LEFT JOIN deleted_messages dm ON dm.message_id = m.id AND dm.user_id = ?
             WHERE m.id IN (${messageIds.map(() => '?').join(', ')})
             AND dm.id IS NULL
@@ -921,12 +976,19 @@ async function forwardMessages(req, res) {
             });
         }
 
-        // A file message whose file row is gone has nothing left to forward
-        if (sources.some(m => m.message_type !== 'text' && !m.file_id)) {
+        // A file message whose file row is gone (or points outside the uploads folder) has nothing to forward
+        if (sources.some(m => (m.message_type !== 'text' || m.file_id) && (!m.file_row_id || !resolveUploadPath(m.file_upload_path)))) {
             return res.status(400).json({
                 success: false,
                 message: 'One or more attachments are no longer available'
             });
+        }
+
+        // The copy's type follows the server's file record, not whatever the original send claimed
+        for (const source of sources) {
+            if (source.file_id) {
+                source.message_type = messageTypeForMime(source.file_mime_type);
+            }
         }
 
         const memberships = await executeQuery(

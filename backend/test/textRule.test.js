@@ -74,7 +74,7 @@ function createWorld(dbType) {
         }
 
         // Forward
-        if (/^SELECT m.id, m.message_type, m.content, m.file_id, m.deleted_for_everyone FROM messages m JOIN group_members gm/.test(sql)) {
+        if (/^SELECT m.id, m.message_type, m.content, m.file_id, m.deleted_for_everyone, f.id AS file_row_id, f.mime_type AS file_mime_type, f.upload_path AS file_upload_path FROM messages m JOIN group_members gm/.test(sql)) {
             return params.slice(2).map(id => world.messages[id])
                 .filter(m => m && isMember(m.chat_id))
                 .map(m => ({ id: m.id, message_type: m.message_type, content: m.content, file_id: m.file_id || null, deleted_for_everyone: bool(m.deleted_for_everyone) }));

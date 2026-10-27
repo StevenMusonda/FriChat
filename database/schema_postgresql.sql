@@ -115,7 +115,8 @@ CREATE TABLE files (
     mime_type VARCHAR(100),
     upload_path VARCHAR(500) NOT NULL,
     uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    attached_at TIMESTAMP NULL -- NULL = uploaded, not attached to a message yet
 );
 
 CREATE INDEX idx_uploaded_by ON files(uploaded_by);

@@ -11,7 +11,6 @@ const { setupFakeDb, fakeRes, fakeIo, stubModule } = require('./helpers/fakeDb')
 const CHAT_ID = 5;
 const SENDER_ID = 1;
 const NEW_MESSAGE_ID = 42;
-const NEW_FILE_ID = 7;
 
 // Answers the queries a send makes, the way each database would
 function sendHandler(dbType) {
@@ -21,7 +20,6 @@ function sendHandler(dbType) {
 
     return (sql, params) => {
         if (/^SELECT id FROM group_members WHERE chat_id/.test(sql)) return [{ id: 1 }];
-        if (/^INSERT INTO files/.test(sql)) return inserted(NEW_FILE_ID, sql);
         if (/^INSERT INTO messages/.test(sql)) return inserted(NEW_MESSAGE_ID, sql);
         if (/^UPDATE/.test(sql)) return written();
         if (/^SELECT last_read_message_id FROM group_members/.test(sql)) return [{ last_read_message_id: NEW_MESSAGE_ID - 1 }];
@@ -116,19 +114,7 @@ for (const dbType of ['mysql', 'postgresql']) {
                 assert.equal(pushed[0].data.id, NEW_MESSAGE_ID);
             });
 
-            test('file message stores the file id on the message', async () => {
-                const { calls, emitted, socketErrors } = await sendViaSocket({
-                    chatId: CHAT_ID,
-                    messageType: 'file',
-                    content: null,
-                    fileData: { originalName: 'a.pdf', storedName: 'x.pdf', fileType: '.pdf', fileSize: 1, mimeType: 'application/pdf', uploadPath: 'uploads/x.pdf' }
-                });
-
-                assert.deepEqual(socketErrors, []);
-                const messageInsert = calls.find(c => /^INSERT INTO messages/.test(c.sql));
-                assert.equal(messageInsert.params[4], NEW_FILE_ID);
-                assert.equal(emitted.filter(e => e.event === 'new_message').length, 1);
-            });
+            // File messages (by fileId only) are covered in fileAttach.test.js
         });
     });
 }

@@ -41,10 +41,17 @@ router.get('/starred', messageActionLimiter, validateStarredQuery, checkValidati
 // Forward one or more messages to one or more chats
 router.post('/forward', forwardLimiter, validateForward, checkValidation, messageController.forwardMessages);
 
+// Uploads write to disk, so they get their own budget (checked before multer stores anything)
+const uploadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: 'Too many uploads. Please wait a moment.'
+});
+
 // Message routes
 router.get('/chat/:chatId', messageController.getMessages);
 router.post('/', validateMessage, checkValidation, messageController.sendMessage);
-router.post('/upload', upload.single('file'), handleUploadError, validateUploadReply, checkValidation, messageController.uploadFile);
+router.post('/upload', uploadLimiter, upload.single('file'), handleUploadError, validateUploadReply, checkValidation, messageController.uploadFile);
 router.patch('/:messageId/status', messageController.updateMessageStatus);
 
 // Edit a text message (sender only, within the edit window)
