@@ -1,6 +1,8 @@
 /**
  * Phase 5: invite links, join approval, group settings, announcement-only mode,
- * leaving as the last admin, member tags and group avatars (both fake drivers).
+ * leaving as the last admin, member tags and group avatars, plus the phase 6 follow-ups: bans,
+ * admin rights, join-request limits and decision pushes, email verification gates, blocking
+ * and socket rate limits (both fake drivers).
  */
 
 const { test, describe } = require('node:test');
@@ -42,6 +44,8 @@ function createWorld(dbType) {
         ],
         invites: {},
         requests: {},
+        bans: [], // { chat_id, user_id, banned_by }
+        blocks: [], // { blocker_id, blocked_id }
         nextId: 100,
         messagesInserted: 0,
         deletedChatsCleared: []
@@ -196,10 +200,93 @@ function createWorld(dbType) {
             return written(1);
         }
 
+        // --- bans and blocks (phase 6) ---
+        if (/^SELECT id FROM group_bans WHERE chat_id = \? AND user_id = \?$/.test(sql)) {
+            const i = world.bans.findIndex(b => b.chat_id === Number(params[0]) && b.user_id === Number(params[1]));
+            return i === -1 ? [] : [{ id: i + 1 }];
+        }
+        if (/^INSERT INTO group_bans \(chat_id, user_id, banned_by\) VALUES \(\?, \?, \?\)$/.test(sql)) {
+            world.bans.push({ chat_id: Number(params[0]), user_id: Number(params[1]), banned_by: params[2] });
+            return inserted(world.bans.length);
+        }
+        if (/^DELETE FROM group_bans WHERE id = \?$/.test(sql)) {
+            world.bans.splice(Number(params[0]) - 1, 1);
+            return written(1);
+        }
+        if (/^SELECT b.user_id, b.created_at, u.username, u.full_name, u.avatar_url, by_user.username AS banned_by_username FROM group_bans b/.test(sql)) {
+            return world.bans.filter(b => b.chat_id === Number(params[0]))
+                .map(b => ({ user_id: b.user_id, created_at: 'now', username: USERS[b.user_id], full_name: null, avatar_url: null, banned_by_username: USERS[b.banned_by] }));
+        }
+        if (/^DELETE FROM chat_join_requests WHERE chat_id = \? AND user_id = \?$/.test(sql)) {
+            for (const [id, r] of Object.entries(world.requests)) {
+                if (r.chat_id === Number(params[0]) && r.user_id === Number(params[1])) delete world.requests[id];
+            }
+            return written(1);
+        }
+        if (/^SELECT blocker_id FROM user_blocks WHERE blocked_id = \?$/.test(sql)) {
+            return world.blocks.filter(b => b.blocked_id === Number(params[0])).map(b => ({ blocker_id: b.blocker_id }));
+        }
+        if (/^SELECT blocker_id FROM user_blocks WHERE blocked_id = \? AND blocker_id IN/.test(sql)) {
+            const candidates = params.slice(1).map(Number);
+            return world.blocks.filter(b => b.blocked_id === Number(params[0]) && candidates.includes(b.blocker_id)).map(b => ({ blocker_id: b.blocker_id }));
+        }
+        if (/^SELECT blocker_id FROM user_blocks WHERE \(blocker_id = \? AND blocked_id = \?\) OR \(blocker_id = \? AND blocked_id = \?\) LIMIT 1$/.test(sql)) {
+            const [a, b] = [Number(params[0]), Number(params[1])];
+            const row = world.blocks.find(x => (x.blocker_id === a && x.blocked_id === b) || (x.blocker_id === b && x.blocked_id === a));
+            return row ? [{ blocker_id: row.blocker_id }] : [];
+        }
+        if (/^SELECT ub.blocker_id FROM chats c JOIN group_members gm ON gm.chat_id = c.id AND gm.user_id <> \? JOIN user_blocks ub/.test(sql)) {
+            const [userId, chatId] = [Number(params[0]), Number(params[3])];
+            if (world.chats[chatId].chat_type !== 'direct') return [];
+            const others = world.members.filter(m => m.chat_id === chatId && m.user_id !== userId).map(m => m.user_id);
+            const row = world.blocks.find(x => (x.blocked_id === userId && others.includes(x.blocker_id)) || (x.blocker_id === userId && others.includes(x.blocked_id)));
+            return row ? [{ blocker_id: row.blocker_id }] : [];
+        }
+        if (/^SELECT chat_id FROM group_members WHERE user_id = \?$/.test(sql)) {
+            return world.members.filter(m => m.user_id === Number(params[0])).map(m => ({ chat_id: m.chat_id }));
+        }
+        if (/^SELECT blocker_id, blocked_id FROM user_blocks WHERE blocker_id = \? OR blocked_id = \?$/.test(sql)) {
+            return world.blocks.filter(b => b.blocker_id === Number(params[0]) || b.blocked_id === Number(params[1])).map(b => ({ ...b }));
+        }
+        if (/^SELECT a.chat_id FROM group_members a JOIN group_members b ON b.chat_id = a.chat_id WHERE a.user_id = \? AND b.user_id = \? LIMIT 1$/.test(sql)) {
+            const shared = world.members.find(a => a.user_id === Number(params[0]) && world.members.some(b => b.chat_id === a.chat_id && b.user_id === Number(params[1])));
+            return shared ? [{ chat_id: shared.chat_id }] : [];
+        }
+        if (/^SELECT c.id FROM chats c JOIN group_members gm1 ON c.id = gm1.chat_id JOIN group_members gm2 ON c.id = gm2.chat_id WHERE c.chat_type = 'direct' AND gm1.user_id = \? AND gm2.user_id = \?$/.test(sql)) {
+            const chat = Object.values(world.chats).find(c => c.chat_type === 'direct' && member(c.id, params[0]) && member(c.id, params[1]));
+            return chat ? [{ id: chat.id }] : [];
+        }
+        if (/^INSERT INTO chats \(chat_type, chat_name, created_by\) VALUES \(\?, \?, \?\)( RETURNING id)?$/.test(sql)) {
+            const id = ++world.nextId;
+            world.chats[id] = { id, chat_type: params[0], chat_name: params[1], description: null, avatar_url: null, approve_new_members: false, announcement_only: false };
+            world.chatsCreated = (world.chatsCreated || 0) + 1;
+            return inserted(id);
+        }
+        if (/^INSERT INTO group_members \(chat_id, user_id, role\) VALUES \(\?, \?, \?\)$/.test(sql)) {
+            const id = ++world.nextId;
+            world.members.push({ id, chat_id: Number(params[0]), user_id: Number(params[1]), role: params[2], joined_at: id, member_tag: null });
+            return inserted(id);
+        }
+        if (/^SELECT m.id, m.chat_id FROM messages m JOIN group_members gm ON m.chat_id = gm.chat_id WHERE m.id = \? AND gm.user_id = \?$/.test(sql)) {
+            const chatId = (world.messages || {})[params[0]];
+            return chatId && member(chatId, params[1]) ? [{ id: Number(params[0]), chat_id: chatId }] : [];
+        }
+        if (/^UPDATE group_members SET role = 'member' WHERE chat_id = \? AND user_id = \? AND role = 'admin' AND \(SELECT other_admins.n FROM \(SELECT COUNT\(\*\) AS n FROM group_members WHERE chat_id = \? AND role = 'admin' AND user_id <> \?\) AS other_admins\) > 0( RETURNING id)?$/.test(sql)) {
+            const m = member(params[0], params[1]);
+            const others = world.members.filter(x => x.chat_id === Number(params[0]) && x.role === 'admin' && x.user_id !== Number(params[1])).length;
+            const ok = !!m && m.role === 'admin' && others > 0;
+            if (ok) m.role = 'member';
+            return written(ok ? 1 : 0);
+        }
+
         // --- join requests ---
-        if (/^SELECT status FROM chat_join_requests WHERE chat_id = \? AND user_id = \?$/.test(sql)) {
-            const r = Object.values(world.requests).find(x => x.chat_id === Number(params[0]) && x.user_id === Number(params[1]));
-            return r ? [{ status: r.status }] : [];
+        if (/^SELECT status, CASE WHEN decided_at IS NOT NULL AND decided_at > .+ THEN 1 ELSE 0 END AS in_cooldown FROM chat_join_requests WHERE chat_id = \? AND user_id = \?$/.test(sql)) {
+            assert.equal(params[0], 24);
+            const r = Object.values(world.requests).find(x => x.chat_id === Number(params[1]) && x.user_id === Number(params[2]));
+            return r ? [{ status: r.status, in_cooldown: r.status === 'declined' && !r.longAgo ? 1 : 0 }] : [];
+        }
+        if (/^SELECT COUNT\(\*\) AS count FROM chat_join_requests WHERE user_id = \? AND status = 'pending'$/.test(sql)) {
+            return [{ count: Object.values(world.requests).filter(r => r.user_id === Number(params[0]) && r.status === 'pending').length + (world.extraPendingElsewhere || 0) }];
         }
         if (/^SELECT id FROM chat_join_requests WHERE chat_id = \? AND user_id = \?$/.test(sql)) {
             const r = Object.values(world.requests).find(x => x.chat_id === Number(params[0]) && x.user_id === Number(params[1]));
@@ -277,7 +364,7 @@ function roomIo() {
 async function call(handler, req) {
     const res = fakeRes();
     const io = req.io || roomIo();
-    await handler({ params: {}, body: {}, ...req, user: { id: ADMIN, username: 'alice', ...(req.user || {}) }, io }, res);
+    await handler({ params: {}, body: {}, query: {}, ...req, user: { id: ADMIN, username: 'alice', email_verified_at: '2026-10-01 00:00:00', ...(req.user || {}) }, io }, res);
     return { res, io };
 }
 
@@ -338,7 +425,7 @@ for (const dbType of ['mysql', 'postgresql']) {
             assert.equal(preview.res.statusCode, 200);
             assert.deepEqual(preview.res.body.data, {
                 chatId: GROUP, chatName: 'Team', description: 'Our team', avatarUrl: null,
-                memberCount: 3, approvalRequired: false, joinState: 'none'
+                memberCount: 3, approvalRequired: false, joinState: 'none', canRequestAgain: true, emailVerified: true
             });
 
             const { res, io } = await call(controller.joinWithInvite, { params: { code: invite.code }, user: { id: DAVE, username: 'dave' } });
@@ -497,7 +584,7 @@ for (const dbType of ['mysql', 'postgresql']) {
             assert.equal(twice.res.statusCode, 409);
         });
 
-        test('declining notifies the requester and keeps them out; they may ask again', async () => {
+        test('declining notifies the requester and keeps them out; they may ask again after 24 hours', async () => {
             const fake = setup(dbType);
             fake.world.chats[GROUP].approve_new_members = true;
             const groupController = fake.load('controllers/groupController.js');
@@ -514,6 +601,16 @@ for (const dbType of ['mysql', 'postgresql']) {
 
             const state = await call(controller.previewInvite, { params: { code }, user: { id: DAVE } });
             assert.equal(state.res.body.data.joinState, 'declined');
+            assert.equal(state.res.body.data.canRequestAgain, false);
+
+            // Within 24 hours of the decline: refused, and the link isn't used up by the attempt
+            const usesBefore = Object.values(fake.world.invites)[0].use_count;
+            const tooSoon = await call(controller.joinWithInvite, { params: { code }, user: { id: DAVE } });
+            assert.equal(tooSoon.res.statusCode, 429);
+            assert.equal(tooSoon.res.body.code, 'DECLINED_RECENTLY');
+            assert.equal(Object.values(fake.world.invites)[0].use_count, usesBefore);
+
+            fake.world.requests[requestId].longAgo = true;
             const retry = await call(controller.joinWithInvite, { params: { code }, user: { id: DAVE } });
             assert.equal(retry.res.body.data.status, 'pending');
             assert.equal(Object.keys(fake.world.requests).length, 1, 'same row, back to pending');
@@ -791,6 +888,516 @@ for (const dbType of ['mysql', 'postgresql']) {
         });
     });
 }
+
+// ===== Phase 6: bans, admin rights, join-request limits, join-decision pushes, email verification, blocks =====
+
+/**
+ * server.js against this world, with one fake socket for userId (records broadcasts and except() lists)
+ */
+async function connectSocket(fake, userId, rooms = []) {
+    process.env.PORT = '0';
+    stubModule(path.join(__dirname, '..', 'utils', 'scheduler.js'), { startScheduler() {} });
+    const log = console.log;
+    console.log = () => {};
+    const { io } = fake.load('server.js');
+    const recorder = fakeIo();
+    io.to = recorder.to;
+
+    const handlers = {};
+    const sent = [];
+    const broadcasts = [];
+    const target = (room, except = []) => ({
+        except: (rooms2) => target(room, [...except, ...rooms2]),
+        emit: (event, data) => broadcasts.push({ room, except, event, data })
+    });
+    const socket = {
+        id: `socket-${userId}`, userId, username: USERS[userId], sessionId: 7, data: {},
+        rooms: new Set(rooms),
+        join(room) { this.rooms.add(room); },
+        on(event, fn) { handlers[event] = fn; },
+        emit(event, payload) { sent.push({ event, payload }); },
+        to: (room) => target(room),
+        broadcast: target('*'),
+        disconnect() { socket.disconnected = true; }
+    };
+    io.sockets.listeners('connection')[0](socket);
+    const close = async () => {
+        await new Promise(resolve => io.close(() => resolve()));
+        console.log = log;
+    };
+    return { socket, handlers, sent, broadcasts, recorder, close };
+}
+
+for (const dbType of ['mysql', 'postgresql']) {
+    describe(`group bans (${dbType})`, () => {
+        test('Remove and ban: gone from the group, no rejoining by link or by an admin until unbanned', async () => {
+            const fake = setup(dbType);
+            const chats = fake.load('controllers/chatController.js');
+            const groupController = fake.load('controllers/groupController.js');
+            const inviteController = fake.load('controllers/inviteController.js');
+            const { res: created } = await call(groupController.createInvite, { params: { chatId: GROUP }, body: {} });
+            const code = created.body.data.code;
+
+            const removed = await call(chats.removeMember, { params: { chatId: GROUP, userId: BOB }, query: { ban: 'true' } });
+            assert.equal(removed.res.statusCode, 200);
+            assert.equal(removed.res.body.data.banned, true);
+            assert.ok(!fake.world.member(GROUP, BOB));
+            assert.deepEqual(fake.world.bans, [{ chat_id: GROUP, user_id: BOB, banned_by: ADMIN }]);
+            assert.ok(removed.io.emitted.some(e => e.event === 'group_left' && e.room === `user_${BOB}`));
+
+            const preview = await call(inviteController.previewInvite, { params: { code }, user: { id: BOB } });
+            assert.equal(preview.res.body.data.joinState, 'banned');
+
+            const join = await call(inviteController.joinWithInvite, { params: { code }, user: { id: BOB } });
+            assert.equal(join.res.statusCode, 403);
+            assert.equal(join.res.body.code, 'BANNED');
+            assert.equal(Object.values(fake.world.invites)[0].use_count, 0, 'a refused join does not use the link');
+
+            const add = await call(chats.addMember, { params: { chatId: GROUP }, body: { userId: BOB } });
+            assert.equal(add.res.statusCode, 403);
+            assert.equal(add.res.body.code, 'BANNED');
+            assert.ok(!fake.world.member(GROUP, BOB));
+
+            // Only admins see and lift bans
+            const asMember = await call(groupController.listBans, { params: { chatId: GROUP }, user: { id: CAROL } });
+            assert.equal(asMember.res.statusCode, 403);
+            const list = await call(groupController.listBans, { params: { chatId: GROUP } });
+            assert.deepEqual(list.res.body.data.map(b => [b.userId, b.username, b.bannedBy]), [[BOB, 'bob', 'alice']]);
+            const memberUnban = await call(groupController.unbanMember, { params: { chatId: GROUP, userId: BOB }, user: { id: CAROL } });
+            assert.equal(memberUnban.res.statusCode, 403);
+
+            const unban = await call(groupController.unbanMember, { params: { chatId: GROUP, userId: BOB } });
+            assert.equal(unban.res.statusCode, 200);
+            const again = await call(inviteController.joinWithInvite, { params: { code }, user: { id: BOB } });
+            assert.equal(again.res.statusCode, 201);
+            assert.ok(fake.world.member(GROUP, BOB));
+            assert.equal((await call(groupController.unbanMember, { params: { chatId: GROUP, userId: BOB } })).res.statusCode, 404);
+        });
+
+        test('a plain remove does not ban, admins cannot ban themselves, and a banned requester cannot be approved', async () => {
+            const fake = setup(dbType);
+            const chats = fake.load('controllers/chatController.js');
+            const groupController = fake.load('controllers/groupController.js');
+
+            const plain = await call(chats.removeMember, { params: { chatId: GROUP, userId: CAROL }, query: {} });
+            assert.equal(plain.res.statusCode, 200);
+            assert.equal(fake.world.bans.length, 0);
+
+            const self = await call(chats.removeMember, { params: { chatId: GROUP, userId: ADMIN }, query: { ban: 'true' } });
+            assert.equal(self.res.statusCode, 400);
+            assert.ok(fake.world.member(GROUP, ADMIN));
+
+            fake.world.requests[901] = { id: 901, chat_id: GROUP, user_id: DAVE, status: 'pending' };
+            fake.world.bans.push({ chat_id: GROUP, user_id: DAVE, banned_by: ADMIN });
+            const approve = await call(groupController.approveJoinRequest, { params: { chatId: GROUP, requestId: 901 } });
+            assert.equal(approve.res.statusCode, 409);
+            assert.equal(approve.res.body.code, 'BANNED');
+            assert.ok(!fake.world.member(GROUP, DAVE));
+            assert.equal(fake.world.requests[901].status, 'pending');
+        });
+    });
+
+    describe(`admin rights (${dbType})`, () => {
+        test('admins promote and demote; the change reaches the members panel', async () => {
+            const fake = setup(dbType);
+            const groupController = fake.load('controllers/groupController.js');
+
+            const promote = await call(groupController.setMemberRole, { params: { chatId: GROUP, userId: BOB }, body: { role: 'admin' } });
+            assert.equal(promote.res.statusCode, 200);
+            assert.equal(fake.world.member(GROUP, BOB).role, 'admin');
+            assert.ok(promote.io.emitted.some(e => e.event === 'group_members_updated' && e.room === `chat_${GROUP}`));
+
+            // The new admin removes the old admin's rights; the group still has one
+            const demote = await call(groupController.setMemberRole, { params: { chatId: GROUP, userId: ADMIN }, body: { role: 'member' }, user: { id: BOB } });
+            assert.equal(demote.res.statusCode, 200);
+            assert.equal(fake.world.member(GROUP, ADMIN).role, 'member');
+
+            // Members can't change roles
+            const asMember = await call(groupController.setMemberRole, { params: { chatId: GROUP, userId: CAROL }, body: { role: 'admin' } });
+            assert.equal(asMember.res.statusCode, 403);
+            assert.equal(fake.world.member(GROUP, CAROL).role, 'member');
+        });
+
+        test('a group always keeps at least one admin', async () => {
+            const fake = setup(dbType);
+            const groupController = fake.load('controllers/groupController.js');
+
+            const selfDemote = await call(groupController.setMemberRole, { params: { chatId: GROUP, userId: ADMIN }, body: { role: 'member' } });
+            assert.equal(selfDemote.res.statusCode, 409);
+            assert.equal(selfDemote.res.body.code, 'LAST_ADMIN');
+            assert.equal(fake.world.member(GROUP, ADMIN).role, 'admin');
+
+            const missing = await call(groupController.setMemberRole, { params: { chatId: GROUP, userId: DAVE }, body: { role: 'admin' } });
+            assert.equal(missing.res.statusCode, 404);
+
+            const unchanged = await call(groupController.setMemberRole, { params: { chatId: GROUP, userId: BOB }, body: { role: 'member' } });
+            assert.equal(unchanged.res.statusCode, 200);
+            assert.equal(unchanged.io.emitted.length, 0, 'nothing changed, nothing broadcast');
+        });
+    });
+
+    describe(`join request limits and decision pushes (${dbType})`, () => {
+        test('at most 3 pending requests per user across all groups', async () => {
+            const fake = setup(dbType);
+            fake.world.chats[GROUP].approve_new_members = true;
+            const groupController = fake.load('controllers/groupController.js');
+            const inviteController = fake.load('controllers/inviteController.js');
+            const { res: created } = await call(groupController.createInvite, { params: { chatId: GROUP }, body: {} });
+            const code = created.body.data.code;
+
+            fake.world.extraPendingElsewhere = 3;
+            const refused = await call(inviteController.joinWithInvite, { params: { code }, user: { id: DAVE } });
+            assert.equal(refused.res.statusCode, 429);
+            assert.equal(refused.res.body.code, 'TOO_MANY_PENDING');
+            assert.equal(Object.keys(fake.world.requests).length, 0);
+            assert.equal(Object.values(fake.world.invites)[0].use_count, 0);
+
+            fake.world.extraPendingElsewhere = 2;
+            const accepted = await call(inviteController.joinWithInvite, { params: { code }, user: { id: DAVE } });
+            assert.equal(accepted.res.statusCode, 202);
+        });
+
+        test('the requester gets a push when an admin approves or declines', async () => {
+            const fake = setup(dbType);
+            const pushes = [];
+            stubModule('web-push', {
+                setVapidDetails() {},
+                async sendNotification(subscription, payload) { pushes.push({ endpoint: subscription.endpoint, payload: JSON.parse(payload) }); }
+            });
+            process.env.VAPID_PUBLIC_KEY = 'test-public';
+            process.env.VAPID_PRIVATE_KEY = 'test-private';
+            const base = fake.world.handler;
+            fake.world.handler = (sql, params) => {
+                const normalized = sql.replace(/\$\d+/g, '?');
+                if (/^SELECT dnd_enabled, quiet_hours_enabled, quiet_start, quiet_end, timezone FROM notification_settings WHERE user_id = \?$/.test(normalized)) return [];
+                if (/^SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = \?$/.test(normalized)) {
+                    return [{ id: 1, user_id: Number(params[0]), endpoint: `https://push.example/${params[0]}`, p256dh: 'k', auth: 'a' }];
+                }
+                return base(sql, params);
+            };
+
+            try {
+                const groupController = fake.load('controllers/groupController.js');
+                fake.world.requests[901] = { id: 901, chat_id: GROUP, user_id: DAVE, status: 'pending' };
+                fake.world.requests[902] = { id: 902, chat_id: GROUP, user_id: 5, status: 'pending' };
+
+                await call(groupController.approveJoinRequest, { params: { chatId: GROUP, requestId: 901 } });
+                await call(groupController.declineJoinRequest, { params: { chatId: GROUP, requestId: 902 } });
+                await new Promise(resolve => setImmediate(resolve)); // the push isn't awaited by the handler
+
+                const approved = pushes.find(p => p.endpoint.endsWith(`/${DAVE}`));
+                assert.equal(approved.payload.type, 'join_decision');
+                assert.equal(approved.payload.status, 'approved');
+                assert.equal(approved.payload.title, 'You joined Team');
+                assert.equal(approved.payload.url, `chat.html?chat=${GROUP}`);
+
+                const declined = pushes.find(p => p.endpoint.endsWith('/5'));
+                assert.equal(declined.payload.status, 'declined');
+                assert.equal(declined.payload.chatId, null);
+            } finally {
+                process.env.VAPID_PUBLIC_KEY = '';
+                process.env.VAPID_PRIVATE_KEY = '';
+            }
+        });
+    });
+
+    describe(`unverified email (${dbType})`, () => {
+        const UNVERIFIED = { email_verified_at: null };
+
+        test('cannot create invite links or join groups by link', async () => {
+            const fake = setup(dbType);
+            const groupController = fake.load('controllers/groupController.js');
+            const inviteController = fake.load('controllers/inviteController.js');
+
+            const create = await call(groupController.createInvite, { params: { chatId: GROUP }, body: {}, user: UNVERIFIED });
+            assert.equal(create.res.statusCode, 403);
+            assert.equal(create.res.body.code, 'EMAIL_NOT_VERIFIED');
+            assert.equal(Object.keys(fake.world.invites).length, 0);
+
+            const { res: created } = await call(groupController.createInvite, { params: { chatId: GROUP }, body: {} });
+            const code = created.body.data.code;
+            const preview = await call(inviteController.previewInvite, { params: { code }, user: { id: DAVE, ...UNVERIFIED } });
+            assert.equal(preview.res.body.data.emailVerified, false);
+
+            const join = await call(inviteController.joinWithInvite, { params: { code }, user: { id: DAVE, ...UNVERIFIED } });
+            assert.equal(join.res.statusCode, 403);
+            assert.equal(join.res.body.code, 'EMAIL_NOT_VERIFIED');
+            assert.ok(!fake.world.member(GROUP, DAVE));
+            assert.equal(Object.values(fake.world.invites)[0].use_count, 0);
+        });
+
+        test('can message people they share a chat with, but not strangers', async () => {
+            const fake = setup(dbType);
+            const chats = fake.load('controllers/chatController.js');
+
+            const stranger = await call(chats.createChat, { body: { chatType: 'direct', participants: [DAVE] }, user: UNVERIFIED });
+            assert.equal(stranger.res.statusCode, 403);
+            assert.equal(stranger.res.body.code, 'EMAIL_NOT_VERIFIED');
+            assert.ok(!fake.world.chatsCreated);
+
+            const groupWithStranger = await call(chats.createChat, { body: { chatType: 'group', chatName: 'x', participants: [CAROL, DAVE] }, user: UNVERIFIED });
+            assert.equal(groupWithStranger.res.statusCode, 403);
+
+            // Carol shares the group with the creator
+            const known = await call(chats.createChat, { body: { chatType: 'direct', participants: [CAROL] }, user: UNVERIFIED });
+            assert.equal(known.res.statusCode, 201);
+
+            const addStranger = await call(chats.addMember, { params: { chatId: GROUP }, body: { userId: DAVE }, user: UNVERIFIED });
+            assert.equal(addStranger.res.statusCode, 403);
+            assert.ok(!fake.world.member(GROUP, DAVE));
+        });
+    });
+
+    describe(`blocking (${dbType})`, () => {
+        // Bob blocks Alice (ADMIN); they share DIRECT and GROUP
+        function blockedWorld() {
+            const fake = setup(dbType);
+            fake.world.blocks.push({ blocker_id: BOB, blocked_id: ADMIN });
+            return fake;
+        }
+
+        test('no direct messages in either direction; group posting is unaffected', async () => {
+            const fake = blockedWorld();
+            const { checkCanPost } = fake.load('utils/groups.js');
+
+            const fromBlocked = await checkCanPost(DIRECT, ADMIN);
+            assert.equal(fromBlocked.code, 'BLOCKED');
+            assert.equal(fromBlocked.message, 'You can\'t send messages to this user.');
+
+            const fromBlocker = await checkCanPost(DIRECT, BOB);
+            assert.equal(fromBlocker.code, 'BLOCKED');
+            assert.match(fromBlocker.message, /You blocked this user/);
+
+            assert.equal(await checkCanPost(GROUP, ADMIN), null);
+        });
+
+        test('socket send_message, reactions and forwards into the direct chat are refused', async () => {
+            const fake = blockedWorld();
+            fake.world.messages = { 900: DIRECT, 77: GROUP };
+
+            const reactions = fake.load('utils/reactions.js');
+            const reaction = await reactions.toggleReaction(900, ADMIN, '👍');
+            assert.equal(reaction.blocked, true);
+
+            const { forwardMessages } = fake.load('controllers/messageController.js');
+            const forward = await call(forwardMessages, { body: { messageIds: [77], chatIds: [DIRECT] } });
+            assert.equal(forward.res.statusCode, 403);
+            assert.equal(forward.res.body.code, 'BLOCKED');
+            assert.equal(fake.world.messagesInserted, 0);
+
+            const ws = await connectSocket(fake, ADMIN, [`chat_${DIRECT}`]);
+            try {
+                await ws.handlers.send_message({ chatId: DIRECT, messageType: 'text', content: 'hello?' });
+            } finally {
+                await ws.close();
+            }
+            const error = ws.sent.find(s => s.event === 'error');
+            assert.equal(error.payload.code, 'BLOCKED');
+            assert.equal(fake.world.messagesInserted, 0);
+            assert.equal(ws.recorder.emitted.filter(e => e.event === 'new_message').length, 0);
+        });
+
+        test('no new direct chat, and the blocked user cannot add the blocker to groups', async () => {
+            const fake = setup(dbType);
+            fake.world.blocks.push({ blocker_id: DAVE, blocked_id: ADMIN });
+            const chats = fake.load('controllers/chatController.js');
+
+            const direct = await call(chats.createChat, { body: { chatType: 'direct', participants: [DAVE] } });
+            assert.equal(direct.res.statusCode, 403);
+            assert.equal(direct.res.body.code, 'BLOCKED');
+
+            const group = await call(chats.createChat, { body: { chatType: 'group', chatName: 'Trap', participants: [CAROL, DAVE] } });
+            assert.equal(group.res.statusCode, 403);
+            assert.ok(!fake.world.chatsCreated);
+
+            const add = await call(chats.addMember, { params: { chatId: GROUP }, body: { userId: DAVE } });
+            assert.equal(add.res.statusCode, 403);
+            assert.equal(add.res.body.code, 'BLOCKED');
+            assert.ok(!fake.world.member(GROUP, DAVE));
+
+            // The blocker can still add the person they blocked (their own choice)
+            fake.world.members.push({ id: 99, chat_id: OTHER_GROUP, user_id: DAVE, role: 'admin', joined_at: 9, member_tag: null });
+            const reverse = await call(chats.addMember, { params: { chatId: OTHER_GROUP }, body: { userId: ADMIN }, user: { id: DAVE } });
+            assert.equal(reverse.res.statusCode, 200);
+        });
+
+        test('the blocker shows as offline and the direct chat composer is locked for the blocked user', async () => {
+            const fake = blockedWorld();
+            const { getChatById } = fake.load('controllers/chatController.js');
+
+            const direct = await call(getChatById, { params: { chatId: DIRECT } });
+            assert.equal(direct.res.body.data.can_post, false);
+            assert.equal(direct.res.body.data.post_blocked_message, 'You can\'t send messages to this user.');
+            assert.equal(direct.res.body.data.participants.find(p => p.id === BOB).status, 'offline');
+
+            // Bob's view of Alice isn't masked
+            const asBob = await call(getChatById, { params: { chatId: GROUP }, user: { id: BOB } });
+            assert.equal(asBob.res.body.data.participants.find(p => p.id === ADMIN).status, 'online');
+        });
+
+        test('presence and typing of the blocker never reach the blocked user (sockets)', async () => {
+            const fake = blockedWorld();
+            const bob = await connectSocket(fake, BOB, [`chat_${GROUP}`]);
+            try {
+                await bob.handlers.authenticate();
+                await bob.handlers.typing({ chatId: GROUP, isTyping: true });
+            } finally {
+                await bob.close();
+            }
+            const online = bob.broadcasts.find(b => b.event === 'user_status');
+            assert.deepEqual(online.except, [`user_${ADMIN}`]);
+            const typing = bob.broadcasts.find(b => b.event === 'user_typing');
+            assert.equal(typing.room, `chat_${GROUP}`);
+            assert.deepEqual(typing.except, [`user_${ADMIN}`]);
+            assert.ok(bob.socket.rooms.has('session_7'), 'each socket joins its session room');
+
+            // The blocked user's typing doesn't reach the blocker either
+            const alice = await connectSocket(fake, ADMIN, [`chat_${GROUP}`]);
+            try {
+                await alice.handlers.typing({ chatId: GROUP, isTyping: true });
+            } finally {
+                await alice.close();
+            }
+            assert.deepEqual(alice.broadcasts.find(b => b.event === 'user_typing').except, [`user_${BOB}`]);
+        });
+
+        test('block and unblock endpoints', async () => {
+            const fake = setup(dbType);
+            const base = fake.world.handler;
+            fake.world.handler = (sql, params) => {
+                const normalized = sql.replace(/\$\d+/g, '?');
+                if (/^SELECT id, username FROM users WHERE id = \?$/.test(normalized)) return USERS[params[0]] ? [{ id: Number(params[0]), username: USERS[params[0]] }] : [];
+                if (/^SELECT status FROM users WHERE id = \?$/.test(normalized)) return [{ status: 'online' }];
+                if (/^INSERT INTO user_blocks/.test(normalized)) {
+                    if (fake.world.blocks.some(b => b.blocker_id === Number(params[0]) && b.blocked_id === Number(params[1]))) {
+                        const error = new Error('duplicate');
+                        error.code = dbType === 'postgresql' ? '23505' : 'ER_DUP_ENTRY';
+                        throw error;
+                    }
+                    fake.world.blocks.push({ blocker_id: Number(params[0]), blocked_id: Number(params[1]) });
+                    return dbType === 'postgresql' ? [{ id: 1 }] : { insertId: 1 };
+                }
+                if (/^SELECT id FROM user_blocks WHERE blocker_id = \? AND blocked_id = \?$/.test(normalized)) {
+                    const i = fake.world.blocks.findIndex(b => b.blocker_id === Number(params[0]) && b.blocked_id === Number(params[1]));
+                    return i === -1 ? [] : [{ id: i + 1 }];
+                }
+                if (/^DELETE FROM user_blocks WHERE id = \?$/.test(normalized)) {
+                    fake.world.blocks.splice(Number(params[0]) - 1, 1);
+                    return dbType === 'postgresql' ? [] : { affectedRows: 1 };
+                }
+                return base(sql, params);
+            };
+            const blocks = fake.load('controllers/blockController.js');
+
+            assert.equal((await call(blocks.blockUser, { body: { userId: ADMIN } })).res.statusCode, 400);
+            assert.equal((await call(blocks.blockUser, { body: { userId: 999 } })).res.statusCode, 404);
+
+            const blocked = await call(blocks.blockUser, { body: { userId: BOB } });
+            assert.equal(blocked.res.statusCode, 201);
+            assert.deepEqual(fake.world.blocks, [{ blocker_id: ADMIN, blocked_id: BOB }]);
+            // Bob's open tabs stop showing Alice as online right away
+            assert.ok(blocked.io.emitted.some(e => e.room === `user_${BOB}` && e.event === 'user_status' && e.data.status === 'offline' && e.data.userId === ADMIN));
+            assert.equal((await call(blocks.blockUser, { body: { userId: BOB } })).res.statusCode, 200, 'blocking twice is harmless');
+
+            const unblocked = await call(blocks.unblockUser, { params: { userId: BOB } });
+            assert.equal(unblocked.res.statusCode, 200);
+            assert.ok(unblocked.io.emitted.some(e => e.room === `user_${BOB}` && e.event === 'user_status' && e.data.status === 'online'));
+            assert.equal((await call(blocks.unblockUser, { params: { userId: BOB } })).res.statusCode, 404);
+        });
+
+        test('@mentions and pushes from a blocked sender skip the blocker', async () => {
+            const fake = setup(dbType);
+            const { resolveMentions } = fake.load('utils/mentions.js');
+            await resolveMentions(GROUP, ADMIN, 'hi @bob');
+            const query = fake.calls.find(c => /JOIN users u/.test(c.sql) && /LOWER\(u.username\)/.test(c.sql));
+            assert.match(query.sql, /NOT EXISTS \(SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = gm.user_id AND ub.blocked_id = (\?|\$3)\)/);
+            assert.deepEqual(query.params.slice(0, 3), [GROUP, ADMIN, ADMIN]);
+        });
+    });
+}
+
+describe('socket rate limiting (token buckets)', () => {
+    const { createSocketRateLimiter, limitSocketEvents, TokenBucket } = require('../utils/socketRateLimit');
+    const config = {
+        groups: {
+            message: { events: ['send_message'], perSocket: { capacity: 3, refillPerSecond: 1 }, perUser: { capacity: 5, refillPerSecond: 1 } },
+            typing: { events: ['typing'], perSocket: { capacity: 1, refillPerSecond: 1 }, perUser: { capacity: 10, refillPerSecond: 1 }, silent: true }
+        },
+        abuse: { maxViolations: 4, violationWindowMs: 60000 }
+    };
+
+    function fakeSocket(userId) {
+        const socket = { userId, emitted: [], handlers: {}, disconnected: false };
+        socket.on = (event, fn) => { socket.handlers[event] = fn; };
+        socket.emit = (event, data) => socket.emitted.push({ event, data });
+        socket.disconnect = () => { socket.disconnected = true; };
+        return socket;
+    }
+
+    test('a bucket allows a burst, then refills at its rate', () => {
+        const bucket = new TokenBucket({ capacity: 2, refillPerSecond: 1 }, 0);
+        assert.equal(bucket.take(0), 0);
+        assert.equal(bucket.take(0), 0);
+        assert.equal(bucket.take(0), 1000);
+        assert.equal(bucket.take(500), 500);
+        assert.equal(bucket.take(1000), 0);
+    });
+
+    test('per socket: the burst passes, the next event is dropped with rate_limited, and time restores it', async () => {
+        let now = 0;
+        const limiter = createSocketRateLimiter(config, () => now);
+        const socket = fakeSocket(1);
+        const handled = [];
+        limitSocketEvents(socket, limiter)('send_message', (data) => handled.push(data));
+
+        for (let i = 0; i < 4; i++) socket.handlers.send_message(i);
+        assert.deepEqual(handled, [0, 1, 2]);
+        assert.deepEqual(socket.emitted, [{ event: 'rate_limited', data: { event: 'send_message', retryAfterMs: 1000 } }]);
+
+        now = 1000;
+        socket.handlers.send_message('later');
+        assert.deepEqual(handled, [0, 1, 2, 'later']);
+    });
+
+    test('per user: all tabs share one budget', () => {
+        const limiter = createSocketRateLimiter(config, () => 0);
+        const a = fakeSocket(9);
+        const b = fakeSocket(9);
+        const other = fakeSocket(10);
+        const results = [a, a, a, b, b, b].map(s => limiter.check(s, 'send_message').allowed);
+        assert.deepEqual(results, [true, true, true, true, true, false], 'user bucket of 5 runs out on the sixth');
+        assert.equal(limiter.check(other, 'send_message').allowed, true, 'other users are unaffected');
+    });
+
+    test('typing is dropped silently; a socket that keeps flooding is disconnected', () => {
+        const limiter = createSocketRateLimiter(config, () => 0);
+        const socket = fakeSocket(3);
+        const on = limitSocketEvents(socket, limiter);
+        on('typing', () => {});
+        on('send_message', () => {});
+
+        socket.handlers.typing();
+        socket.handlers.typing();
+        assert.equal(socket.emitted.length, 0);
+
+        for (let i = 0; i < 6; i++) socket.handlers.send_message();
+        assert.equal(socket.disconnected, true);
+        assert.equal(socket.emitted.at(-1).data.disconnected, true);
+    });
+
+    test('server.js limits send_message per socket with the configured limits', async () => {
+        const fake = setupFakeDb('mysql', () => []);
+        const ws = await connectSocket({ load: fake.load }, 1, []);
+        try {
+            // An invalid type fails before any database work, so only the limiter is exercised
+            for (let i = 0; i < 11; i++) await ws.handlers.send_message({ chatId: 1, messageType: 'nope' });
+        } finally {
+            await ws.close();
+        }
+        assert.equal(ws.sent.filter(s => s.event === 'error').length, 10);
+        assert.equal(ws.sent.filter(s => s.event === 'rate_limited').length, 1);
+    });
+});
 
 describe('validation of new inputs', () => {
     const load = () => setupFakeDb('mysql', () => []).load('utils/validation.js');

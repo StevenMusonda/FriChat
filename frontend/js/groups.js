@@ -115,7 +115,7 @@ function canPostInCurrentChat() {
 }
 
 /**
- * Announcement-only groups show members a disabled composer with an explanation
+ * Announcement-only groups (for members) and blocked direct chats show a disabled composer with an explanation
  */
 function updateComposerAccess() {
     const container = document.querySelector('.message-input-container');
@@ -125,6 +125,14 @@ function updateComposerAccess() {
     const locked = !canPostInCurrentChat();
     container.classList.toggle('composer-locked', locked);
     notice.hidden = !locked;
+
+    // Announcement-only group, or a direct chat with a block (the server words the reason)
+    const text = document.getElementById('composerLockedText');
+    if (text) {
+        text.textContent = locked && currentChatDetails && currentChatDetails.post_blocked_message
+            ? currentChatDetails.post_blocked_message
+            : 'Only admins can send messages in this group. You can still read and react.';
+    }
     ['messageInput', 'sendBtn', 'attachBtn', 'emojiBtn'].forEach((id) => {
         const control = document.getElementById(id);
         if (control) control.disabled = locked;
@@ -205,24 +213,27 @@ async function refreshGroupInfo() {
 
         let invites = [];
         let requests = [];
+        let bans = [];
         if (chat.my_role === 'admin') {
-            const [inviteResponse, requestResponse] = await Promise.all([
+            const [inviteResponse, requestResponse, banResponse] = await Promise.all([
                 chat.invite_links_enabled ? apiRequest(CONFIG.ENDPOINTS.GROUP_INVITES(chatId)) : null,
-                apiRequest(CONFIG.ENDPOINTS.JOIN_REQUESTS(chatId))
+                apiRequest(CONFIG.ENDPOINTS.JOIN_REQUESTS(chatId)),
+                apiRequest(CONFIG.ENDPOINTS.GROUP_BANS(chatId))
             ]);
             if (inviteResponse && inviteResponse.success) invites = inviteResponse.data;
             if (requestResponse && requestResponse.success) requests = requestResponse.data;
+            if (banResponse && banResponse.success) bans = banResponse.data;
             updateChatInfoBadge(requests.length);
         }
 
         if (groupInfoOpenFor !== chatId) return;
-        renderGroupInfo(chat, invites, requests);
+        renderGroupInfo(chat, invites, requests, bans);
     } catch (error) {
         console.error('Group info error:', error);
     }
 }
 
-function renderGroupInfo(chat, invites, requests) {
+function renderGroupInfo(chat, invites, requests, bans = []) {
     const content = document.getElementById('chatInfoContent');
     const isAdmin = chat.my_role === 'admin';
     const scrollTop = content.parentElement ? content.parentElement.scrollTop : 0;
@@ -234,6 +245,7 @@ function renderGroupInfo(chat, invites, requests) {
         isAdmin ? renderInviteSection(chat, invites) : null,
         isAdmin && (chat.approve_new_members || requests.length > 0) ? renderRequestsSection(chat, requests) : null,
         renderMembersSection(chat, isAdmin),
+        isAdmin && bans.length > 0 ? renderBansSection(chat, bans) : null,
         renderLeaveSection(chat)
     ].filter(Boolean));
 
@@ -343,7 +355,7 @@ async function uploadGroupAvatar(chatId, file, input) {
     const formData = new FormData();
     formData.append('avatar', file);
     try {
-        const token = localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN);
+        const token = await getAccessToken();
         const response = await fetch(`${CONFIG.API_BASE_URL}${CONFIG.ENDPOINTS.GROUP_AVATAR(chatId)}`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
@@ -626,12 +638,118 @@ function renderMembersSection(chat, isAdmin) {
             member.role === 'admin' ? h('span', { className: 'member-role', text: 'Admin' }) : null,
             isAdmin
                 ? h('button', { className: 'btn btn-secondary btn-small member-tag-btn', text: member.member_tag ? 'Edit tag' : 'Add tag', attrs: { type: 'button', 'aria-label': `Tag for ${displayNameOf(member)}` }, on: { click: () => showTagEditor(chat.id, member, item) } })
+                : null,
+            member.id !== me
+                ? h('button', { className: 'btn btn-secondary btn-small member-options-btn', text: '⋯', attrs: { type: 'button', title: 'More options', 'aria-label': `Options for ${displayNameOf(member)}`, 'aria-expanded': 'false' }, on: { click: (e) => toggleMemberActions(chat, member, item, isAdmin, e.currentTarget) } })
                 : null
         );
         return item;
     });
 
     return section(`Members (${members.length})`, h('ul', { className: 'members-list' }, ...items));
+}
+
+/**
+ * Inline actions under a member: admin rights, remove, remove and ban (admins) and block (everyone)
+ */
+function toggleMemberActions(chat, member, item, isAdmin, toggle) {
+    const existing = item.querySelector('.member-actions');
+    if (existing) {
+        existing.remove();
+        toggle.setAttribute('aria-expanded', 'false');
+        return;
+    }
+
+    const name = displayNameOf(member);
+    const blocked = typeof isUserBlocked === 'function' && isUserBlocked(member.id);
+    const row = h('div', { className: 'member-actions group-actions-row', attrs: { role: 'group', 'aria-label': `Options for ${name}` } },
+        isAdmin
+            ? h('button', { className: 'btn btn-secondary btn-small', text: member.role === 'admin' ? 'Remove admin' : 'Make admin', attrs: { type: 'button' }, on: { click: (e) => setMemberRole(chat.id, member, member.role === 'admin' ? 'member' : 'admin', e.target) } })
+            : null,
+        isAdmin
+            ? h('button', { className: 'btn btn-secondary btn-small', text: 'Remove', attrs: { type: 'button' }, on: { click: (e) => removeGroupMember(chat.id, member, false, e.target) } })
+            : null,
+        isAdmin
+            ? h('button', { className: 'btn btn-danger btn-small', text: 'Remove and ban', attrs: { type: 'button' }, on: { click: (e) => removeGroupMember(chat.id, member, true, e.target) } })
+            : null,
+        h('button', { className: 'btn btn-secondary btn-small', text: blocked ? 'Unblock' : 'Block', attrs: { type: 'button' }, on: { click: () => setUserBlocked(member.id, !blocked, name) } })
+    );
+    item.appendChild(row);
+    toggle.setAttribute('aria-expanded', 'true');
+}
+
+async function setMemberRole(chatId, member, role, button) {
+    if (button) button.disabled = true;
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.MEMBER_ROLE(chatId, member.id), {
+            method: 'PUT',
+            body: JSON.stringify({ role })
+        });
+        if (!response.success) {
+            showNotification(firstErrorMessage(response, 'Failed to change admin rights'), 'error');
+            if (button) button.disabled = false;
+            return;
+        }
+        showNotification(role === 'admin' ? `${displayNameOf(member)} is now an admin` : `${displayNameOf(member)} is no longer an admin`, 'info');
+        refreshGroupInfo();
+    } catch (error) {
+        showNotification('Failed to change admin rights', 'error');
+        if (button) button.disabled = false;
+    }
+}
+
+async function removeGroupMember(chatId, member, ban, button) {
+    const name = displayNameOf(member);
+    const question = ban
+        ? `Remove ${name} and ban them? They can't rejoin by any invite link or be added again until an admin unbans them.`
+        : `Remove ${name} from the group?`;
+    if (!window.confirm(question)) return;
+
+    if (button) button.disabled = true;
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.REMOVE_MEMBER(chatId, member.id, ban), { method: 'DELETE' });
+        if (!response.success) {
+            showNotification(firstErrorMessage(response, 'Failed to remove the member'), 'error');
+            if (button) button.disabled = false;
+            return;
+        }
+        showNotification(ban ? `${name} was removed and banned` : `${name} was removed`, 'info');
+        refreshGroupInfo();
+    } catch (error) {
+        showNotification('Failed to remove the member', 'error');
+        if (button) button.disabled = false;
+    }
+}
+
+// --- bans ---
+
+function renderBansSection(chat, bans) {
+    const list = h('ul', { className: 'members-list banned-list' }, ...bans.map(ban => h('li', { className: 'member-item' },
+        avatarNode(displayNameOf(ban), null, 'member-avatar'),
+        h('div', { className: 'member-info' },
+            h('div', { className: 'member-name', text: displayNameOf(ban) }),
+            h('div', { className: 'member-username', text: `@${ban.username}${ban.bannedBy ? ` · banned by @${ban.bannedBy}` : ''}` })
+        ),
+        h('button', { className: 'btn btn-secondary btn-small', text: 'Unban', attrs: { type: 'button', 'aria-label': `Unban ${displayNameOf(ban)}` }, on: { click: (e) => unbanGroupMember(chat.id, ban, e.target) } })
+    )));
+    return section(`Banned (${bans.length})`, list);
+}
+
+async function unbanGroupMember(chatId, ban, button) {
+    if (button) button.disabled = true;
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.GROUP_BAN(chatId, ban.userId), { method: 'DELETE' });
+        if (!response.success) {
+            showNotification(firstErrorMessage(response, 'Failed to unban'), 'error');
+            if (button) button.disabled = false;
+            return;
+        }
+        showNotification(`${displayNameOf(ban)} can join again`, 'info');
+        refreshGroupInfo();
+    } catch (error) {
+        showNotification('Failed to unban', 'error');
+        if (button) button.disabled = false;
+    }
 }
 
 function showTagEditor(chatId, member, item) {

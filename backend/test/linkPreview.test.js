@@ -295,6 +295,8 @@ for (const dbType of ['mysql', 'postgresql']) {
                     world.message.link_preview_id = null;
                     return written();
                 }
+                // Phase 6 block checks: nobody is blocked in these tests
+                if (/user_blocks/.test(sql)) return [];
                 throw new Error(`Unexpected query: ${sql}`);
             });
             const module = fake.load('utils/linkPreview.js');
@@ -409,6 +411,8 @@ for (const dbType of ['mysql', 'postgresql']) {
                     world.updates.push(params);
                     return dbType === 'mysql' ? { affectedRows: 1 } : [];
                 }
+                // Phase 6 block checks: nobody is blocked in these tests
+                if (/user_blocks/.test(sql)) return [];
                 throw new Error(`Unexpected query: ${sql}`);
             });
             return { world, controller: fake.load('controllers/messageController.js') };

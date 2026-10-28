@@ -4177,3 +4177,143 @@ body.dark-theme .member-tag {
         border-radius: 14px;
     }
 }
+
+/* ===== Phase 6: email verification, devices, blocked users, member actions ===== */
+
+.verify-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 8px 12px 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--warning-color);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.verify-banner[hidden] {
+    display: none;
+}
+
+.verify-banner p {
+    flex: 1 1 180px;
+    margin: 0;
+}
+
+.settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.settings-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.settings-form input {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.settings-form .btn {
+    align-self: flex-start;
+}
+
+.device-list,
+.blocked-list {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.device-item,
+.blocked-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.device-item:last-child,
+.blocked-item:last-child {
+    border-bottom: none;
+}
+
+.device-info {
+    min-width: 0;
+}
+
+.device-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.device-current {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background-color: var(--primary-color);
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.device-meta {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    overflow-wrap: anywhere;
+}
+
+.device-item .btn,
+.blocked-item .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.member-options-btn {
+    min-width: 36px;
+}
+
+.member-actions {
+    flex-basis: 100%;
+    margin: 4px 0 0;
+}
+
+.join-verify {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+}
+
+@media (max-width: 480px) {
+    .device-item,
+    .blocked-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .device-item .btn,
+    .blocked-item .btn {
+        align-self: flex-start;
+    }
+}

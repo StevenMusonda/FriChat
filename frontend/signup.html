@@ -107,8 +107,8 @@
     <script>
         // Initialize signup form
         document.addEventListener('DOMContentLoaded', () => {
-            // Check if already logged in
-            if (localStorage.getItem('authToken')) {
+            // Check if already logged in (chat.html confirms it with the server)
+            if (isAuthenticated()) {
                 window.location.href = 'chat.html';
             }
 

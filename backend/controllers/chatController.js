@@ -13,9 +13,15 @@ const {
     setArchived,
     setMentionsOnly
 } = require('../utils/chatState');
-const { getMembership, leaveGroup, removeUserFromChatRoom, emitMembersUpdated } = require('../utils/groups');
+const { getMembership, leaveGroup, removeUserFromChatRoom, emitMembersUpdated, isBanned, banUser } = require('../utils/groups');
 const { getGroupDetailsForMember } = require('./groupController');
 const { toBool } = require('../utils/messageQueries');
+const { checkUnverifiedContact } = require('../utils/emailVerification');
+const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong, getBlockerIds, maskBlockerStatus } = require('../utils/blocks');
+
+function sendError(res, error) {
+    return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+}
 
 /**
  * Get all chats for current user
@@ -87,6 +93,9 @@ async function getUserChats(req, res) {
                 WHERE gm.chat_id IN (${placeholders})
                 ORDER BY gm.chat_id, gm.id
             `, chatIds);
+
+            // People who blocked this user show as offline to them
+            maskBlockerStatus(participantRows, await getBlockerIds(userId));
 
             for (const row of participantRows) {
                 const chatId = row.chat_id;
@@ -199,7 +208,7 @@ async function getChatById(req, res) {
             ORDER BY gm.joined_at ASC, gm.id ASC
         `, [chatId]);
 
-        chat.participants = participants;
+        chat.participants = maskBlockerStatus(participants, await getBlockerIds(userId));
         chat.approve_new_members = toBool(chat.approve_new_members);
         chat.announcement_only = toBool(chat.announcement_only);
 
@@ -208,7 +217,10 @@ async function getChatById(req, res) {
             Object.assign(chat, await getGroupDetailsForMember(chatId, membership));
         } else {
             chat.my_role = membership.role;
-            chat.can_post = true;
+            // A block either way locks the composer, with the reason worded for this user
+            const blockError = await checkDirectChatBlock(chatId, userId);
+            chat.can_post = !blockError;
+            chat.post_blocked_message = blockError ? blockError.message : null;
         }
 
         res.json({
@@ -230,13 +242,30 @@ async function getChatById(req, res) {
  */
 async function createChat(req, res) {
     try {
-        const { chatType, participants } = req.body;
+        const { chatType } = req.body;
+        let { participants } = req.body;
         const userId = req.user.id;
 
         // Stored raw like message text (validated to 100 chars); clients escape on render
         const chatName = chatType === 'group' && typeof req.body.chatName === 'string'
             ? (stripControlChars(req.body.chatName).trim() || null)
             : null;
+
+        // Numeric ids of the other people, without duplicates or the creator
+        const participantIds = [...new Set(participants.map(Number))];
+        if (participantIds.some(id => !Number.isInteger(id) || id < 1)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid participant'
+            });
+        }
+        participants = participantIds.filter(id => id !== Number(userId));
+        if (participants.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one other participant is required'
+            });
+        }
 
         // For direct chats, check if chat already exists
         if (chatType === 'direct') {
@@ -267,7 +296,24 @@ async function createChat(req, res) {
                     data: { chatId: existingChat.id }
                 });
             }
+
+            // No new direct chat while either of them has blocked the other
+            const blockError = await checkBlockBetween(userId, otherUserId);
+            if (blockError) return sendError(res, blockError);
+        } else {
+            // People who blocked the creator can't be put in a group by them
+            if ((await findBlockersAmong(userId, participants)).length > 0) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can\'t add one or more of these people to a group.',
+                    code: 'BLOCKED'
+                });
+            }
         }
+
+        // Unverified accounts only reach people they already share a chat with
+        const contactError = await checkUnverifiedContact(req.user, participants);
+        if (contactError) return sendError(res, contactError);
 
         // Create chat
         let chatId;
@@ -350,6 +396,26 @@ async function addMember(req, res) {
             });
         }
 
+        if (await isBanned(chatId, newUserId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'This user is banned from the group. Unban them first.',
+                code: 'BANNED'
+            });
+        }
+
+        // Someone who blocked this admin can't be added by them
+        if ((await findBlockersAmong(currentUserId, [newUserId])).length > 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'You can\'t add this user to the group.',
+                code: 'BLOCKED'
+            });
+        }
+
+        const contactError = await checkUnverifiedContact(req.user, [newUserId]);
+        if (contactError) return sendError(res, contactError);
+
         // Add member; earlier history starts out read so they don't join to a wall of unread
         await executeQuery(
             'INSERT INTO group_members (chat_id, user_id, role, last_read_message_id) VALUES (?, ?, ?, (SELECT MAX(id) FROM messages WHERE chat_id = ?))',
@@ -377,6 +443,8 @@ async function removeMember(req, res) {
     try {
         const { chatId, userId: removeUserId } = req.params;
         const currentUserId = req.user.id;
+        // ?ban=true: "Remove and ban" - no rejoining by link or by an admin until unbanned
+        const ban = req.query && (req.query.ban === 'true' || req.query.ban === '1');
 
         // Check if current user is admin
         const membership = await queryOne(
@@ -388,6 +456,13 @@ async function removeMember(req, res) {
             return res.status(403).json({
                 success: false,
                 message: 'Only admins can remove members'
+            });
+        }
+
+        if (ban && Number(removeUserId) === Number(currentUserId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'You can\'t ban yourself'
             });
         }
 
@@ -403,6 +478,10 @@ async function removeMember(req, res) {
                 'DELETE FROM group_members WHERE chat_id = ? AND user_id = ?',
                 [chatId, removeUserId]
             );
+
+            if (ban) {
+                await banUser(chatId, removeUserId, currentUserId);
+            }
         }
 
         // Their open tabs stop receiving the chat's live events
@@ -414,7 +493,8 @@ async function removeMember(req, res) {
 
         res.json({
             success: true,
-            message: 'Member removed successfully'
+            message: ban ? 'Member removed and banned' : 'Member removed successfully',
+            data: { userId: Number(removeUserId), banned: !!ban }
         });
     } catch (error) {
         console.error('Remove member error:', error);
@@ -451,7 +531,7 @@ async function searchUsers(req, res) {
 
         res.json({
             success: true,
-            data: users
+            data: maskBlockerStatus(users, await getBlockerIds(userId))
         });
     } catch (error) {
         console.error('Search users error:', error);

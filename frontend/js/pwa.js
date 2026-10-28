@@ -82,7 +82,8 @@ async function cleanupPushOnLogout() {
             : null;
 
         if (subscription) {
-            const token = localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN);
+            // In-memory access token (auth.js); refreshed if it has expired
+            const token = typeof getAccessToken === 'function' ? await getAccessToken() : null;
             if (token) {
                 await fetch(`${CONFIG.API_BASE_URL}${CONFIG.ENDPOINTS.PUSH_SUBSCRIPTIONS}`, {
                     method: 'DELETE',

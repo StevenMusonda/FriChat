@@ -27,7 +27,6 @@ async function loadChats() {
     try {
         console.log('Loading chats...');
         console.log('User data:', getCurrentUser());
-        console.log('Auth token:', localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN));
         console.log('API endpoint:', CONFIG.API_BASE_URL + CONFIG.ENDPOINTS.CHATS);
         
         const response = await apiRequest(CONFIG.ENDPOINTS.CHATS);
@@ -392,6 +391,13 @@ function toggleChatOptionsMenu(event) {
         + '<div class="chat-options-separator" role="separator"></div>'
         + (chat.archived_at ? item('archive:off', 'Unarchive chat') : item('archive:on', 'Archive chat'));
 
+    // Direct chats: block or unblock the other person (security.js keeps the blocked list)
+    const otherUser = chat.chat_type === 'direct' ? getDirectChatOtherUser(chat) : null;
+    if (otherUser) {
+        menu.innerHTML += '<div class="chat-options-separator" role="separator"></div>'
+            + (isUserBlocked(otherUser.userId) ? item('block:off', 'Unblock user') : item('block:on', 'Block user'));
+    }
+
     menu.addEventListener('click', (e) => {
         const button = e.target.closest('[data-action]');
         if (!button) return;
@@ -400,6 +406,8 @@ function toggleChatOptionsMenu(event) {
         closeChatOptionsMenu();
         if (kind === 'mute') {
             setChatMute(chat.id, value);
+        } else if (kind === 'block') {
+            setUserBlocked(otherUser.userId, value === 'on', otherUser.fullName || otherUser.username);
         } else if (kind === 'mentions') {
             setChatMentionsOnly(chat.id, value === 'on');
         } else {
@@ -415,6 +423,20 @@ function toggleChatOptionsMenu(event) {
         document.addEventListener('click', closeChatOptionsMenuOnOutsideClick);
         document.addEventListener('keydown', closeChatOptionsMenuOnEscape);
     }, 0);
+}
+
+/**
+ * The other participant of a direct chat from the chat list ({ userId, username, fullName }), or null
+ */
+function getDirectChatOtherUser(chat) {
+    let participants = [];
+    try {
+        participants = typeof chat.participants === 'string' ? JSON.parse(chat.participants) : (chat.participants || []);
+    } catch (e) {
+        return null;
+    }
+    const me = getCurrentUser().userId;
+    return participants.find(p => Number(p.userId) !== Number(me)) || null;
 }
 
 function closeChatOptionsMenu() {

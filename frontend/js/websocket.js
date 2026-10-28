@@ -19,9 +19,33 @@ let messageDeletedHandlers = [];
 let linkPreviewHandlers = [];
 let socketErrorHandlers = [];
 let groupEventHandlers = [];
+let accountEventHandlers = [];
+let rateLimitHandlers = [];
 
 // Group profile/settings, members, leaving and join requests (handled in groups.js)
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
+// Email verified, block list changed in another tab (handled in security.js)
+const ACCOUNT_EVENTS = ['email_verified', 'block_updated'];
+
+// Handshake refusals the server sends (server.js io.use)
+const EXPIRED_TOKEN_ERRORS = ['Invalid or expired token', 'Access token required'];
+const MAX_AUTH_RECONNECTS = 3;
+let authReconnects = 0;
+
+/**
+ * The access token expired (or the server dropped us): get a new one and connect again.
+ * If the session itself is gone, auth.js signs the user out.
+ */
+async function reconnectWithFreshToken() {
+    if (!socket || authReconnects >= MAX_AUTH_RECONNECTS) return;
+    authReconnects++;
+    const result = await refreshAccessToken();
+    if (result.ok && socket) {
+        socket.connect();
+    } else if (result.network && socket) {
+        setTimeout(() => { if (socket && !socket.connected) socket.connect(); }, 5000);
+    }
+}
 
 /**
  * Initialize WebSocket connection
@@ -39,8 +63,8 @@ function initializeWebSocket() {
     
     // Connect to Socket.IO server
     socket = io(CONFIG.SOCKET_URL, {
-        // Server verifies this JWT on handshake (re-read on each reconnect)
-        auth: (cb) => cb({ token: localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN) }),
+        // Server verifies this access JWT and its session on every handshake (fresh one on each reconnect)
+        auth: (cb) => { getAccessToken().then(token => cb({ token })).catch(() => cb({ token: null })); },
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
@@ -50,6 +74,7 @@ function initializeWebSocket() {
     // Connection events
     socket.on('connect', () => {
         console.log('WebSocket connected');
+        authReconnects = 0;
         
         // Go online and join chat rooms (identity comes from the handshake token)
         socket.emit('authenticate');
@@ -58,14 +83,40 @@ function initializeWebSocket() {
         sendPresence();
     });
     
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
         console.log('WebSocket disconnected');
+        // The server closed this socket on purpose (e.g. this device was signed out): find out whether
+        // the session still exists - refresh succeeds and reconnects, or the user is signed out
+        if (reason === 'io server disconnect') reconnectWithFreshToken();
     });
-    
+
     socket.on('connect_error', (error) => {
         console.error('WebSocket connection error:', error);
+        const message = error && error.message;
+        if (message === 'Session revoked') {
+            handleSessionEnded('revoked');
+        } else if (EXPIRED_TOKEN_ERRORS.includes(message)) {
+            // A refused handshake isn't retried by Socket.IO itself
+            reconnectWithFreshToken();
+        }
     });
-    
+
+    // This device was signed out (Settings > Devices elsewhere, password change, token reuse)
+    socket.on('session_revoked', (data) => {
+        handleSessionEnded(data && data.reason === 'reuse' ? 'security' : 'revoked');
+    });
+
+    // An event was dropped because this socket or user sent too many
+    socket.on('rate_limited', (data) => {
+        rateLimitHandlers.forEach(handler => handler(data || {}));
+    });
+
+    ACCOUNT_EVENTS.forEach((event) => {
+        socket.on(event, (data) => {
+            accountEventHandlers.forEach(handler => handler(event, data || {}));
+        });
+    });
+
     // Message events
     socket.on('new_message', (message) => {
         console.log('New message received:', message);
@@ -387,6 +438,20 @@ function onSocketError(handler) {
  */
 function onGroupEvent(handler) {
     groupEventHandlers.push(handler);
+}
+
+/**
+ * Register handler(event, data) for the account events in ACCOUNT_EVENTS
+ */
+function onAccountEvent(handler) {
+    accountEventHandlers.push(handler);
+}
+
+/**
+ * Register handler({ event, retryAfterMs, disconnected }) for rate-limited events
+ */
+function onRateLimited(handler) {
+    rateLimitHandlers.push(handler);
 }
 
 /**

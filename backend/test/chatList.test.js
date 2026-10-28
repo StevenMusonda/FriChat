@@ -32,6 +32,8 @@ function chatListHandler(chatRows) {
         if (/FROM chats c JOIN group_members gm ON c.id = gm.chat_id AND gm.user_id/.test(sql)) return chatRows.map(r => ({ ...r }));
         if (/FROM group_members gm JOIN users u/.test(sql)) return PARTICIPANT_ROWS.map(r => ({ ...r }));
         if (/FROM chats c JOIN messages m ON m.id = \(/.test(sql)) return LAST_MESSAGE_ROWS.map(r => ({ ...r }));
+        // Phase 6 block checks: nobody is blocked in these tests
+        if (/user_blocks/.test(sql)) return [];
         throw new Error(`Unexpected query: ${sql}`);
     };
 }
@@ -51,15 +53,18 @@ async function getChats(dbType, chatRows = CHAT_ROWS) {
 }
 
 for (const dbType of ['mysql', 'postgresql']) {
-    test(`chat list uses three queries in total (${dbType})`, async () => {
+    test(`chat list uses four queries in total (${dbType})`, async () => {
         const { res, calls } = await getChats(dbType);
 
         assert.equal(res.statusCode, 200);
-        assert.equal(calls.length, 3);
+        assert.equal(calls.length, 4);
 
         // Both batched queries bind every chat id once, in list order
         assert.deepEqual(calls[1].params, [3, 2, 9]);
-        assert.deepEqual(calls[2].params, [3, 2, 9]);
+        assert.deepEqual(calls[3].params, [3, 2, 9]);
+
+        // One lookup of who blocked this user (their status is shown as offline)
+        assert.match(calls[2].sql, /^SELECT blocker_id FROM user_blocks WHERE blocked_id = (\?|\$1)$/);
     });
 
     test(`chat list keeps its response shape (${dbType})`, async () => {

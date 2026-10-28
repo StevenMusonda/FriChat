@@ -43,8 +43,8 @@ function extractMentionUsernames(text) {
 }
 
 /**
- * Which of the mentioned usernames are members of this group chat (never the sender).
- * Direct chats have no mentions. Returns [{ user_id, username }].
+ * Which of the mentioned usernames are members of this group chat (never the sender, and never
+ * someone who blocked the sender). Direct chats have no mentions. Returns [{ user_id, username }].
  */
 async function resolveMentions(chatId, senderId, text) {
     const usernames = extractMentionUsernames(text);
@@ -57,8 +57,9 @@ async function resolveMentions(chatId, senderId, text) {
         JOIN users u ON u.id = gm.user_id
         WHERE gm.chat_id = ?
         AND gm.user_id <> ?
+        AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = gm.user_id AND ub.blocked_id = ?)
         AND LOWER(u.username) IN (${usernames.map(() => '?').join(', ')})
-    `, [chatId, senderId, ...usernames]);
+    `, [chatId, senderId, senderId, ...usernames]);
 }
 
 /**

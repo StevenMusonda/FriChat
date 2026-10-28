@@ -21,13 +21,27 @@ const CONFIG = {
         PROFILE: '/auth/profile',
         FORGOT_PASSWORD: '/auth/forgot-password',
         RESET_PASSWORD: '/auth/reset-password',
+        REFRESH: '/auth/refresh',
+        VERIFY_EMAIL: '/auth/verify-email',
+        RESEND_VERIFICATION: '/auth/resend-verification',
+        CHANGE_PASSWORD: '/auth/password',
+        SESSIONS: '/auth/sessions',
+        SESSION: (sessionId) => `/auth/sessions/${sessionId}`,
+        REVOKE_OTHER_SESSIONS: '/auth/sessions/revoke-others',
+
+        // Blocking
+        BLOCKS: '/blocks',
+        BLOCK: (userId) => `/blocks/${userId}`,
         
         // Chats
         CHATS: '/chats',
         CHAT_BY_ID: (id) => `/chats/${id}`,
         CREATE_CHAT: '/chats',
         ADD_MEMBER: (chatId) => `/chats/${chatId}/members`,
-        REMOVE_MEMBER: (chatId, userId) => `/chats/${chatId}/members/${userId}`,
+        REMOVE_MEMBER: (chatId, userId, ban = false) => `/chats/${chatId}/members/${userId}${ban ? '?ban=true' : ''}`,
+        MEMBER_ROLE: (chatId, userId) => `/chats/${chatId}/members/${userId}/role`,
+        GROUP_BANS: (chatId) => `/chats/${chatId}/bans`,
+        GROUP_BAN: (chatId, userId) => `/chats/${chatId}/bans/${userId}`,
         SEARCH_USERS: '/chats/search/users',
         MARK_READ: (chatId) => `/chats/${chatId}/read`,
         MUTE_CHAT: (chatId) => `/chats/${chatId}/mute`,
@@ -75,6 +89,7 @@ const CONFIG = {
 
     // Storage Keys
     STORAGE_KEYS: {
+        // Legacy: tokens are no longer stored; auth.js deletes this key if an old version left it
         AUTH_TOKEN: 'authToken',
         USER_DATA: 'userData',
         THEME: 'theme',

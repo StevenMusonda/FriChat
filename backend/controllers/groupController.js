@@ -10,6 +10,8 @@ const { inviteLinksEnabled } = require('../config/groups');
 const groups = require('../utils/groups');
 const invites = require('../utils/invites');
 const { saveGroupAvatar, deleteGroupAvatar } = require('../utils/groupAvatar');
+const { requireVerifiedEmail } = require('../utils/emailVerification');
+const { notifyJoinDecision } = require('../utils/push');
 
 function sendError(res, error) {
     return res.status(error.status).json({ success: false, message: error.message, code: error.code });
@@ -131,6 +133,10 @@ async function createInvite(req, res) {
         const check = await groups.requireGroupMember(chatId, req.user.id, { admin: true });
         if (check.error) return sendError(res, check.error);
 
+        // A link lets strangers in, so its creator must have a verified email
+        const notVerified = requireVerifiedEmail(req.user, 'create invite links');
+        if (notVerified) return sendError(res, notVerified);
+
         const { token, invite } = await invites.createInvite(chatId, req.user.id, req.body.expiresIn || 'never', req.body.maxUses || null);
 
         res.status(201).json({
@@ -234,6 +240,11 @@ async function decideJoinRequest(req, res, decision) {
             return res.status(404).json({ success: false, message: 'Join request not found' });
         }
 
+        // Banned after asking (a ban deletes their request, but not one filed a moment later)
+        if (decision === 'approved' && request.status === 'pending' && (await groups.isBanned(chatId, request.user_id))) {
+            return res.status(409).json({ success: false, message: 'This user is banned from the group. Unban them first.', code: 'BANNED' });
+        }
+
         const updateSql = "UPDATE chat_join_requests SET status = ?, decided_by = ?, decided_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'";
         let updated;
         if (process.env.DB_TYPE === 'postgresql') {
@@ -259,6 +270,9 @@ async function decideJoinRequest(req, res, decision) {
                 status: decision
             });
         }
+
+        // Also as a push, for when they aren't in the app (not awaited; never fails the decision)
+        notifyJoinDecision(request.user_id, { chatId: Number(chatId), chatName: chat ? chat.chat_name : null, status: decision });
 
         const pendingCount = await groups.countPendingRequests(chatId);
         await groups.emitToAdmins(req.io, chatId, 'join_requests_updated', { chatId: Number(chatId), pendingCount });
@@ -293,6 +307,61 @@ async function setMemberTag(req, res) {
         res.json({ success: true, data: { userId, tag } });
     } catch (error) {
         serverError(res, 'Set member tag', error, 'Failed to update the member tag');
+    }
+}
+
+/**
+ * PUT /api/chats/:chatId/members/:userId/role (admins) Body: { role: 'admin' | 'member' }
+ * The group always keeps at least one admin.
+ */
+async function setMemberRole(req, res) {
+    try {
+        const { chatId, userId } = req.params;
+        const check = await groups.requireGroupMember(chatId, req.user.id, { admin: true });
+        if (check.error) return sendError(res, check.error);
+
+        const result = await groups.setMemberRole(chatId, userId, req.body.role);
+        if (result.error) return sendError(res, result.error);
+
+        if (result.changed) groups.emitMembersUpdated(req.io, chatId);
+
+        res.json({ success: true, data: { userId: Number(userId), role: result.role } });
+    } catch (error) {
+        serverError(res, 'Set member role', error, 'Failed to change the member\'s role');
+    }
+}
+
+/**
+ * GET /api/chats/:chatId/bans (admins)
+ */
+async function listBans(req, res) {
+    try {
+        const { chatId } = req.params;
+        const check = await groups.requireGroupMember(chatId, req.user.id, { admin: true });
+        if (check.error) return sendError(res, check.error);
+
+        res.json({ success: true, data: await groups.listBans(chatId) });
+    } catch (error) {
+        serverError(res, 'List bans', error, 'Failed to load banned users');
+    }
+}
+
+/**
+ * DELETE /api/chats/:chatId/bans/:userId (admins). They can join again by link or be added.
+ */
+async function unbanMember(req, res) {
+    try {
+        const { chatId, userId } = req.params;
+        const check = await groups.requireGroupMember(chatId, req.user.id, { admin: true });
+        if (check.error) return sendError(res, check.error);
+
+        if (!(await groups.unbanUser(chatId, userId))) {
+            return res.status(404).json({ success: false, message: 'That user is not banned from this group' });
+        }
+
+        res.json({ success: true, data: { userId: Number(userId), banned: false } });
+    } catch (error) {
+        serverError(res, 'Unban member', error, 'Failed to unban the user');
     }
 }
 
@@ -345,6 +414,9 @@ module.exports = {
     approveJoinRequest,
     declineJoinRequest,
     setMemberTag,
+    setMemberRole,
+    listBans,
+    unbanMember,
     leaveGroup,
     getGroupDetailsForMember
 };

@@ -10,6 +10,11 @@ const MEMBER_TAG_MAX_LENGTH = 30;
 const INVITE_EXPIRY_OPTIONS = ['1h', '1d', '7d', 'never'];
 const INVITE_MAX_USES_LIMIT = 1000;
 
+// Join requests: pending requests one user may have across all groups, and how long after a
+// decline the same group can't be asked again
+const MAX_PENDING_JOIN_REQUESTS = 3;
+const JOIN_REQUEST_COOLDOWN_HOURS = 24;
+
 // Group avatars: stored under uploads/group-avatars, resized to a square when sharp is installed
 const GROUP_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const GROUP_AVATAR_SIZE_PX = 256;
@@ -32,6 +37,8 @@ module.exports = {
     MEMBER_TAG_MAX_LENGTH,
     INVITE_EXPIRY_OPTIONS,
     INVITE_MAX_USES_LIMIT,
+    MAX_PENDING_JOIN_REQUESTS,
+    JOIN_REQUEST_COOLDOWN_HOURS,
     GROUP_AVATAR_TYPES,
     GROUP_AVATAR_SIZE_PX,
     groupAvatarMaxBytes,

@@ -385,6 +385,111 @@ const validateInviteCode = [
         .withMessage('This invite link is invalid. Check that you copied the whole link.')
 ];
 
+const userIdParamRule = param('userId')
+    .isInt({ min: 1 })
+    .withMessage('Invalid user ID')
+    .toInt();
+
+/**
+ * Validation rules for removing a group member (?ban=true also bans them)
+ */
+const validateRemoveMember = [
+    chatIdParamRule,
+    userIdParamRule,
+
+    query('ban')
+        .optional()
+        .isIn(['true', 'false', '1', '0'])
+        .withMessage('ban must be true or false')
+];
+
+/**
+ * Validation rules for making a member an admin or a regular member
+ */
+const validateMemberRole = [
+    chatIdParamRule,
+    userIdParamRule,
+
+    body('role')
+        .isIn(['admin', 'member'])
+        .withMessage("role must be 'admin' or 'member'")
+];
+
+/**
+ * Validation rules for adding a member to a group
+ */
+const validateAddMember = [
+    chatIdParamRule,
+
+    body('userId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid user ID')
+        .toInt()
+];
+
+/**
+ * Validation rules for group routes that take :chatId and :userId (unban)
+ */
+const validateChatUserParams = [
+    chatIdParamRule,
+    userIdParamRule
+];
+
+/**
+ * Validation rules for changing the password while signed in
+ */
+const validateChangePassword = [
+    body('currentPassword')
+        .isString()
+        .notEmpty()
+        .withMessage('Current password is required'),
+
+    body('newPassword')
+        .isString()
+        .isLength({ min: 6 })
+        .withMessage('New password must be at least 6 characters long')
+        .bail()
+        .custom((value, { req }) => value !== req.body.currentPassword)
+        .withMessage('The new password must be different from the current one')
+];
+
+/**
+ * Validation rules for the email verification link
+ */
+const validateVerifyEmail = [
+    body('token')
+        .isString()
+        .matches(/^[a-f0-9]{64}$/)
+        .withMessage('This verification link is invalid')
+];
+
+/**
+ * Validation rules for signing out one device
+ */
+const validateSessionIdParam = [
+    param('sessionId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid session ID')
+        .toInt()
+];
+
+/**
+ * Validation rules for blocking a user
+ */
+const validateBlockUser = [
+    body('userId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid user ID')
+        .toInt()
+];
+
+/**
+ * Validation rules for unblocking a user
+ */
+const validateUserIdParam = [
+    userIdParamRule
+];
+
 // Push service endpoints are public HTTPS URLs; refuse anything that points the server at itself
 // or at a raw IP, since the server will POST to this URL
 function isPushEndpoint(value) {
@@ -527,6 +632,15 @@ module.exports = {
     validateMemberTag,
     validateLeaveGroup,
     validateInviteCode,
+    validateRemoveMember,
+    validateMemberRole,
+    validateAddMember,
+    validateChatUserParams,
+    validateChangePassword,
+    validateVerifyEmail,
+    validateSessionIdParam,
+    validateBlockUser,
+    validateUserIdParam,
     validatePushSubscription,
     validatePushUnsubscribe,
     validateNotificationSettings,

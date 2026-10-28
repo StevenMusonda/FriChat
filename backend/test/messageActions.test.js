@@ -179,6 +179,10 @@ function createWorld(dbType) {
         if (/^SELECT id FROM messages WHERE id = /.test(sql)) return world.messages[params[0]] ? [{ id: Number(params[0]) }] : [];
         if (/^SELECT COUNT\(\*\) AS count/.test(sql)) return [{ count: 0 }];
 
+        // Phase 6 block checks: nobody is blocked in these tests
+
+        if (/user_blocks/.test(sql)) return [];
+
         throw new Error(`Unexpected query: ${sql}`);
     };
 

@@ -158,7 +158,9 @@ for (const dbType of ['mysql', 'postgresql']) {
 
             // Recipient query excludes the sender, muted members and deleted chats
             const recipientsQuery = calls.find(c => /LEFT JOIN notification_settings/.test(c.sql));
-            assert.deepEqual(recipientsQuery.params, [CHAT_ID, SENDER_ID]);
+            // The sender id twice: excluded as a recipient, and anyone who blocked them is skipped
+            assert.deepEqual(recipientsQuery.params, [CHAT_ID, SENDER_ID, SENDER_ID]);
+            assert.match(recipientsQuery.sql, /NOT EXISTS \(SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = gm.user_id AND ub.blocked_id = /);
             assert.match(recipientsQuery.sql, /gm.muted_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_muted/);
             assert.match(recipientsQuery.sql, /dc.id IS NULL/);
 

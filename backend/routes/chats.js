@@ -19,6 +19,10 @@ const {
     validateJoinRequestParam,
     validateMemberTag,
     validateLeaveGroup,
+    validateAddMember,
+    validateRemoveMember,
+    validateMemberRole,
+    validateChatUserParams,
     checkValidation
 } = require('../utils/validation');
 
@@ -51,9 +55,16 @@ router.get('/', chatController.getUserChats);
 router.get('/:chatId', chatController.getChatById);
 router.post('/', validateCreateChat, checkValidation, chatController.createChat);
 
-// Group management
-router.post('/:chatId/members', chatController.addMember);
-router.delete('/:chatId/members/:userId', chatController.removeMember);
+// Group management (DELETE ...?ban=true is "Remove and ban")
+router.post('/:chatId/members', groupActionLimiter, validateAddMember, checkValidation, chatController.addMember);
+router.delete('/:chatId/members/:userId', groupActionLimiter, validateRemoveMember, checkValidation, chatController.removeMember);
+
+// Make a member an admin or remove admin rights (admins; a group always keeps one admin)
+router.put('/:chatId/members/:userId/role', groupActionLimiter, validateMemberRole, checkValidation, groupController.setMemberRole);
+
+// Banned users (admins)
+router.get('/:chatId/bans', groupActionLimiter, validateChatIdParam, checkValidation, groupController.listBans);
+router.delete('/:chatId/bans/:userId', groupActionLimiter, validateChatUserParams, checkValidation, groupController.unbanMember);
 
 // Group profile and settings (admins; GET /:chatId returns them to every member)
 router.patch('/:chatId/settings', groupActionLimiter, validateGroupSettings, checkValidation, groupController.updateGroupSettings);

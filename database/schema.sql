@@ -2,6 +2,11 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS group_bans;
+DROP TABLE IF EXISTS user_blocks;
+DROP TABLE IF EXISTS session_refresh_tokens;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS email_verifications;
 DROP TABLE IF EXISTS chat_join_requests;
 DROP TABLE IF EXISTS chat_invites;
 DROP TABLE IF EXISTS deleted_chats;
@@ -30,6 +35,7 @@ CREATE TABLE users (
     avatar_url VARCHAR(255),
     status ENUM('online', 'offline', 'away') DEFAULT 'offline',
     last_seen TIMESTAMP NULL,
+    email_verified_at DATETIME NULL, -- NULL = email not verified yet
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_username (username),
@@ -284,7 +290,74 @@ CREATE TABLE chat_join_requests (
     FOREIGN KEY (invite_id) REFERENCES chat_invites(id) ON DELETE SET NULL,
     FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE KEY unique_join_request (chat_id, user_id),
-    INDEX idx_join_requests_chat_status (chat_id, status)
+    INDEX idx_join_requests_chat_status (chat_id, status),
+    INDEX idx_join_requests_user_status (user_id, status)
+);
+
+-- Email verification links (only a SHA-256 hash of the token is stored; single-use)
+CREATE TABLE email_verifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_email_verification_token (token_hash),
+    INDEX idx_email_verifications_user_id (user_id)
+);
+
+-- One row per signed-in device; refresh_token_hash is the SHA-256 of the current refresh token
+CREATE TABLE sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    refresh_token_hash CHAR(64) NOT NULL,
+    user_agent VARCHAR(255) NULL,
+    device_label VARCHAR(100) NULL, -- e.g. 'Chrome on Windows', parsed from the user agent
+    ip_address VARCHAR(45) NULL, -- last seen IP (IPv4 or IPv6), no geolocation
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL, -- refresh token lifetime, slides forward on every rotation
+    revoked_at DATETIME NULL,
+    revoked_reason VARCHAR(20) NULL, -- 'logout' | 'user' | 'password' | 'reuse'
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_session_refresh_token (refresh_token_hash),
+    INDEX idx_sessions_user_id (user_id)
+);
+
+-- Refresh tokens already rotated out; presenting one again revokes the whole session
+CREATE TABLE session_refresh_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    session_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    rotated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_rotated_refresh_token (token_hash),
+    INDEX idx_rotated_tokens_session_id (session_id)
+);
+
+-- blocker_id blocked blocked_id
+CREATE TABLE user_blocks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    blocker_id INT NOT NULL,
+    blocked_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (blocker_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (blocked_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_block (blocker_id, blocked_id),
+    INDEX idx_user_blocks_blocked_id (blocked_id)
+);
+
+-- Users an admin removed and banned from a group
+CREATE TABLE group_bans (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    user_id INT NOT NULL,
+    banned_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (banned_by) REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE KEY unique_group_ban (chat_id, user_id)
 );
 
 -- Create a view for easy message retrieval with user info

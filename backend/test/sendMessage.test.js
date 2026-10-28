@@ -32,6 +32,8 @@ function sendHandler(dbType) {
                 ? [{ id: NEW_MESSAGE_ID, chat_id: CHAT_ID, sender_id: SENDER_ID, content: 'hello', message_type: 'text' }]
                 : [];
         }
+        // Phase 6 block checks: nobody is blocked in these tests
+        if (/user_blocks/.test(sql)) return [];
         throw new Error(`Unexpected query: ${sql}`);
     };
 }

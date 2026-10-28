@@ -143,7 +143,8 @@ function chatAllowsPush({ isMuted, mentionsOnly, mentioned }) {
 
 /**
  * Members who should get a push for a new message: not the sender, allowed by their
- * mute / "mentions only" setting, chat not deleted on their side, DND off, and no visible tab on the chat
+ * mute / "mentions only" setting, chat not deleted on their side, DND off, no visible tab on the chat,
+ * and not someone who blocked the sender
  */
 async function findRecipients(io, message, now = new Date()) {
     const mentioned = new Set((message.mentions || []).map(m => Number(m.user_id)));
@@ -163,7 +164,8 @@ async function findRecipients(io, message, now = new Date()) {
         WHERE gm.chat_id = ?
         AND gm.user_id <> ?
         AND dc.id IS NULL
-    `, [message.chat_id, message.sender_id]);
+        AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.blocker_id = gm.user_id AND ub.blocked_id = ?)
+    `, [message.chat_id, message.sender_id, message.sender_id]);
 
     const recipients = [];
     for (const row of rows) {
@@ -283,7 +285,55 @@ async function notifyNewMessage(io, message) {
     return result;
 }
 
+/**
+ * Tell someone who asked to join a group that an admin approved or declined it, on every device
+ * they enabled push on (respects do-not-disturb). Never throws.
+ * @param {{ chatId, chatName, status: 'approved' | 'declined' }} decision
+ */
+async function notifyJoinDecision(userId, decision) {
+    const result = { sent: 0, removed: 0, failed: 0 };
+    try {
+        if (!isPushConfigured()) return result;
+
+        const settings = await executeQuery(
+            'SELECT dnd_enabled, quiet_hours_enabled, quiet_start, quiet_end, timezone FROM notification_settings WHERE user_id = ?',
+            [userId]
+        );
+        if (settings[0] && isDndActive(fromRow(settings[0]), new Date())) return result;
+
+        const subscriptions = await executeQuery(
+            'SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?',
+            [userId]
+        );
+        if (subscriptions.length === 0) return result;
+
+        const approved = decision.status === 'approved';
+        const groupName = String(decision.chatName || 'the group');
+        const payload = {
+            type: 'join_decision',
+            chatId: approved ? decision.chatId : null,
+            status: decision.status,
+            title: approved ? `You joined ${groupName}` : 'Join request declined',
+            body: approved
+                ? 'An admin approved your request. Tap to open the chat.'
+                : `An admin declined your request to join ${groupName}.`,
+            url: approved ? `chat.html?chat=${decision.chatId}` : 'chat.html'
+        };
+
+        const outcomes = await Promise.all(subscriptions.map(subscription => sendToSubscription(subscription, payload)));
+        for (const outcome of outcomes) {
+            if (outcome === 'sent') result.sent++;
+            else if (outcome === 'gone') result.removed++;
+            else result.failed++;
+        }
+    } catch (error) {
+        console.error('Push join decision error:', error);
+    }
+    return result;
+}
+
 module.exports = {
+    notifyJoinDecision,
     isPushConfigured,
     getVapidPublicKey,
     hashEndpoint,

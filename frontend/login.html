@@ -73,14 +73,24 @@
             // After login, go back to an invite link if one sent us here (validated, same site only)
             const nextUrl = getSafeNextUrl();
 
-            // Check if already logged in
-            if (localStorage.getItem('authToken')) {
-                window.location.href = nextUrl || 'chat.html';
-            }
-
             const loginForm = document.getElementById('loginForm');
             const loginBtn = document.getElementById('loginBtn');
             const errorMessage = document.getElementById('errorMessage');
+
+            // Sent here because the session ended (auth.js adds ?signedOut=<reason>)
+            const signedOut = new URLSearchParams(window.location.search).get('signedOut');
+            const SIGNED_OUT_MESSAGES = {
+                revoked: 'You were signed out of this device. Please sign in again.',
+                security: 'For your security, this sign-in was ended. Please sign in again.',
+                expired: 'Your session expired. Please sign in again.'
+            };
+            if (SIGNED_OUT_MESSAGES[signedOut]) {
+                errorMessage.textContent = SIGNED_OUT_MESSAGES[signedOut];
+                errorMessage.style.display = 'block';
+            } else if (isAuthenticated()) {
+                // Signed in on this browser (chat.html confirms it with the server)
+                window.location.href = nextUrl || 'chat.html';
+            }
 
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();

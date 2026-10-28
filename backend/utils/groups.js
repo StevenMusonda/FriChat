@@ -5,6 +5,7 @@
 
 const { executeQuery, queryOne } = require('../config/database');
 const { toBool } = require('./messageQueries');
+const { checkDirectChatBlock } = require('./blocks');
 
 const ANNOUNCEMENT_ONLY_MESSAGE = 'Only admins can send messages in this group';
 
@@ -35,10 +36,17 @@ function postingError(membership) {
 }
 
 /**
- * Every send path (REST send, file upload into a chat, forward, socket send_message) goes through this
+ * Every send path (REST send, file upload into a chat, forward, socket send_message) goes through this.
+ * Direct chats also refuse while either user has blocked the other.
  */
 async function checkCanPost(chatId, userId) {
-    return postingError(await getMembership(chatId, userId));
+    const membership = await getMembership(chatId, userId);
+    const error = postingError(membership);
+    if (error) return error;
+    if (membership.chat_type === 'direct') {
+        return checkDirectChatBlock(chatId, userId);
+    }
+    return null;
 }
 
 /**
@@ -111,6 +119,100 @@ async function countAdmins(chatId, exceptUserId = 0) {
         [chatId, exceptUserId]
     );
     return row ? parseInt(row.count) || 0 : 0;
+}
+
+const LAST_ADMIN_ERROR = { status: 409, code: 'LAST_ADMIN', message: 'A group needs at least one admin. Make someone else an admin first.' };
+
+/**
+ * Make a member an admin or a regular member. Demoting can never leave the group without an admin:
+ * the UPDATE only applies while another admin exists, and a race between two demotions is repaired.
+ * @returns {{ error } | { changed: boolean, role }}
+ */
+async function setMemberRole(chatId, userId, role) {
+    const target = await queryOne('SELECT role FROM group_members WHERE chat_id = ? AND user_id = ?', [chatId, userId]);
+    if (!target) {
+        return { error: { status: 404, message: 'That user is not a member of this group' } };
+    }
+    if (target.role === role) return { changed: false, role };
+
+    if (role === 'admin') {
+        await promoteToAdmin(chatId, userId);
+        return { changed: true, role };
+    }
+
+    if ((await countAdmins(chatId, userId)) === 0) return { error: LAST_ADMIN_ERROR };
+
+    // The derived table lets MySQL read group_members inside an UPDATE of group_members; the COUNT
+    // inside it keeps MySQL from merging it back into the UPDATE (which would raise error 1093)
+    const sql = `
+        UPDATE group_members SET role = 'member'
+        WHERE chat_id = ? AND user_id = ? AND role = 'admin'
+        AND (SELECT other_admins.n FROM (SELECT COUNT(*) AS n FROM group_members WHERE chat_id = ? AND role = 'admin' AND user_id <> ?) AS other_admins) > 0
+    `;
+    let updated;
+    if (process.env.DB_TYPE === 'postgresql') {
+        updated = (await executeQuery(`${sql} RETURNING id`, [chatId, userId, chatId, userId])).length === 1;
+    } else {
+        updated = (await executeQuery(sql, [chatId, userId, chatId, userId])).affectedRows === 1;
+    }
+    if (!updated) return { error: LAST_ADMIN_ERROR };
+
+    // Two admins demoting each other at the same moment
+    if ((await countAdmins(chatId)) === 0) {
+        await promoteToAdmin(chatId, userId);
+        return { error: LAST_ADMIN_ERROR };
+    }
+    return { changed: true, role };
+}
+
+// --- bans ---
+
+const BANNED_ERROR = { status: 403, code: 'BANNED', message: 'You can\'t join this group.' };
+
+async function isBanned(chatId, userId) {
+    const row = await queryOne('SELECT id FROM group_bans WHERE chat_id = ? AND user_id = ?', [chatId, userId]);
+    return !!row;
+}
+
+/**
+ * Ban a user from a group (they must already be removed). Pending join requests go too.
+ */
+async function banUser(chatId, userId, bannedBy) {
+    try {
+        await executeQuery('INSERT INTO group_bans (chat_id, user_id, banned_by) VALUES (?, ?, ?)', [chatId, userId, bannedBy]);
+    } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error;
+    }
+    await executeQuery('DELETE FROM chat_join_requests WHERE chat_id = ? AND user_id = ?', [chatId, userId]);
+}
+
+/**
+ * @returns {Promise<boolean>} false if the user wasn't banned
+ */
+async function unbanUser(chatId, userId) {
+    const existing = await queryOne('SELECT id FROM group_bans WHERE chat_id = ? AND user_id = ?', [chatId, userId]);
+    if (!existing) return false;
+    await executeQuery('DELETE FROM group_bans WHERE id = ?', [existing.id]);
+    return true;
+}
+
+async function listBans(chatId) {
+    const rows = await executeQuery(`
+        SELECT b.user_id, b.created_at, u.username, u.full_name, u.avatar_url, by_user.username AS banned_by_username
+        FROM group_bans b
+        JOIN users u ON u.id = b.user_id
+        LEFT JOIN users by_user ON by_user.id = b.banned_by
+        WHERE b.chat_id = ?
+        ORDER BY b.created_at DESC, b.id DESC
+    `, [chatId]);
+    return rows.map(row => ({
+        userId: Number(row.user_id),
+        username: row.username,
+        fullName: row.full_name || null,
+        avatarUrl: row.avatar_url || null,
+        bannedBy: row.banned_by_username || null,
+        bannedAt: row.created_at
+    }));
 }
 
 async function promoteToAdmin(chatId, userId) {
@@ -235,11 +337,13 @@ async function countPendingRequests(chatId) {
 }
 
 /**
- * Send an event to the personal room of every admin of the group
+ * Send an event to the personal room of every admin of the group (except excludeIds)
  */
-async function emitToAdmins(io, chatId, event, data) {
+async function emitToAdmins(io, chatId, event, data, excludeIds = []) {
     if (!io) return;
+    const skip = new Set(excludeIds.map(Number));
     for (const adminId of await getAdminIds(chatId)) {
+        if (skip.has(Number(adminId))) continue;
         io.to(`user_${adminId}`).emit(event, data);
     }
 }
@@ -253,6 +357,13 @@ module.exports = {
     isDuplicateKeyError,
     addGroupMember,
     findLongestStandingMember,
+    countAdmins,
+    setMemberRole,
+    BANNED_ERROR,
+    isBanned,
+    banUser,
+    unbanUser,
+    listBans,
     leaveGroup,
     joinUserToChatRoom,
     removeUserFromChatRoom,
@@ -260,5 +371,6 @@ module.exports = {
     emitGroupUpdated,
     emitMembersUpdated,
     countPendingRequests,
+    getAdminIds,
     emitToAdmins
 };

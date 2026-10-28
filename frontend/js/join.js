@@ -49,6 +49,29 @@
         window.location.href = `chat.html?chat=${encodeURIComponent(chatId)}`;
     }
 
+    /**
+     * Joining by link needs a verified email; offer to send the link again
+     */
+    function verifyEmailPrompt(container) {
+        const box = h('div', 'join-verify');
+        box.appendChild(h('p', null, 'Please verify your email address to join groups by link. Open the link we emailed you, then come back to this page.'));
+        const status = h('p', 'join-status');
+        status.setAttribute('role', 'status');
+        const resend = button('Resend verification email', 'btn-secondary', async () => {
+            resend.disabled = true;
+            try {
+                const response = await apiRequest(CONFIG.ENDPOINTS.RESEND_VERIFICATION, { method: 'POST' });
+                status.textContent = response.message || (response.success ? 'Verification email sent.' : 'Could not send the email.');
+            } catch (error) {
+                status.textContent = 'Something went wrong. Please try again.';
+            }
+            resend.disabled = false;
+        });
+        box.appendChild(resend);
+        box.appendChild(status);
+        container.appendChild(box);
+    }
+
     function renderPreview(code, group) {
         const card = h('div', 'join-preview');
 
@@ -75,8 +98,14 @@
         if (group.joinState === 'member') {
             status.textContent = 'You are already a member of this group.';
             actions.appendChild(button('Open chat', 'btn-primary', () => openChat(group.chatId)));
+        } else if (group.joinState === 'banned') {
+            status.textContent = 'You can\'t join this group.';
         } else if (group.joinState === 'pending') {
             status.textContent = 'Your request to join is waiting for an admin. You\'ll see the group in your chats once it\'s approved.';
+        } else if (group.joinState === 'declined' && group.canRequestAgain === false) {
+            status.textContent = 'An admin declined your request. You can ask again 24 hours after it was declined.';
+        } else if (group.emailVerified === false) {
+            verifyEmailPrompt(actions);
         } else {
             if (group.joinState === 'declined') {
                 status.textContent = 'An admin declined your earlier request. You can ask again.';
@@ -97,7 +126,8 @@
         try {
             const response = await apiRequest(CONFIG.ENDPOINTS.INVITE_JOIN(code), { method: 'POST' });
             if (!response.success) {
-                showMessage('Can\'t join this group', errorText(response, 'This invite link can\'t be used.'), true);
+                const box = showMessage('Can\'t join this group', errorText(response, 'This invite link can\'t be used.'), true);
+                if (response.code === 'EMAIL_NOT_VERIFIED') verifyEmailPrompt(box);
                 return;
             }
             if (response.data.status === 'pending') {
@@ -130,6 +160,13 @@
 
         if (!isAuthenticated()) {
             window.location.href = `login.html?next=${encodeURIComponent(`join.html?code=${code}`)}`;
+            return;
+        }
+
+        // Turn the refresh cookie into an access token (an ended session goes to login, which comes back here)
+        const session = await ensureSession();
+        if (!session.ok) {
+            if (session.network) showMessage('Connection error', 'Please check your connection and reload the page.', true);
             return;
         }
 

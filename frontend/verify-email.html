@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Keep the verification token out of Referer headers -->
+    <meta name="referrer" content="no-referrer">
+    <title>FriChat - Verify Email</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#667eea" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a202c" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="icons/favicon-32.png" type="image/png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="FriChat">
+    <script src="js/pwa.js" defer></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>FriChat</h1>
+                <p>Email verification</p>
+            </div>
+            <div class="auth-form">
+                <div id="verifyStatus" class="success-message" role="status">Verifying your email address…</div>
+                <div id="errorMessage" class="error-message" role="alert" style="display: none;"></div>
+            </div>
+            <div class="auth-footer">
+                <p><a href="chat.html" id="continueLink">Continue to FriChat</a></p>
+            </div>
+        </div>
+    </div>
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const status = document.getElementById('verifyStatus');
+            const errorMessage = document.getElementById('errorMessage');
+            const continueLink = document.getElementById('continueLink');
+            const token = new URLSearchParams(window.location.search).get('token');
+
+            // Remove the token from the address bar and browser history
+            if (token) {
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+
+            if (!isAuthenticated()) continueLink.href = 'login.html';
+
+            function showError(message) {
+                status.style.display = 'none';
+                errorMessage.textContent = message;
+                errorMessage.style.display = 'block';
+            }
+
+            if (!token || !/^[a-f0-9]{64}$/.test(token)) {
+                showError('This verification link is invalid. Sign in and send a new one from Settings.');
+                return;
+            }
+
+            const result = await verifyEmailToken(token);
+            if (!result.success) {
+                showError((result.errors && result.errors[0].msg) || result.message || 'This verification link is invalid or has expired.');
+                return;
+            }
+
+            status.textContent = result.message || 'Your email address is verified.';
+            // Keep this browser's profile hint in step (open chat tabs also get a live event)
+            const user = getCurrentUser();
+            if (user) {
+                user.emailVerified = true;
+                localStorage.setItem(CONFIG.STORAGE_KEYS.USER_DATA, JSON.stringify(user));
+            }
+        });
+    </script>
+</body>
+</html>

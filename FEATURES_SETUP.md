@@ -719,6 +719,7 @@ Don't re-run the schema file. Run the migrations you haven't run yet, in this or
 | 9 | `add_mentions_and_link_previews.sql` (run once) | `add_mentions_and_link_previews_postgresql.sql` |
 | 10 | `reactions_one_per_user.sql` | `reactions_one_per_user_postgresql.sql` |
 | 11 | `add_group_invites_and_settings.sql` (run once) | `add_group_invites_and_settings_postgresql.sql` |
+| 12 | `add_security_layer.sql` (run once) | `add_security_layer_postgresql.sql` |
 
 ```bash
 # MySQL, one file at a time
@@ -874,6 +875,199 @@ Use four users. A is the admin of a group with B and C. D is not in it. Use a pr
 - A requester who is offline when their request is decided gets no push notification. They see the result when they next open FriChat (the chat is in their list) or the join page.
 - Only admins can tag. There is no promote or demote endpoint besides the leave hand-over (not in this phase).
 - Changing `chats` settings bumps `chats.updated_at` (existing `ON UPDATE` / trigger), so a settings change moves the group up the sidebar like a new message.
+
+---
+
+## Phase 6: Safety layer (verification, sessions, devices, blocking, socket limits, group follow-ups)
+
+The safety layer that has to exist before strangers can reach members through invite links: verified email addresses, short-lived tokens with revocable per-device sessions, blocking, Socket.IO rate limits, and the Phase 5 group follow-ups (bans, admin rights, join-decision pushes, join-request limits).
+
+### What it does
+
+- **Tokens moved out of `localStorage`.** Before this phase, a 7-day JWT was stored in `localStorage` and read by `auth.js`, `websocket.js`, `messages.js`, `groups.js` and `pwa.js`. Now:
+  - The **access token** is a 15-minute JWT (`ACCESS_TOKEN_TTL`) that carries `userId` and the session id (`sid`). It lives only in a JavaScript variable in `auth.js`.
+  - The **refresh token** is 256 random bits in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie named `frichat_refresh`. The cookie has `Path=/api/auth`, so it never goes to chat, message or upload routes.
+  - Each page load calls `POST /api/auth/refresh` to get an access token, and the client renews it a minute before it expires. Any old `authToken` left in `localStorage` is deleted on load. `localStorage` keeps only the non-secret `userData` as a "signed in on this browser" hint.
+- **Rotation and reuse detection.**
+  - Every refresh returns a new refresh token. The old token's SHA-256 hash moves to `session_refresh_tokens`, and only hashes are ever stored.
+  - Presenting an old token again means a copy exists somewhere. The server revokes that whole session (the family), disconnects its sockets, and returns `401 TOKEN_REUSED`. The newest token stops working too.
+  - Two tabs refreshing at the same moment is a race, not theft. Within `REFRESH_REUSE_GRACE_SECONDS` (default 10) of a rotation, the old token gets `409 REFRESH_RACE` instead of a revoke, and the client retries with the cookie the other tab just received. Tabs also serialise refreshes with the Web Locks API where the browser supports it.
+- **Sessions table.** One row per signed-in device. Each row holds the user, the current refresh-token hash, a device label parsed from the user agent (for example "Chrome on Windows" or "Safari on iPhone", with no external parser), the last IP, created, last active (written at most once a minute), expiry (30 days, sliding) and revoked. The IP is shown as-is, with no geolocation lookup.
+- **Every request re-checks the session.** The auth middleware and the Socket.IO handshake load the user through `sessions JOIN users WHERE revoked_at IS NULL`. A revoked device is refused on its next request, not when its access token expires. Revoking a session emits `session_revoked` to the room `session_<id>`, and then disconnects every socket in it. In a live test the revoked device was disconnected 6 ms after **Log out**. On reconnect the handshake checks the token and session again:
+  - `Invalid or expired token`: the client refreshes and reconnects.
+  - `Session revoked`: the client signs out.
+- **Settings > Devices** lists active sessions newest first, with device, last active and IP, and marks **This device**. Each other device has **Log out**, the current one has **Log out this device**, and there is a **Log out all other devices** button.
+- **Change password** (Settings) needs the current password, and the new one must be different. It signs out every other device and keeps this one. A wrong current password returns `400`, not `401`, so it doesn't sign you out. A **password reset** by email signs out every device.
+- **Email verification.**
+  - Sign-up sends a link to `<FRONTEND_URL>/verify-email.html?token=…`. The link is single-use and expires after 24 hours (`EMAIL_VERIFICATION_TTL_HOURS`). Only its SHA-256 hash is stored, it goes out through `utils/mailer.js`, and without SMTP the link is printed to the server console.
+  - Unverified users can sign in and use the chats they already have, but they can't:
+    - create invite links
+    - join groups by link
+    - start a chat with, create a group with, or add to a group anyone they don't already share a chat with
+  - The refusal is `403 EMAIL_NOT_VERIFIED`. A banner in the sidebar, Settings > Email and the join page all offer **Resend**, rate limited to 3 per 15 minutes per account and 10 per hour per IP. Open tabs drop the banner live (`email_verified`) when the link is used.
+  - **Accounts that already exist when you run the migration are marked verified**, so current users lose nothing.
+- **Blocking.** **Block user** / **Unblock user** is in the chat ⋯ menu of a direct chat and in the ⋯ options of each member in a group panel. **Settings > Blocked users** lists blocked users with **Unblock**. The server enforces the following:
+  - **Direct messages, both directions:** `POST /api/messages`, upload into the chat, forward, `send_message`, reactions and edits are refused with `403 BLOCKED` (socket: `error { code: 'BLOCKED' }`). The composer of a blocked direct chat is locked with the reason. No new direct chat can be created between the two.
+  - **Presence:** the blocker's `user_status` broadcasts skip the blocked user's sockets. REST lists (chat list, chat details, user search) show the blocker as `offline` to them, and blocking immediately sends the blocked user's open tabs an `offline` status.
+  - **Typing:** `user_typing` isn't delivered between the two users, in either direction.
+  - **Groups:** the blocked user can't put the blocker into a new group or add them to one. The blocker can still add the person they blocked.
+  - **Other paths:** @mentions from the blocked user don't mention or notify the blocker, new-message pushes from the blocked user skip the blocker, and admins who blocked a requester aren't sent the live `join_request_created` notice.
+- **Socket.IO rate limits.** `backend/config/socketLimits.js` defines token buckets per socket and per user (all of a user's tabs share the user bucket) for each event group:
+  - `send_message`
+  - `typing` (dropped silently)
+  - `add_reaction` and `remove_reaction`
+  - `join_chat` and `authenticate`
+
+  A dropped event is answered with `rate_limited { event, retryAfterMs }`, and the UI shows a toast. A socket that hits the limit 30 times in a minute is disconnected (`rate_limited { disconnected: true }`), and its user bucket still applies after it reconnects.
+- **Group follow-ups from Phase 5:**
+  - **Remove and ban.** In the members panel, each member's ⋯ menu offers **Remove** and **Remove and ban**. A banned user can't rejoin through any invite link (`403 BANNED`, and the attempt doesn't use the link) and can't be added back by an admin. Banning also deletes their pending request, and approving a request from a banned user is refused (`409`). A **Banned** section for admins lists banned users, who banned them, and an **Unban** button.
+  - **Make admin / Remove admin.** These are in the same ⋯ menu. The demote is one conditional `UPDATE` that applies only while another admin exists, with a repair step if two admins demote each other at the same moment, so a group always keeps at least one admin (`409 LAST_ADMIN`).
+  - **Push for join decisions.** When an admin approves or declines a request, the requester gets a Web Push notification on every device where they enabled push. The notification respects do-not-disturb, reuses the Phase 2 push code, and opens the chat when the request was approved.
+  - **Join-request limits.** A user can have at most 3 pending requests across all groups (`429 TOO_MANY_PENDING`). After a decline, they can't ask the same group again for 24 hours (`429 DECLINED_RECENTLY`, and the join page explains it). Neither refusal uses up the link. The limits are in `backend/config/groups.js`.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_security_layer.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_security_layer_postgresql.sql
+```
+
+The migration adds:
+- `users.email_verified_at`, with every existing account marked verified.
+- The tables `email_verifications`, `sessions`, `session_refresh_tokens`, `user_blocks` and `group_bans`.
+- The index `idx_join_requests_user_status`.
+
+Fresh installs get all of this from `schema.sql` / `schema_postgresql.sql`. **Run the migration before starting the new code**, because every authenticated request now reads `sessions`. After the upgrade, everyone has to sign in once, since the old 7-day tokens are refused (they have no session).
+
+Users from `sample_data.sql` are unverified on a fresh install. To use them for invite links, verify them by hand:
+```sql
+UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE email_verified_at IS NULL;
+```
+
+New env variables (all optional, in `backend/.env.example`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ACCESS_TOKEN_TTL` | `15m` | Access JWT lifetime. Replaces `JWT_EXPIRES_IN`, which is no longer used |
+| `REFRESH_TOKEN_TTL_DAYS` | `30` | Refresh token and session lifetime. It slides forward on every refresh |
+| `REFRESH_REUSE_GRACE_SECONDS` | `10` | How long a just-rotated token gets "retry" instead of revoking the session |
+| `EMAIL_VERIFICATION_TTL_HOURS` | `24` | Verification link lifetime |
+| `COOKIE_SAMESITE` | `strict` | `strict`, `lax` or `none`. Use `none` only when the frontend and API are on different sites, for example two different `*.onrender.com` hosts. `none` forces `Secure` |
+| `COOKIE_SECURE` | `true` | Set `false` only for plain-http development in a browser that refuses Secure cookies from `http://localhost` (older Safari) |
+| `TRUST_PROXY` | unset | Behind a reverse proxy (Render, nginx), set it to the number of proxies (usually `1`). `req.ip`, the rate limits and the IPs under Devices then show the client's address |
+
+No new npm packages.
+
+### New endpoints
+
+Refresh and logout read the cookie and require the header `X-FriChat-Refresh: 1`. A page on another origin can't send that header without a CORS preflight, which `CORS_ORIGIN` refuses.
+
+| Method | Endpoint | Body | Auth | Notes |
+|---|---|---|---|---|
+| POST | `/api/auth/login`, `/api/auth/register` | as before | – | Return `accessToken`, `expiresIn` and `emailVerified` (no `token` any more), and set the refresh cookie. New rate limits: 20 logins per 15 minutes and 10 sign-ups per hour, per IP |
+| POST | `/api/auth/refresh` | – | cookie + header | `200` with a new access token and a rotated cookie. `409 REFRESH_RACE` means retry. `401` with `NO_SESSION`, `SESSION_EXPIRED` or `TOKEN_REUSED` (session revoked). Limit 30/min per IP |
+| POST | `/api/auth/logout` | – | cookie + header (Bearer optional) | Revokes this session and clears the cookie, also with an expired access token |
+| POST | `/api/auth/verify-email` | `{ token }` | – | `400` if the link is invalid, expired or used. Limit 20 per 15 min per IP |
+| POST | `/api/auth/resend-verification` | – | Bearer | `400 ALREADY_VERIFIED`. 3 per 15 min per account, 10 per hour per IP |
+| PUT | `/api/auth/password` | `{ currentPassword, newPassword }` | Bearer | `400 WRONG_PASSWORD`. Returns `revokedSessions`. 5 per 15 min per IP |
+| GET | `/api/auth/sessions` | – | Bearer | `[{ id, device, userAgent, ipAddress, createdAt, lastActiveAt, current }]` |
+| DELETE | `/api/auth/sessions/:sessionId` | – | Bearer | Own sessions only (`404` otherwise). Disconnects that device's sockets at once |
+| POST | `/api/auth/sessions/revoke-others` | – | Bearer | Everything except the calling session |
+| GET | `/api/blocks` | – | Bearer | `[{ id, username, fullName, avatarUrl, blockedAt }]` |
+| POST | `/api/blocks` | `{ userId }` | Bearer | `201` (`200` if already blocked). `400` for yourself, `404` for an unknown user |
+| DELETE | `/api/blocks/:userId` | – | Bearer | `404` if not blocked |
+| DELETE | `/api/chats/:chatId/members/:userId?ban=true` | – | admins | Remove and ban. Plain removal is unchanged. Now validated and rate limited |
+| PUT | `/api/chats/:chatId/members/:userId/role` | `{ role: 'admin' \| 'member' }` | admins | `409 LAST_ADMIN`, `404` if not a member |
+| GET | `/api/chats/:chatId/bans` | – | admins | `[{ userId, username, fullName, avatarUrl, bannedBy, bannedAt }]` |
+| DELETE | `/api/chats/:chatId/bans/:userId` | – | admins | Unban, `404` if not banned |
+
+Block, ban, role and device routes are limited to 30/min per IP.
+
+Other changes to existing endpoints:
+- `POST /api/chats/:chatId/members` is now validated and rate limited, and refuses with `403` and code `BANNED`, `BLOCKED` or `EMAIL_NOT_VERIFIED`.
+- `POST /api/chats` refuses with `BLOCKED` or `EMAIL_NOT_VERIFIED`.
+- `POST /api/chats/:chatId/invites` refuses with `EMAIL_NOT_VERIFIED`.
+- `POST /api/invites/:code/join` refuses with `EMAIL_NOT_VERIFIED`, `BANNED`, `TOO_MANY_PENDING` or `DECLINED_RECENTLY`.
+- `GET /api/invites/:code` now also returns `canRequestAgain` and `emailVerified`, and `joinState` can be `banned`.
+- `GET /api/chats/:chatId` returns `can_post: false` and `post_blocked_message` for a blocked direct chat.
+- Message send, upload, forward, reaction and edit refuse with `403 BLOCKED` in a blocked direct chat.
+
+### New Socket.IO events
+
+| Event | Direction | Payload | When |
+|---|---|---|---|
+| `session_revoked` | server → `session_<id>` | `{ reason: 'logout' \| 'user' \| 'password' \| 'reuse' }` | Right before that device's sockets are disconnected |
+| `rate_limited` | server → socket | `{ event, retryAfterMs, disconnected? }` | A limited event was dropped (`typing` is dropped silently) |
+| `email_verified` | server → `user_<id>` | `{ userId }` | The verification link was used |
+| `block_updated` | server → blocker's `user_<id>` | `{ userId, blocked }` | Block list changed in another tab |
+| `user_status` | server → blocked user | `{ userId, status }` | Sent at block (`offline`) and unblock (the real status) |
+
+Changed:
+- The handshake now needs a session-bound access token and refuses revoked sessions (`connect_error: Session revoked`).
+- Every socket joins `session_<id>`.
+- `send_message`, `typing`, `add_reaction`, `remove_reaction`, `join_chat` and `authenticate` are rate limited.
+- `send_message` into a blocked direct chat returns `error { event, message, code: 'BLOCKED' }`.
+
+### Manual test checklist
+
+Use users A, B and C, a second browser (or a private window) for A's second device, and the server console for the email links when SMTP isn't set.
+
+1. [ ] Run the migration and restart. A signs in. In DevTools > Application: `localStorage` has no `authToken`, and the cookie `frichat_refresh` is `HttpOnly`, `Secure`, `Strict`, with `Path=/api/auth`. Reload the page several times: you stay signed in.
+2. [ ] Wait 15+ minutes, or set `ACCESS_TOKEN_TTL=1m`, and keep chatting. Messages still send, and the Network tab shows `/auth/refresh` calls and no `401` loops.
+3. [ ] Sign up as a new user D. The sidebar shows the verify banner. D can't start a chat with A (`EMAIL_NOT_VERIFIED` toast) and the join page asks D to verify. Open the console link: "Your email address is verified", and D's open tab drops the banner without a reload. Opening the link again says it's invalid.
+4. [ ] As D before verifying, click **Resend email** 4 times: the 4th is refused with a "We already sent you a few links" message.
+5. [ ] A signs in on a second browser. **Settings > Devices** lists both, with the right browser names, "This device" on the current one, last active and IP. **Log out** the other one: that browser goes to the login page within a second ("You were signed out of this device"). Reloading it doesn't get back in.
+6. [ ] **Log out all other devices** works the same way for every other device.
+7. [ ] Stolen token: in browser 1, copy the `frichat_refresh` cookie value. Reload the page (the token rotates). Wait 15 seconds, then run `curl -X POST -H "X-FriChat-Refresh: 1" -H "Cookie: frichat_refresh=<old value>" http://localhost:3000/api/auth/refresh`: `401 TOKEN_REUSED`. Browser 1 is signed out ("For your security…") and the device is gone from the list.
+8. [ ] **Change password** with a wrong current password: error, still signed in. With the right one: the other browser is signed out and this one stays. **Forgot password** → reset: every browser is signed out.
+9. [ ] B blocks A from the ⋯ menu of their direct chat. A's composer in that chat is locked ("You can't send messages to this user."), and B's shows "You blocked this user…". A sees B as offline, even though B is online. A's typing in a shared group doesn't show for B, and B's typing doesn't show for A.
+10. [ ] Bypass as A from the console: `socket.emit('send_message', { chatId: <dm>, messageType: 'text', content: 'x' })` → error toast, nothing delivered. `POST /api/messages`, forwarding into the direct chat and reacting there → `403`. A creating a new group with B, or adding B to A's group → `403`. `@B` in a shared group doesn't notify or highlight for B.
+11. [ ] **Settings > Blocked users** lists A. **Unblock**: A can message B again, and B's online status shows for A again.
+12. [ ] Rate limit: from the console, run `for (let i = 0; i < 30; i++) socket.emit('send_message', { chatId: <id>, messageType: 'text', content: 'spam ' + i })`. About 10 arrive, and then "You're sending messages too fast" appears.
+13. [ ] Group (A admin, with B and C): open B's ⋯ → **Make admin**. B gets the Admin badge in every member's panel. A → **Remove admin** on A: allowed (B is admin). B tries to remove their own admin rights while they're the last admin → "A group needs at least one admin".
+14. [ ] ⋯ on C → **Remove and ban**. C is removed. In the **Banned** section, C shows with "banned by @…". C opening any invite link: "You can't join this group". Adding C back → refused. **Unban**: C can join again.
+15. [ ] Approval on: D (verified) requests to join with push enabled and the tab closed. A approves, and D gets a "You joined …" push. Decline another request: "Join request declined" push. The declined user can't request again (join page and API) until 24 h have passed.
+16. [ ] D requests to join 3 approval groups, then a 4th: "You already have 3 join requests waiting…".
+17. [ ] Dark theme and a 360px-wide phone: the verify banner, the Settings sections (password form, devices, blocked list) and the member ⋯ actions fit without sideways scrolling.
+
+### Tests
+
+`cd backend && npm test` (477 tests, 73 more than before; all pass).
+- `test/sessions.test.js` drives the real Express app over HTTP on both fake drivers. It covers:
+  - Cookie flags, path and token lifetime, and that only hashes are stored.
+  - Rotation, and the stolen old token: `401`, family revoked, sockets disconnected, the newer token dead too.
+  - The `409` race and the header requirement.
+  - Devices: list, current device, revoking (only your own), and revoke-others.
+  - Change password (wrong, same, ok) and reset revoking everything.
+  - Logout with an expired access token, and verify/resend including the per-account limit.
+  - The Socket.IO handshake (valid, expired, legacy, revoked), cookie settings and device labels.
+- `test/authClient.test.js` runs the real `frontend/js/auth.js` in a sandbox. It covers:
+  - The token is never written to storage, and an old `authToken` is deleted.
+  - A `401` refreshes and retries once, and a failed refresh, revoked session or reused token signs out with the right reason.
+  - `403` keeps the session, a network error doesn't sign out, `409` is retried, concurrent callers share one refresh, and the login page never refreshes.
+- `test/groups.test.js` now also covers bans, admin rights, the join-request limit, join-decision pushes, the email-verification gates, blocking on every path (REST, socket, reactions, forward, create and add, presence and typing broadcasts, mentions) and the token buckets.
+- Existing tests: the fake databases in `chatList`, `messageActions`, `mentions`, `push`, `textRule`, `sendMessage`, `fileAttach`, `reactions` and `linkPreview` were taught the new block lookups. Three assertions were updated on purpose:
+  - The chat list is now 4 queries.
+  - The push recipient query binds the sender twice.
+  - A declined requester waits 24 hours instead of asking again immediately.
+
+  The old "frontend apiRequest" test moved to `authClient.test.js`.
+- Live check on PostgreSQL 18, in throwaway databases that were dropped afterwards:
+  - The HEAD schema plus the migration, run twice, matches a fresh `schema_postgresql.sql` for every new table and column. Pre-existing users came out verified and later sign-ups unverified.
+  - An end-to-end script against the real server, with real Socket.IO clients, passed 18 checks, including the stolen-token case and the 6 ms device disconnect.
+
+### Known limitations
+
+- **MySQL wasn't run against a live server** (none is installed here). The MySQL statements use `DATE_ADD`/`DATE_SUB` with `INTERVAL ? DAY|HOUR|SECOND`. The no-last-admin demote uses a derived table holding the `COUNT(*)`, which MySQL materializes, so the self-referencing `UPDATE` is allowed. Both fake drivers exercise every statement.
+- Rate limits (HTTP and socket) and the "last active" throttle are in memory, per server instance, like the existing limiter. Socket revocation uses Socket.IO rooms, so it works across instances only with a shared adapter.
+- A socket that connected with a valid access token stays connected after that token expires, until its session is revoked or the socket reconnects. This is the usual Socket.IO model. Revocation is the control.
+- If a refresh response is lost on the network after the server rotated the token, the browser keeps the old cookie. The next refresh after the grace window then looks like reuse and signs that device out. This is safe, but it can sign someone out after a bad connection.
+- Blocks don't hide group messages: in a shared group, the blocker still sees the blocked user's messages and vice versa, as in most chat apps. Read receipts (`messages_read`) and pins in an existing direct chat aren't filtered by blocks.
+- `Secure` cookies over plain `http://localhost` work in Chrome, Edge and Firefox. Older Safari needs `COOKIE_SECURE=false` for local http testing. For deployments where the frontend and API are on different sites, set `COOKIE_SAMESITE=none` (HTTPS only).
+- `sample_data.sql` users are unverified on a fresh install (see the SQL above). The sample data itself wasn't changed.
+- The block confirm, remove and ban dialogs use the browser's `confirm()` box.
 
 ---
 

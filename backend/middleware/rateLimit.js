@@ -5,10 +5,10 @@
 
 /**
  * Create a rate limiting middleware
- * @param {Object} options - { windowMs, max, message }
+ * @param {Object} options - { windowMs, max, message, keyGenerator? } (keyGenerator(req) defaults to the IP)
  */
-function rateLimit({ windowMs, max, message }) {
-    const hits = new Map(); // ip -> { count, resetAt }
+function rateLimit({ windowMs, max, message, keyGenerator }) {
+    const hits = new Map(); // key -> { count, resetAt }
 
     // Periodically drop expired entries so the map doesn't grow forever
     setInterval(() => {
@@ -21,7 +21,7 @@ function rateLimit({ windowMs, max, message }) {
     }, windowMs).unref();
 
     return (req, res, next) => {
-        const key = req.ip;
+        const key = keyGenerator ? keyGenerator(req) : req.ip;
         const now = Date.now();
         let entry = hits.get(key);
 

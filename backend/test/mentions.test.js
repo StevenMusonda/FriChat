@@ -120,6 +120,10 @@ function createWorld(dbType) {
         if (/^SELECT id FROM messages WHERE id = /.test(sql)) return world.messages[params[0]] ? [{ id: Number(params[0]) }] : [];
         if (/^SELECT COUNT\(\*\) AS count/.test(sql)) return [{ count: 3 }];
 
+        // Phase 6 block checks: nobody is blocked in these tests
+
+        if (/user_blocks/.test(sql)) return [];
+
         throw new Error(`Unexpected query: ${sql}`);
     };
     return world;
@@ -312,6 +316,8 @@ for (const dbType of ['mysql', 'postgresql']) {
         test('mentions bypass "mentions only" (and a mute with it), DND still wins', async () => {
             const { load } = setupFakeDb(dbType, (sql) => {
                 if (/FROM group_members gm LEFT JOIN notification_settings ns/.test(sql)) return ROWS.map(r => ({ ...r }));
+                // Phase 6 block checks: nobody is blocked in these tests
+                if (/user_blocks/.test(sql)) return [];
                 throw new Error(`Unexpected query: ${sql}`);
             });
             const { findRecipients } = load('utils/push.js');
@@ -326,6 +332,8 @@ for (const dbType of ['mysql', 'postgresql']) {
                 }
                 if (/^SELECT gm.user_id, COUNT\(m.id\) AS unread/.test(sql)) return [];
                 if (/^SELECT chat_type, chat_name FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team' }];
+                // Phase 6 block checks: nobody is blocked in these tests
+                if (/user_blocks/.test(sql)) return [];
                 throw new Error(`Unexpected query: ${sql}`);
             });
             const sent = [];

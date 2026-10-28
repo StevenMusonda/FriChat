@@ -13,6 +13,7 @@ const { attachLinkPreview } = require('../utils/linkPreview');
 const reactionRules = require('../utils/reactions');
 const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
 const { checkCanPost, postingError } = require('../utils/groups');
+const { checkDirectChatBlock } = require('../utils/blocks');
 const {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
@@ -465,9 +466,10 @@ async function addReaction(req, res) {
     try {
         const result = await reactionRules.toggleReaction(req.params.messageId, req.user.id, req.body.emoji);
         if (result.error) {
-            return res.status(result.notFound ? 404 : 400).json({
+            return res.status(result.notFound ? 404 : (result.blocked ? 403 : 400)).json({
                 success: false,
-                message: result.error
+                message: result.error,
+                code: result.blocked ? 'BLOCKED' : undefined
             });
         }
 
@@ -874,6 +876,12 @@ async function editMessage(req, res) {
             });
         }
 
+        // An edit reaches the other person like a new message, so a block stops it too
+        const blockError = await checkDirectChatBlock(message.chat_id, userId);
+        if (blockError) {
+            return res.status(blockError.status).json({ success: false, message: blockError.message, code: blockError.code });
+        }
+
         if (toBool(message.deleted_for_everyone) || toBool(message.deleted_for_me)) {
             return res.status(400).json({
                 success: false,
@@ -1020,6 +1028,19 @@ async function forwardMessages(req, res) {
                 message: 'One or more of those groups only allow admins to send messages',
                 code: 'ANNOUNCEMENT_ONLY'
             });
+        }
+
+        // ...and direct chats refuse it while either person has blocked the other
+        for (const membership of memberships) {
+            if (membership.chat_type !== 'direct') continue;
+            const blockError = await checkDirectChatBlock(membership.chat_id, userId);
+            if (blockError) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can\'t forward to one or more of those chats',
+                    code: 'BLOCKED'
+                });
+            }
         }
 
         // Copies go through the same text rule as new messages

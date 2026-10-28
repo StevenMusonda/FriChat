@@ -76,6 +76,8 @@ function createWorld(dbType) {
         if (/FROM messages m JOIN users u ON m.sender_id = u.id/.test(sql)) {
             return [{ id: NEW_MESSAGE_ID, chat_id: CHAT_ID, sender_id: ME, content: null, message_type: 'file' }];
         }
+        // Phase 6 block checks: nobody is blocked in these tests
+        if (/user_blocks/.test(sql)) return [];
         throw new Error(`Unexpected query: ${sql}`);
     };
 

@@ -69,6 +69,30 @@ If you didn't request this, you can safely ignore this email.`;
     await sendMail({ to, subject: 'Reset your FriChat password', text, html });
 }
 
+/**
+ * Send an email-verification link
+ */
+async function sendVerificationEmail(to, username, verifyUrl, expiresInHours) {
+    const text = `Hi ${username},
+
+Welcome to FriChat! Please confirm your email address by opening the link below:
+
+${verifyUrl}
+
+This link expires in ${expiresInHours} hours and can only be used once.
+If you didn't create a FriChat account, you can ignore this email.`;
+
+    const html = `
+        <p>Hi ${escapeHtml(username)},</p>
+        <p>Welcome to FriChat! Please confirm your email address.</p>
+        <p><a href="${escapeHtml(verifyUrl)}">Verify your email</a></p>
+        <p>This link expires in ${expiresInHours} hours and can only be used once.<br>
+        If you didn't create a FriChat account, you can ignore this email.</p>
+    `;
+
+    await sendMail({ to, subject: 'Verify your FriChat email address', text, html });
+}
+
 function escapeHtml(text) {
     return String(text)
         .replace(/&/g, '&amp;')
@@ -79,5 +103,6 @@ function escapeHtml(text) {
 
 module.exports = {
     sendMail,
-    sendPasswordResetEmail
+    sendPasswordResetEmail,
+    sendVerificationEmail
 };

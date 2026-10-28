@@ -126,6 +126,10 @@ function createWorld(dbType) {
         if (/^SELECT id FROM messages WHERE id = /.test(sql)) return world.messages[params[0]] ? [{ id: Number(params[0]) }] : [];
         if (/^SELECT COUNT\(\*\) AS count/.test(sql)) return [{ count: 0 }];
 
+        // Phase 6 block checks: nobody is blocked in these tests
+
+        if (/user_blocks/.test(sql)) return [];
+
         throw new Error(`Unexpected query: ${sql}`);
     };
     return world;
@@ -433,10 +437,15 @@ describe('auth middleware: bad tokens are 401 so the frontend logs out only then
             assert.equal((await authenticate(dbType, null)).res.statusCode, 401);
             assert.equal((await authenticate(dbType, 'not-a-jwt')).res.statusCode, 401);
 
-            const expired = jwt.sign({ userId: ME, exp: Math.floor(Date.now() / 1000) - 60 }, 'test-secret');
+            const expired = jwt.sign({ userId: ME, sid: 1, exp: Math.floor(Date.now() / 1000) - 60 }, 'test-secret');
             assert.equal((await authenticate(dbType, expired)).res.statusCode, 401);
 
-            const valid = jwt.sign({ userId: ME }, 'test-secret');
+            // Tokens from before sessions existed (no sid) are refused
+            const legacy = jwt.sign({ userId: ME }, 'test-secret');
+            assert.equal((await authenticate(dbType, legacy, [{ id: ME, username: 'me' }])).res.statusCode, 401);
+
+            // Revoked session or deleted account: no row from the sessions/users lookup
+            const valid = jwt.sign({ userId: ME, sid: 1 }, 'test-secret');
             assert.equal((await authenticate(dbType, valid, [])).res.statusCode, 401);
 
             const ok = await authenticate(dbType, valid, [{ id: ME, username: 'me' }]);
@@ -445,46 +454,4 @@ describe('auth middleware: bad tokens are 401 so the frontend logs out only then
     }
 });
 
-describe('frontend apiRequest logs out on 401 only', () => {
-    async function request(status, withToken = true) {
-        const authJs = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'auth.js'), 'utf8');
-        const state = { loggedOut: false, href: 'chat.html' };
-        const sandbox = {
-            console: { log() {}, error() {} },
-            CONFIG: { API_BASE_URL: '', STORAGE_KEYS: { AUTH_TOKEN: 't' } },
-            localStorage: { getItem: () => (withToken ? 'token' : null), removeItem() {}, setItem() {} },
-            window: { location: state },
-            fetch: async () => ({ status, json: async () => ({ success: false, message: `status ${status}` }) })
-        };
-        vm.createContext(sandbox);
-        vm.runInContext(authJs, sandbox);
-        sandbox.logout = async () => { state.loggedOut = true; };
-
-        let result;
-        let error;
-        try {
-            result = await sandbox.apiRequest('/x');
-        } catch (e) {
-            error = e;
-        }
-        return { result, error, loggedOut: state.loggedOut };
-    }
-
-    test('403 is returned to the caller and keeps the session', async () => {
-        const { result, loggedOut } = await request(403);
-        assert.equal(loggedOut, false);
-        assert.equal(result.message, 'status 403');
-    });
-
-    test('401 with a token logs out', async () => {
-        const { error, loggedOut } = await request(401);
-        assert.equal(loggedOut, true);
-        assert.ok(error);
-    });
-
-    test('401 without a token (wrong password on the login page) does not', async () => {
-        const { result, loggedOut } = await request(401, false);
-        assert.equal(loggedOut, false);
-        assert.equal(result.success, false);
-    });
-});
+// The frontend's 401 / refresh / sign-out behaviour is covered in authClient.test.js

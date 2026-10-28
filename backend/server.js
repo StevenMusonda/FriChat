@@ -10,7 +10,6 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
-const jwt = require('jsonwebtoken');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -18,6 +17,7 @@ const chatRoutes = require('./routes/chats');
 const messageRoutes = require('./routes/messages');
 const notificationRoutes = require('./routes/notifications');
 const inviteRoutes = require('./routes/invites');
+const blockRoutes = require('./routes/blocks');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -31,12 +31,22 @@ const { saveMentions } = require('./utils/mentions');
 const { attachLinkPreview } = require('./utils/linkPreview');
 const reactionRules = require('./utils/reactions');
 const { checkCanPost } = require('./utils/groups');
+const { verifyAccessToken, findSessionUser, touchSession, normalizeIp } = require('./utils/sessions');
+const { getBlockRelations } = require('./utils/blocks');
+const { createSocketRateLimiter, limitSocketEvents } = require('./utils/socketRateLimit');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
 // Initialize Express app
 const app = express();
 const server = http.createServer(app);
+
+// Behind a reverse proxy (Render, nginx): TRUST_PROXY=1 (number of proxies) so req.ip, rate limits
+// and the IPs shown under Settings > Devices are the client's, not the proxy's
+if (process.env.TRUST_PROXY) {
+    const hops = parseInt(process.env.TRUST_PROXY, 10);
+    app.set('trust proxy', Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
+}
 
 // Initialize Socket.IO
 const io = socketIo(server, {
@@ -77,6 +87,7 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/invites', inviteRoutes);
+app.use('/api/blocks', blockRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -90,9 +101,25 @@ app.get('/api/health', (req, res) => {
 // Socket.IO connection handling
 const connectedUsers = new Map(); // userId -> socketId
 
+// Token buckets for send_message, typing, reactions and joins (limits in config/socketLimits.js)
+const socketLimiter = createSocketRateLimiter();
+setInterval(socketLimiter.sweep, 60 * 1000).unref();
+
 /**
- * Verify JWT on handshake - the socket's identity comes from the token,
- * never from client-supplied userId/senderId fields
+ * Socket.IO's view of the client IP (X-Forwarded-For only when TRUST_PROXY is set)
+ */
+function socketIp(socket) {
+    const forwarded = socket.handshake.headers && socket.handshake.headers['x-forwarded-for'];
+    if (process.env.TRUST_PROXY && forwarded) return normalizeIp(String(forwarded).split(',')[0].trim());
+    return normalizeIp(socket.handshake.address);
+}
+
+/**
+ * Verify the access JWT on every handshake (first connect and each reconnect) - the socket's identity
+ * comes from the token, never from client-supplied userId/senderId fields. The token's session must
+ * still be active; revoking a session disconnects its sockets (room session_<id>).
+ * Error messages are what the client acts on: 'Invalid or expired token' -> refresh and reconnect,
+ * 'Session revoked' -> sign out.
  */
 io.use(async (socket, next) => {
     try {
@@ -101,23 +128,44 @@ io.use(async (socket, next) => {
             return next(new Error('Access token required'));
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await queryOne(
-            'SELECT id, username FROM users WHERE id = ?',
-            [decoded.userId]
-        );
+        const decoded = verifyAccessToken(token);
+        if (!decoded) {
+            return next(new Error('Invalid or expired token'));
+        }
 
+        const user = await findSessionUser(decoded.userId, decoded.sid);
         if (!user) {
-            return next(new Error('User not found'));
+            return next(new Error('Session revoked'));
         }
 
         socket.userId = user.id;
         socket.username = user.username;
+        socket.sessionId = decoded.sid;
+        touchSession(decoded.sid, socketIp(socket));
         next();
     } catch (error) {
         next(new Error('Invalid or expired token'));
     }
 });
+
+/**
+ * Rooms of the users who must not see this user's presence or typing:
+ * people they blocked (presence and typing) plus, for typing, people who blocked them
+ */
+async function hiddenFromRooms(userId, { includeBlockers = false } = {}) {
+    const { blocked, blockedBy } = await getBlockRelations(userId);
+    const ids = includeBlockers ? [...blocked, ...blockedBy] : blocked;
+    return ids.map(id => `user_${id}`);
+}
+
+/**
+ * Broadcast this socket's user status to everyone except people they blocked
+ */
+async function broadcastStatus(socket, status) {
+    const hidden = await hiddenFromRooms(socket.userId);
+    const target = hidden.length > 0 ? socket.broadcast.except(hidden) : socket.broadcast;
+    target.emit('user_status', { userId: socket.userId, status });
+}
 
 /**
  * Check that a user belongs to a chat
@@ -136,6 +184,12 @@ io.on('connection', (socket) => {
     // Every tab of this user joins one room, so read/mute/archive changes reach all of them
     socket.join(`user_${socket.userId}`);
 
+    // One room per signed-in device, so revoking that session disconnects exactly its sockets
+    if (socket.sessionId) socket.join(`session_${socket.sessionId}`);
+
+    // Rate-limited events are registered through this (dropped + `rate_limited` when over the limit)
+    const onLimited = limitSocketEvents(socket, socketLimiter);
+
     // Until the tab reports otherwise it counts as visible (no push while it might be on screen)
     socket.data.visible = true;
 
@@ -149,7 +203,7 @@ io.on('connection', (socket) => {
     /**
      * User authentication and online status
      */
-    socket.on('authenticate', async () => {
+    onLimited('authenticate', async () => {
         try {
             const userId = socket.userId;
 
@@ -172,11 +226,8 @@ io.on('connection', (socket) => {
                     socket.join(`chat_${chat.chat_id}`);
                 });
 
-                // Broadcast user online status
-                socket.broadcast.emit('user_status', {
-                    userId: userId,
-                    status: 'online'
-                });
+                // Broadcast user online status (not to people this user blocked)
+                await broadcastStatus(socket, 'online');
 
                 console.log(`User ${userId} authenticated and joined chats`);
             }
@@ -188,7 +239,7 @@ io.on('connection', (socket) => {
     /**
      * Join a specific chat room
      */
-    socket.on('join_chat', async (data) => {
+    onLimited('join_chat', async (data) => {
         try {
             const { chatId } = data;
             const userId = socket.userId;
@@ -206,7 +257,7 @@ io.on('connection', (socket) => {
     /**
      * Send message in real-time
      */
-    socket.on('send_message', async (data) => {
+    onLimited('send_message', async (data) => {
         try {
             data = data || {};
             const { chatId } = data;
@@ -375,7 +426,7 @@ io.on('connection', (socket) => {
     /**
      * React to a message: adds, replaces this user's other emoji, or removes the same emoji (toggle)
      */
-    socket.on('add_reaction', async (data) => {
+    onLimited('add_reaction', async (data) => {
         try {
             const result = await reactionRules.toggleReaction(data && data.messageId, socket.userId, data && data.emoji);
             if (result.error) {
@@ -392,7 +443,7 @@ io.on('connection', (socket) => {
     /**
      * Remove this user's reaction from a message
      */
-    socket.on('remove_reaction', async (data) => {
+    onLimited('remove_reaction', async (data) => {
         try {
             const result = await reactionRules.removeReaction(data && data.messageId, socket.userId, data && data.emoji);
             if (result.error) {
@@ -409,20 +460,29 @@ io.on('connection', (socket) => {
     /**
      * Typing indicator
      */
-    socket.on('typing', (data) => {
-        const { chatId, isTyping } = data;
+    onLimited('typing', async (data) => {
+        try {
+            const { chatId, isTyping } = data || {};
 
-        // Only members (who were joined to the room) can broadcast typing
-        if (!socket.rooms.has(`chat_${chatId}`)) {
-            return;
+            // Only members (who were joined to the room) can broadcast typing
+            if (!socket.rooms.has(`chat_${chatId}`)) {
+                return;
+            }
+
+            // Not shown to anyone on either side of a block
+            const hidden = await hiddenFromRooms(socket.userId, { includeBlockers: true });
+            let target = socket.to(`chat_${chatId}`);
+            if (hidden.length > 0) target = target.except(hidden);
+
+            target.emit('user_typing', {
+                chatId,
+                userId: socket.userId,
+                username: socket.username,
+                isTyping: !!isTyping
+            });
+        } catch (error) {
+            console.error('Typing error:', error);
         }
-
-        socket.to(`chat_${chatId}`).emit('user_typing', {
-            chatId,
-            userId: socket.userId,
-            username: socket.username,
-            isTyping
-        });
     });
 
     /**
@@ -431,20 +491,21 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => {
         console.log('Client disconnected:', socket.id);
 
-        if (socket.userId) {
-            connectedUsers.delete(socket.userId);
+        try {
+            if (socket.userId) {
+                connectedUsers.delete(socket.userId);
 
-            // Update user status to offline
-            await executeQuery(
-                'UPDATE users SET status = ?, last_seen = CURRENT_TIMESTAMP WHERE id = ?',
-                ['offline', socket.userId]
-            );
+                // Update user status to offline
+                await executeQuery(
+                    'UPDATE users SET status = ?, last_seen = CURRENT_TIMESTAMP WHERE id = ?',
+                    ['offline', socket.userId]
+                );
 
-            // Broadcast user offline status
-            socket.broadcast.emit('user_status', {
-                userId: socket.userId,
-                status: 'offline'
-            });
+                // Broadcast user offline status
+                await broadcastStatus(socket, 'offline');
+            }
+        } catch (error) {
+            console.error('Disconnect error:', error);
         }
     });
 });

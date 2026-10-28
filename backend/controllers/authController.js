@@ -1,14 +1,15 @@
 /**
  * Authentication Controller
- * Handles user registration, login, and authentication
+ * Handles user registration, login, sessions (refresh/logout), passwords and email verification
  */
 
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const { executeQuery, queryOne } = require('../config/database');
 const { sanitizeHtml } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/mailer');
+const sessions = require('../utils/sessions');
+const verification = require('../utils/emailVerification');
 
 const RESET_TOKEN_TTL_MINUTES = 60;
 
@@ -18,6 +19,29 @@ const RESET_TOKEN_TTL_MINUTES = 60;
  */
 function hashResetToken(token) {
     return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * The fields every auth response returns about the signed-in user
+ */
+function shapeUser(user) {
+    return {
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        fullName: user.full_name || null,
+        avatarUrl: user.avatar_url || null,
+        emailVerified: verification.isEmailVerified(user)
+    };
+}
+
+/**
+ * Start a session for this device: refresh token in an HttpOnly cookie, access token in the body
+ */
+async function startSession(req, res, user) {
+    const { sessionId, refreshToken } = await sessions.createSession(user.id, sessions.requestMeta(req));
+    sessions.setRefreshCookie(res, refreshToken);
+    return sessions.signAccessToken(user, sessionId);
 }
 
 /**
@@ -60,23 +84,17 @@ async function register(req, res) {
             userId = result.insertId || result[0]?.id;
         }
 
-        // Generate JWT token
-        const token = jwt.sign(
-            { userId: userId, username: username },
-            process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-        );
+        const user = { id: userId, username, email, full_name: fullName || null, avatar_url: null, email_verified_at: null };
+
+        // New accounts can sign in straight away; verifying unlocks invite links and new contacts
+        await verification.issueVerification(user);
+
+        const { accessToken, expiresIn } = await startSession(req, res, user);
 
         res.status(201).json({
             success: true,
-            message: 'User registered successfully',
-            data: {
-                userId: userId,
-                username: username,
-                email: email,
-                fullName: fullName,
-                token: token
-            }
+            message: 'User registered successfully. Check your email to verify your address.',
+            data: { ...shapeUser(user), accessToken, expiresIn }
         });
     } catch (error) {
         console.error('Registration error:', error);
@@ -124,24 +142,12 @@ async function login(req, res) {
             ['online', user.id]
         );
 
-        // Generate JWT token
-        const token = jwt.sign(
-            { userId: user.id, username: user.username },
-            process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-        );
+        const { accessToken, expiresIn } = await startSession(req, res, user);
 
         res.json({
             success: true,
             message: 'Login successful',
-            data: {
-                userId: user.id,
-                username: user.username,
-                email: user.email,
-                fullName: user.full_name,
-                avatarUrl: user.avatar_url,
-                token: token
-            }
+            data: { ...shapeUser(user), accessToken, expiresIn }
         });
     } catch (error) {
         console.error('Login error:', error);
@@ -154,17 +160,88 @@ async function login(req, res) {
 }
 
 /**
- * Logout user
+ * POST /api/auth/refresh (refresh cookie)
+ * Rotates the refresh token and returns a new access token. A refresh token that was already
+ * rotated out is treated as stolen: its whole session is revoked and its sockets disconnected.
+ */
+async function refresh(req, res) {
+    try {
+        const token = sessions.readRefreshCookie(req);
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'Not signed in', code: 'NO_SESSION' });
+        }
+
+        const result = await sessions.rotateRefreshToken(token, sessions.requestMeta(req));
+
+        if (result.error === 'race') {
+            // Another tab refreshed with this cookie a moment ago; the browser now holds the newer one
+            return res.status(409).json({ success: false, message: 'Refresh already in progress, retry', code: 'REFRESH_RACE' });
+        }
+
+        if (result.error === 'reused') {
+            await sessions.revokeSession(req.io, result.sessionId, 'reuse');
+            console.warn(`Refresh token reuse detected - revoked session ${result.sessionId} of user ${result.userId}`);
+            sessions.clearRefreshCookie(res);
+            return res.status(401).json({ success: false, message: 'This sign-in was ended for your security. Please sign in again.', code: 'TOKEN_REUSED' });
+        }
+
+        if (result.error) {
+            sessions.clearRefreshCookie(res);
+            return res.status(401).json({ success: false, message: 'Session expired. Please sign in again.', code: 'SESSION_EXPIRED' });
+        }
+
+        const user = await queryOne(
+            'SELECT id, username, email, full_name, avatar_url, email_verified_at FROM users WHERE id = ?',
+            [result.userId]
+        );
+        if (!user) {
+            await sessions.revokeSession(req.io, result.sessionId, 'user');
+            sessions.clearRefreshCookie(res);
+            return res.status(401).json({ success: false, message: 'User not found', code: 'SESSION_EXPIRED' });
+        }
+
+        sessions.setRefreshCookie(res, result.refreshToken);
+        const { accessToken, expiresIn } = sessions.signAccessToken(user, result.sessionId);
+
+        res.json({
+            success: true,
+            data: { ...shapeUser(user), accessToken, expiresIn }
+        });
+    } catch (error) {
+        console.error('Refresh error:', error);
+        res.status(500).json({ success: false, message: 'Failed to refresh the session' });
+    }
+}
+
+/**
+ * Logout: ends this device's session (found by access token, or by the refresh cookie when the
+ * access token has already expired) and clears the cookie
  */
 async function logout(req, res) {
     try {
-        const userId = req.user.id;
+        let sessionId = req.sessionId || null;
+        let userId = req.user ? req.user.id : null;
 
-        // Update user status to offline
-        await executeQuery(
-            'UPDATE users SET status = ?, last_seen = CURRENT_TIMESTAMP WHERE id = ?',
-            ['offline', userId]
-        );
+        if (!sessionId) {
+            const session = await sessions.findSessionByRefreshToken(sessions.readRefreshCookie(req));
+            if (session) {
+                sessionId = Number(session.id);
+                userId = Number(session.user_id);
+            }
+        }
+
+        if (sessionId) {
+            await sessions.revokeSession(req.io, sessionId, 'logout', userId);
+        }
+        sessions.clearRefreshCookie(res);
+
+        if (userId) {
+            // Update user status to offline
+            await executeQuery(
+                'UPDATE users SET status = ?, last_seen = CURRENT_TIMESTAMP WHERE id = ?',
+                ['offline', userId]
+            );
+        }
 
         res.json({
             success: true,
@@ -191,11 +268,13 @@ async function getProfile(req, res) {
             success: true,
             data: {
                 id: user.id,
+                userId: user.id,
                 username: user.username,
                 email: user.email,
                 fullName: user.full_name,
                 avatarUrl: user.avatar_url,
-                status: user.status
+                status: user.status,
+                emailVerified: verification.isEmailVerified(user)
             }
         });
     } catch (error) {
@@ -232,6 +311,46 @@ async function updateProfile(req, res) {
             message: 'Failed to update profile',
             error: error.message
         });
+    }
+}
+
+/**
+ * PUT /api/auth/password Body: { currentPassword, newPassword }
+ * Every other device is signed out; this one stays signed in.
+ */
+async function changePassword(req, res) {
+    try {
+        const userId = req.user.id;
+        const { currentPassword, newPassword } = req.body;
+
+        const row = await queryOne('SELECT password_hash FROM users WHERE id = ?', [userId]);
+        if (!row || !(await bcrypt.compare(currentPassword, row.password_hash))) {
+            // 400, not 401: a wrong current password must not sign the user out
+            return res.status(400).json({ success: false, message: 'Your current password is incorrect', code: 'WRONG_PASSWORD' });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(newPassword, salt);
+
+        await executeQuery(
+            'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [passwordHash, userId]
+        );
+        // Outstanding reset links would undo the change
+        await executeQuery('DELETE FROM password_resets WHERE user_id = ?', [userId]);
+
+        const revoked = await sessions.revokeUserSessions(req.io, userId, 'password', req.sessionId);
+
+        res.json({
+            success: true,
+            message: revoked > 0
+                ? `Password changed. ${revoked} other device${revoked === 1 ? ' was' : 's were'} signed out.`
+                : 'Password changed.',
+            data: { revokedSessions: revoked }
+        });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ success: false, message: 'Failed to change password' });
     }
 }
 
@@ -288,7 +407,7 @@ async function forgotPassword(req, res) {
 }
 
 /**
- * Reset password using a token from the reset email
+ * Reset password using a token from the reset email. Signs out every device.
  */
 async function resetPassword(req, res) {
     try {
@@ -317,6 +436,9 @@ async function resetPassword(req, res) {
         // Tokens are single-use
         await executeQuery('DELETE FROM password_resets WHERE user_id = ?', [reset.user_id]);
 
+        // Whoever knew the old password is signed out everywhere
+        await sessions.revokeUserSessions(req.io, reset.user_id, 'password');
+
         res.json({
             success: true,
             message: 'Your password has been reset. You can now log in.'
@@ -330,12 +452,116 @@ async function resetPassword(req, res) {
     }
 }
 
+/**
+ * POST /api/auth/verify-email Body: { token } (from the link in the verification email)
+ */
+async function verifyEmail(req, res) {
+    try {
+        const userId = await verification.consumeVerification(req.body.token);
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: 'This verification link is invalid or has expired. Sign in and send a new one from Settings.'
+            });
+        }
+
+        // Open tabs drop the "verify your email" banner
+        if (req.io) {
+            req.io.to(`user_${userId}`).emit('email_verified', { userId });
+        }
+
+        res.json({ success: true, message: 'Your email address is verified.' });
+    } catch (error) {
+        console.error('Verify email error:', error);
+        res.status(500).json({ success: false, message: 'Failed to verify the email address' });
+    }
+}
+
+/**
+ * POST /api/auth/resend-verification (signed in, rate limited per user and per IP)
+ */
+async function resendVerification(req, res) {
+    try {
+        if (verification.isEmailVerified(req.user)) {
+            return res.status(400).json({ success: false, message: 'Your email address is already verified.', code: 'ALREADY_VERIFIED' });
+        }
+
+        await verification.issueVerification(req.user);
+
+        res.json({ success: true, message: `We sent a new verification link to ${req.user.email}.` });
+    } catch (error) {
+        console.error('Resend verification error:', error);
+        res.status(500).json({ success: false, message: 'Failed to send the verification email' });
+    }
+}
+
+/**
+ * GET /api/auth/sessions - this user's signed-in devices; `current` marks the one asking
+ */
+async function listSessions(req, res) {
+    try {
+        const list = await sessions.listActiveSessions(req.user.id);
+        res.json({
+            success: true,
+            data: list.map(session => ({ ...session, current: session.id === Number(req.sessionId) }))
+        });
+    } catch (error) {
+        console.error('List sessions error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load your devices' });
+    }
+}
+
+/**
+ * DELETE /api/auth/sessions/:sessionId - sign one device out (its sockets disconnect immediately)
+ */
+async function revokeSession(req, res) {
+    try {
+        const sessionId = Number(req.params.sessionId);
+        const revoked = await sessions.revokeSession(req.io, sessionId, 'user', req.user.id);
+        if (!revoked) {
+            return res.status(404).json({ success: false, message: 'Device not found or already signed out' });
+        }
+
+        const current = sessionId === Number(req.sessionId);
+        if (current) sessions.clearRefreshCookie(res);
+
+        res.json({ success: true, message: current ? 'Signed out of this device' : 'Device signed out', data: { sessionId, current } });
+    } catch (error) {
+        console.error('Revoke session error:', error);
+        res.status(500).json({ success: false, message: 'Failed to sign the device out' });
+    }
+}
+
+/**
+ * POST /api/auth/sessions/revoke-others - sign out every device except this one
+ */
+async function revokeOtherSessions(req, res) {
+    try {
+        const revoked = await sessions.revokeUserSessions(req.io, req.user.id, 'user', req.sessionId);
+        res.json({
+            success: true,
+            message: revoked > 0 ? `Signed out ${revoked} other device${revoked === 1 ? '' : 's'}` : 'No other devices were signed in',
+            data: { revokedSessions: revoked }
+        });
+    } catch (error) {
+        console.error('Revoke other sessions error:', error);
+        res.status(500).json({ success: false, message: 'Failed to sign out other devices' });
+    }
+}
+
 module.exports = {
     register,
     login,
+    refresh,
     logout,
     getProfile,
     updateProfile,
+    changePassword,
     forgotPassword,
-    resetPassword
+    resetPassword,
+    verifyEmail,
+    resendVerification,
+    listSessions,
+    revokeSession,
+    revokeOtherSessions
 };

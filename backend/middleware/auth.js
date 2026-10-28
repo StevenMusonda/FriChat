@@ -1,60 +1,58 @@
 /**
  * JWT Authentication Middleware
- * Verifies JWT tokens and attaches user info to request
+ * Verifies the short-lived access token, checks its session hasn't been revoked,
+ * and attaches the user (req.user) and session id (req.sessionId) to the request
  */
 
-const jwt = require('jsonwebtoken');
-const { queryOne } = require('../config/database');
+const { verifyAccessToken, findSessionUser, touchSession, normalizeIp } = require('../utils/sessions');
+
+function bearerToken(req) {
+    const authHeader = req.headers['authorization'];
+    return authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+}
 
 /**
  * Verify JWT token and authenticate user
  */
 async function authenticateToken(req, res, next) {
     try {
-        // Get token from header
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+        const token = bearerToken(req);
 
         if (!token) {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Access token required' 
+            return res.status(401).json({
+                success: false,
+                message: 'Access token required'
             });
         }
 
-        // Verify token
-        jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-            // 401 (not 403): the frontend logs out only on 401, so a bad token must use it
-            if (err) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Invalid or expired token' 
-                });
-            }
+        // 401 (not 403): the frontend refreshes (and logs out if that fails) only on 401
+        const decoded = verifyAccessToken(token);
+        if (!decoded) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid or expired token'
+            });
+        }
 
-            // Get user from database
-            const user = await queryOne(
-                'SELECT id, username, email, full_name, avatar_url, status FROM users WHERE id = ?',
-                [decoded.userId]
-            );
+        // A revoked device is signed out on its next request, not when its access token runs out
+        const user = await findSessionUser(decoded.userId, decoded.sid);
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Session ended. Please sign in again.',
+                code: 'SESSION_REVOKED'
+            });
+        }
 
-            // Token for an account that no longer exists: treat as signed out
-            if (!user) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'User not found' 
-                });
-            }
-
-            // Attach user to request
-            req.user = user;
-            next();
-        });
+        req.user = user;
+        req.sessionId = decoded.sid;
+        touchSession(decoded.sid, normalizeIp(req.ip));
+        next();
     } catch (error) {
         console.error('Authentication error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Authentication failed' 
+        res.status(500).json({
+            success: false,
+            message: 'Authentication failed'
         });
     }
 }
@@ -64,25 +62,16 @@ async function authenticateToken(req, res, next) {
  */
 async function optionalAuth(req, res, next) {
     try {
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
-
-        if (!token) {
-            return next();
-        }
-
-        jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-            if (!err) {
-                const user = await queryOne(
-                    'SELECT id, username, email, full_name, avatar_url, status FROM users WHERE id = ?',
-                    [decoded.userId]
-                );
-                if (user) {
-                    req.user = user;
-                }
+        const token = bearerToken(req);
+        const decoded = token ? verifyAccessToken(token) : null;
+        if (decoded) {
+            const user = await findSessionUser(decoded.userId, decoded.sid);
+            if (user) {
+                req.user = user;
+                req.sessionId = decoded.sid;
             }
-            next();
-        });
+        }
+        next();
     } catch (error) {
         next();
     }

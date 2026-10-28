@@ -2,6 +2,11 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS group_bans CASCADE;
+DROP TABLE IF EXISTS user_blocks CASCADE;
+DROP TABLE IF EXISTS session_refresh_tokens CASCADE;
+DROP TABLE IF EXISTS sessions CASCADE;
+DROP TABLE IF EXISTS email_verifications CASCADE;
 DROP TABLE IF EXISTS chat_join_requests CASCADE;
 DROP TABLE IF EXISTS chat_invites CASCADE;
 DROP TABLE IF EXISTS deleted_chats CASCADE;
@@ -44,6 +49,7 @@ CREATE TABLE users (
     avatar_url VARCHAR(255),
     status user_status DEFAULT 'offline',
     last_seen TIMESTAMP,
+    email_verified_at TIMESTAMP NULL, -- NULL = email not verified yet
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -281,6 +287,66 @@ CREATE TABLE chat_join_requests (
 );
 
 CREATE INDEX idx_join_requests_chat_status ON chat_join_requests(chat_id, status);
+CREATE INDEX idx_join_requests_user_status ON chat_join_requests(user_id, status);
+
+-- Email verification links (only a SHA-256 hash of the token is stored; single-use)
+CREATE TABLE email_verifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_email_verifications_user_id ON email_verifications(user_id);
+
+-- One row per signed-in device; refresh_token_hash is the SHA-256 of the current refresh token
+CREATE TABLE sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    refresh_token_hash CHAR(64) NOT NULL UNIQUE,
+    user_agent VARCHAR(255) NULL,
+    device_label VARCHAR(100) NULL, -- e.g. 'Chrome on Windows', parsed from the user agent
+    ip_address VARCHAR(45) NULL, -- last seen IP (IPv4 or IPv6), no geolocation
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL, -- refresh token lifetime, slides forward on every rotation
+    revoked_at TIMESTAMP NULL,
+    revoked_reason VARCHAR(20) NULL -- 'logout' | 'user' | 'password' | 'reuse'
+);
+
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+
+-- Refresh tokens already rotated out; presenting one again revokes the whole session
+CREATE TABLE session_refresh_tokens (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    rotated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_rotated_tokens_session_id ON session_refresh_tokens(session_id);
+
+-- blocker_id blocked blocked_id
+CREATE TABLE user_blocks (
+    id SERIAL PRIMARY KEY,
+    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (blocker_id, blocked_id)
+);
+
+CREATE INDEX idx_user_blocks_blocked_id ON user_blocks(blocked_id);
+
+-- Users an admin removed and banned from a group
+CREATE TABLE group_bans (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    banned_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (chat_id, user_id)
+);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

@@ -744,7 +744,7 @@ async function uploadFile(chatId, file, replyToMessageId = null) {
             formData.append('replyToMessageId', replyToMessageId);
         }
         
-        const token = localStorage.getItem(CONFIG.STORAGE_KEYS.AUTH_TOKEN);
+        const token = await getAccessToken();
         
         const response = await fetch(`${CONFIG.API_BASE_URL}${CONFIG.ENDPOINTS.UPLOAD_FILE}`, {
             method: 'POST',
