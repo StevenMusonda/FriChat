@@ -769,35 +769,12 @@ async function uploadFile(chatId, file, replyToMessageId = null) {
 }
 
 /**
- * Toggle reaction on message
+ * Toggle reaction on message. The server applies the rule (one reaction per user:
+ * a different emoji replaces it, the same emoji removes it) and broadcasts the result.
  */
 async function toggleReaction(messageId, emoji) {
-    const currentUser = getCurrentUser();
-    const message = currentMessages.find(m => m.id === messageId);
-    
-    if (!message) return;
-    
-    // Check if user already reacted with this emoji
-    let reactions = [];
-    if (message.reactions && typeof message.reactions === 'string') {
-        try {
-            reactions = JSON.parse(message.reactions) || [];
-        } catch (e) {
-            reactions = [];
-        }
-    } else if (Array.isArray(message.reactions)) {
-        reactions = message.reactions;
-    }
-    
-    const hasReacted = reactions.some(r => r.userId === currentUser.userId && r.emoji === emoji);
-    
-    if (hasReacted) {
-        // Remove reaction
-        removeReactionViaSocket(messageId, emoji);
-    } else {
-        // Add reaction
-        addReactionViaSocket(messageId, emoji);
-    }
+    if (!currentMessages.some(m => m.id === messageId)) return;
+    addReactionViaSocket(messageId, emoji);
 }
 
 /**
@@ -1074,20 +1051,14 @@ if (typeof onMessagesRead === 'function') {
 }
 
 /**
- * Handle reaction update from WebSocket
+ * Handle reaction update from WebSocket (add and replace arrive as 'add', toggle-off as 'remove')
  */
 function handleReactionUpdate(data, action) {
     const { messageId, userId, username, emoji } = data;
-    console.log('handleReactionUpdate called:', { messageId, userId, username, emoji, action });
-    console.log('Current messages:', currentMessages.map(m => ({ id: m.id, reactions: m.reactions })));
-    
+
     // Find message in current messages array
     const message = currentMessages.find(m => m.id === messageId);
-    console.log('Found message:', message);
-    if (!message) {
-        console.error('Message not found in currentMessages:', messageId);
-        return;
-    }
+    if (!message) return;
     
     // Parse existing reactions
     let reactions = [];
@@ -1101,21 +1072,18 @@ function handleReactionUpdate(data, action) {
         reactions = message.reactions;
     }
     
+    // A user has at most one reaction per message: drop theirs, then add the new one
+    reactions = reactions.filter(r => r.userId !== userId);
     if (action === 'add') {
-        // Add new reaction
         reactions.push({
             userId: userId,
             username: username,
             emoji: emoji
         });
-    } else if (action === 'remove') {
-        // Remove reaction
-        reactions = reactions.filter(r => !(r.userId === userId && r.emoji === emoji));
     }
     
     // Update message reactions
     message.reactions = reactions;
-    console.log('Updated message reactions:', message.reactions);
     
     // Re-render just this message
     rerenderMessage(message);

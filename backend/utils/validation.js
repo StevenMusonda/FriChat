@@ -5,6 +5,7 @@
 const { body, param, query, validationResult } = require('express-validator');
 const { isValidTimezone } = require('./notificationSettings');
 const { MAX_MESSAGE_LENGTH, MAX_FORWARD_MESSAGES, MAX_FORWARD_CHATS } = require('../config/messages');
+const { isValidEmoji } = require('./reactions');
 
 /**
  * Validation rules for user registration
@@ -133,6 +134,29 @@ const messageIdParamRule = param('messageId')
  */
 const validateMessageIdParam = [
     messageIdParamRule
+];
+
+/**
+ * Validation rules for reacting to a message (toggle/replace)
+ */
+const validateReaction = [
+    messageIdParamRule,
+
+    body('emoji')
+        .custom(isValidEmoji)
+        .withMessage('Invalid emoji')
+];
+
+/**
+ * Validation rules for removing a reaction (emoji optional: only removed if it still matches)
+ */
+const validateReactionRemoval = [
+    messageIdParamRule,
+
+    body('emoji')
+        .optional({ values: 'null' })
+        .custom(isValidEmoji)
+        .withMessage('Invalid emoji')
 ];
 
 /**
@@ -350,6 +374,8 @@ module.exports = {
     validateMessage,
     validateUploadReply,
     validateMessageIdParam,
+    validateReaction,
+    validateReactionRemoval,
     validateEditMessage,
     validateForward,
     validateStarredQuery,

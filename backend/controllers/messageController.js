@@ -10,6 +10,7 @@ const { recordNewMessage } = require('../utils/chatState');
 const { notifyNewMessage } = require('../utils/push');
 const { saveMentions, replaceMentions, attachMentions } = require('../utils/mentions');
 const { attachLinkPreview } = require('../utils/linkPreview');
+const reactionRules = require('../utils/reactions');
 const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
 const {
     MESSAGE_COLUMNS,
@@ -463,45 +464,24 @@ async function updateMessageStatus(req, res) {
 }
 
 /**
- * Add reaction to a message
+ * React to a message: adds, replaces the user's other emoji, or removes the same emoji (toggle)
  */
 async function addReaction(req, res) {
     try {
-        const { messageId } = req.params;
-        const { emoji } = req.body;
-        const userId = req.user.id;
-
-        // Verify message exists and user has access
-        const message = await queryOne(`
-            SELECT m.id, m.chat_id
-            FROM messages m
-            JOIN group_members gm ON m.chat_id = gm.chat_id
-            WHERE m.id = ? AND gm.user_id = ?
-        `, [messageId, userId]);
-
-        if (!message) {
-            return res.status(404).json({
+        const result = await reactionRules.toggleReaction(req.params.messageId, req.user.id, req.body.emoji);
+        if (result.error) {
+            return res.status(result.notFound ? 404 : 400).json({
                 success: false,
-                message: 'Message not found or access denied'
+                message: result.error
             });
         }
 
-        // Add or update reaction (PostgreSQL compatible)
-        if (process.env.DB_TYPE === 'postgresql') {
-            await executeQuery(
-                'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON CONFLICT (message_id, user_id, emoji) DO UPDATE SET emoji = ?',
-                [messageId, userId, emoji, emoji]
-            );
-        } else {
-            await executeQuery(
-                'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = ?',
-                [messageId, userId, emoji, emoji]
-            );
-        }
+        reactionRules.broadcastReaction(req.io, result, req.user.username);
 
         res.json({
             success: true,
-            message: 'Reaction added successfully'
+            message: `Reaction ${result.action}`,
+            data: { action: result.action, emoji: result.emoji, previousEmoji: result.previousEmoji }
         });
     } catch (error) {
         console.error('Add reaction error:', error);
@@ -514,22 +494,23 @@ async function addReaction(req, res) {
 }
 
 /**
- * Remove reaction from a message
+ * Remove the user's reaction from a message
  */
 async function removeReaction(req, res) {
     try {
-        const { messageId } = req.params;
-        const { emoji } = req.body;
-        const userId = req.user.id;
+        const result = await reactionRules.removeReaction(req.params.messageId, req.user.id, req.body && req.body.emoji);
+        if (result.error) {
+            return res.status(result.notFound ? 404 : 400).json({
+                success: false,
+                message: result.error
+            });
+        }
 
-        await executeQuery(
-            'DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?',
-            [messageId, userId, emoji]
-        );
+        reactionRules.broadcastReaction(req.io, result);
 
         res.json({
             success: true,
-            message: 'Reaction removed successfully'
+            message: result.action ? 'Reaction removed successfully' : 'No reaction to remove'
         });
     } catch (error) {
         console.error('Remove reaction error:', error);

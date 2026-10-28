@@ -28,6 +28,7 @@ const { cleanMessageText } = require('./utils/messageText');
 const { claimUploadedFile, releaseUploadedFile, guardStaticPath } = require('./utils/uploads');
 const { saveMentions } = require('./utils/mentions');
 const { attachLinkPreview } = require('./utils/linkPreview');
+const reactionRules = require('./utils/reactions');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
@@ -366,77 +367,36 @@ io.on('connection', (socket) => {
     });
 
     /**
-     * Add reaction to message
+     * React to a message: adds, replaces this user's other emoji, or removes the same emoji (toggle)
      */
     socket.on('add_reaction', async (data) => {
         try {
-            const { messageId, emoji } = data;
-            const userId = socket.userId;
-
-            // Get chat ID and verify the user can see this message
-            const message = await queryOne(
-                'SELECT chat_id FROM messages WHERE id = ?',
-                [messageId]
-            );
-
-            if (!message || !(await isChatMember(message.chat_id, userId))) {
+            const result = await reactionRules.toggleReaction(data && data.messageId, socket.userId, data && data.emoji);
+            if (result.error) {
+                socket.emit('error', { event: 'add_reaction', message: result.error });
                 return;
             }
-
-            // Add reaction
-            if (process.env.DB_TYPE === 'postgresql') {
-                await executeQuery(
-                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji',
-                    [messageId, userId, emoji]
-                );
-            } else {
-                await executeQuery(
-                    'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = VALUES(emoji)',
-                    [messageId, userId, emoji]
-                );
-            }
-
-            io.to(`chat_${message.chat_id}`).emit('reaction_added', {
-                messageId: messageId,
-                userId: userId,
-                username: socket.username,
-                emoji: emoji
-            });
+            reactionRules.broadcastReaction(io, result, socket.username);
         } catch (error) {
             console.error('Add reaction error:', error);
+            socket.emit('error', { event: 'add_reaction', message: 'Failed to add reaction' });
         }
     });
 
     /**
-     * Remove reaction from message
+     * Remove this user's reaction from a message
      */
     socket.on('remove_reaction', async (data) => {
         try {
-            const { messageId, emoji } = data;
-            const userId = socket.userId;
-
-            // Get chat ID and verify the user can see this message
-            const message = await queryOne(
-                'SELECT chat_id FROM messages WHERE id = ?',
-                [messageId]
-            );
-
-            if (!message || !(await isChatMember(message.chat_id, userId))) {
+            const result = await reactionRules.removeReaction(data && data.messageId, socket.userId, data && data.emoji);
+            if (result.error) {
+                socket.emit('error', { event: 'remove_reaction', message: result.error });
                 return;
             }
-
-            await executeQuery(
-                'DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?',
-                [messageId, userId, emoji]
-            );
-
-            io.to(`chat_${message.chat_id}`).emit('reaction_removed', {
-                messageId: messageId,
-                userId: userId,
-                emoji: emoji
-            });
+            reactionRules.broadcastReaction(io, result);
         } catch (error) {
             console.error('Remove reaction error:', error);
+            socket.emit('error', { event: 'remove_reaction', message: 'Failed to remove reaction' });
         }
     });
 

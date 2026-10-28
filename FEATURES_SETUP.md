@@ -717,6 +717,7 @@ Don't re-run the schema file. Run the migrations you haven't run yet, in this or
 | 7 | `add_message_actions.sql` (run once) | `add_message_actions_postgresql.sql` |
 | 8 | `add_file_attachment_claim.sql` (run once) | `add_file_attachment_claim_postgresql.sql` |
 | 9 | `add_mentions_and_link_previews.sql` (run once) | `add_mentions_and_link_previews_postgresql.sql` |
+| 10 | `reactions_one_per_user.sql` | `reactions_one_per_user_postgresql.sql` |
 
 ```bash
 # MySQL, one file at a time
@@ -726,6 +727,25 @@ psql -U postgres -d frichat -f database/<file>_postgresql.sql
 ```
 
 On PostgreSQL, a database built from the initial-commit schema plus all the migrations above matches a fresh `schema_postgresql.sql` install: same tables, columns, types, defaults, indexes, constraints, views, triggers and enum types. The only difference is the column order inside a table, because `ALTER TABLE ADD COLUMN` adds columns at the end. Running all the migrations on top of a fresh install is a no-op. The MySQL files were updated the same way but not checked against a live MySQL server.
+
+## Reactions: one per user per message
+
+A user has at most one reaction on a message. Reacting with a different emoji replaces it; reacting with the same emoji again removes it. The REST routes and the socket events share one implementation (`backend/utils/reactions.js`), so both behave the same on MySQL and PostgreSQL.
+
+**Migration:** `database/reactions_one_per_user.sql` (MySQL) / `database/reactions_one_per_user_postgresql.sql` (PostgreSQL). Each keeps only the newest reaction (highest id) per user and message, then sets the unique key to `(message_id, user_id)`. Both are safe to run more than once. Fresh installs from `schema.sql` / `schema_postgresql.sql` already have the key. No new env variables.
+
+**Endpoints** (rate limited, member of the message's chat only, `emoji` is 1-10 characters without whitespace):
+- `POST /api/messages/:messageId/reactions` `{ emoji }` → `data.action` is `added`, `replaced` or `removed`
+- `DELETE /api/messages/:messageId/reactions` `{ emoji? }` → removes the user's reaction (only if it is still `emoji`, when given)
+
+**Socket events:** `add_reaction { messageId, emoji }` (same toggle/replace rule) and `remove_reaction { messageId, emoji }`. The server broadcasts `reaction_added { messageId, userId, username, emoji, previousEmoji }` for add and replace, and `reaction_removed { messageId, userId, emoji }`. Refusals come back as `error { event, message }`.
+
+**Manual test checklist**
+- [ ] Two users in one chat. User A reacts 👍: both see 👍 1.
+- [ ] A reacts ❤️ on the same message: both see ❤️ 1 and no 👍.
+- [ ] A clicks ❤️ again: the reaction disappears for both.
+- [ ] B reacts 👍, A reacts 👍: both see 👍 2; A clicks it: 👍 1.
+- [ ] Reload: counts match what was shown live.
 
 ---
 

@@ -12,6 +12,8 @@ const {
     validateMessage,
     validateUploadReply,
     validateMessageIdParam,
+    validateReaction,
+    validateReactionRemoval,
     validateEditMessage,
     validateForward,
     validateStarredQuery,
@@ -64,9 +66,9 @@ router.delete('/:messageId/star', messageActionLimiter, validateMessageIdParam, 
 // Remove the link preview card (sender only)
 router.delete('/:messageId/link-preview', messageActionLimiter, validateMessageIdParam, checkValidation, messageController.dismissLinkPreview);
 
-// Reaction routes
-router.post('/:messageId/reactions', messageController.addReaction);
-router.delete('/:messageId/reactions', messageController.removeReaction);
+// Reaction routes (one reaction per user per message; same emoji again removes it)
+router.post('/:messageId/reactions', messageActionLimiter, validateReaction, checkValidation, messageController.addReaction);
+router.delete('/:messageId/reactions', messageActionLimiter, validateReactionRemoval, checkValidation, messageController.removeReaction);
 
 // Delete message route
 router.delete('/:messageId', messageController.deleteMessage);

@@ -174,7 +174,7 @@ CREATE TABLE message_reactions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE KEY unique_user_message_emoji (message_id, user_id, emoji),
+    UNIQUE KEY unique_user_message (message_id, user_id), -- one reaction per user per message
     INDEX idx_message_id (message_id)
 );
 
