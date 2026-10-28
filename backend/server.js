@@ -17,6 +17,7 @@ const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chats');
 const messageRoutes = require('./routes/messages');
 const notificationRoutes = require('./routes/notifications');
+const inviteRoutes = require('./routes/invites');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -29,6 +30,7 @@ const { claimUploadedFile, releaseUploadedFile, guardStaticPath } = require('./u
 const { saveMentions } = require('./utils/mentions');
 const { attachLinkPreview } = require('./utils/linkPreview');
 const reactionRules = require('./utils/reactions');
+const { checkCanPost } = require('./utils/groups');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
@@ -74,6 +76,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/invites', inviteRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -244,9 +247,12 @@ io.on('connection', (socket) => {
                 }
             }
 
-            // Verify sender is a member
-            if (!(await isChatMember(chatId, senderId))) {
-                socket.emit('error', { event: 'send_message', message: 'Access denied' });
+            // Verify sender is a member, and an admin if the group is announcement-only
+            const postError = await checkCanPost(chatId, senderId);
+            if (postError) {
+                socket.emit('error', postError.code === 'NOT_A_MEMBER'
+                    ? { event: 'send_message', message: 'Access denied' }
+                    : { event: 'send_message', message: postError.message, code: postError.code });
                 return;
             }
 

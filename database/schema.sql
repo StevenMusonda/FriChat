@@ -2,6 +2,8 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS chat_join_requests;
+DROP TABLE IF EXISTS chat_invites;
 DROP TABLE IF EXISTS deleted_chats;
 DROP TABLE IF EXISTS pinned_messages;
 DROP TABLE IF EXISTS deleted_messages;
@@ -78,6 +80,10 @@ CREATE TABLE chats (
     id INT AUTO_INCREMENT PRIMARY KEY,
     chat_type ENUM('direct', 'group') NOT NULL,
     chat_name VARCHAR(100), -- For group chats
+    description VARCHAR(500) NULL, -- group profile
+    avatar_url VARCHAR(255) NULL, -- path under uploads/, e.g. 'uploads/group-avatars/<random>.webp'
+    approve_new_members BOOLEAN NOT NULL DEFAULT FALSE, -- invite-link joins wait for an admin
+    announcement_only BOOLEAN NOT NULL DEFAULT FALSE, -- only admins can send messages
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -95,6 +101,7 @@ CREATE TABLE group_members (
     last_read_message_id INT NULL, -- read position for unread counts
     muted_until DATETIME NULL, -- NULL = not muted; '9999-12-31' = "always". DATETIME because TIMESTAMP stops at 2038.
     archived_at DATETIME NULL, -- NULL = in the main list
+    member_tag VARCHAR(30) NULL, -- short label set by admins, shown next to the name
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -242,6 +249,42 @@ CREATE TABLE deleted_chats (
     UNIQUE KEY unique_user_chat (chat_id, user_id),
     INDEX idx_chat_id (chat_id),
     INDEX idx_user_id (user_id)
+);
+
+-- Invite links (only a SHA-256 hash of the 128-bit token is stored; token_hint = its first 4 characters)
+CREATE TABLE chat_invites (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    token_hint VARCHAR(8) NOT NULL,
+    created_by INT NULL,
+    expires_at DATETIME NULL, -- NULL = never
+    max_uses INT NULL, -- NULL = unlimited
+    use_count INT NOT NULL DEFAULT 0,
+    revoked_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE KEY unique_invite_token (token_hash),
+    INDEX idx_invites_chat_id (chat_id)
+);
+
+-- Requests to join a group that has "Approve new members" on (one row per user and group)
+CREATE TABLE chat_join_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    user_id INT NOT NULL,
+    invite_id INT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'declined'
+    decided_by INT NULL,
+    decided_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (invite_id) REFERENCES chat_invites(id) ON DELETE SET NULL,
+    FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE KEY unique_join_request (chat_id, user_id),
+    INDEX idx_join_requests_chat_status (chat_id, status)
 );
 
 -- Create a view for easy message retrieval with user info

@@ -3697,3 +3697,483 @@ body.dark-theme .mention.mention-me {
         max-height: 200px;
     }
 }
+
+/* ===== Groups: info panel, invite links, join requests, announcement-only (phase 5) ===== */
+.chat-avatar img,
+.group-profile-avatar img,
+.join-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.chat-info-btn {
+    position: relative;
+}
+
+.chat-info-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--danger-color);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    pointer-events: none;
+}
+
+.chat-info-badge[hidden] {
+    display: none;
+}
+
+.btn-small {
+    min-height: 34px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+}
+
+.group-info-section .btn,
+.join-actions .btn {
+    width: auto;
+}
+
+/* .btn and the flex rows set display, which would otherwise beat the hidden attribute */
+.group-info-section [hidden] {
+    display: none !important;
+}
+
+.group-info-loading,
+.group-info-error {
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 20px 0;
+}
+
+.group-info-error {
+    color: var(--danger-color);
+}
+
+.group-profile {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.group-profile-avatar,
+.join-avatar {
+    width: 64px;
+    height: 64px;
+    min-width: 64px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 1.6rem;
+    font-weight: 600;
+}
+
+.group-profile-text {
+    min-width: 0;
+    flex: 1;
+}
+
+.group-profile-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.group-profile-meta {
+    font-size: 0.85rem;
+    color: var(--text-tertiary);
+}
+
+.chat-info-section p.group-profile-description {
+    margin-top: 6px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-secondary);
+}
+
+.chat-info-section p.group-profile-description.empty {
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.group-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.group-edit-form,
+.invite-create-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.invite-create-form {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+
+.group-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    min-width: 0;
+}
+
+.invite-create-form .group-field {
+    flex: 1 1 120px;
+}
+
+.group-info-section input[type="text"],
+.group-info-section input[type="number"],
+.group-info-section textarea,
+.group-info-section select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.9rem;
+}
+
+.group-info-section textarea {
+    resize: vertical;
+}
+
+.group-info-section input:focus,
+.group-info-section textarea:focus,
+.group-info-section select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.invite-created {
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--primary-color);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.invite-url-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+
+.invite-url-row .invite-url {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+}
+
+/* QR codes stay dark on white so phones can scan them in dark mode too */
+.invite-qr {
+    width: 200px;
+    max-width: 100%;
+    height: auto;
+    background: #fff;
+    border-radius: 6px;
+    image-rendering: pixelated;
+}
+
+.invite-list,
+.join-request-list,
+.members-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.invite-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.invite-item-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.invite-item-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.invite-item-meta {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    overflow-wrap: anywhere;
+}
+
+.invite-status {
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: rgba(113, 128, 150, 0.2);
+    color: var(--text-secondary);
+}
+
+.invite-status-active {
+    background: rgba(72, 187, 120, 0.2);
+    color: var(--success-color);
+}
+
+.invite-revoked .invite-item-title,
+.invite-expired .invite-item-title,
+.invite-used_up .invite-item-title {
+    opacity: 0.7;
+}
+
+.join-request-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.join-request-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.members-list .member-item {
+    flex-wrap: wrap;
+}
+
+.member-info {
+    min-width: 0;
+}
+
+.member-name {
+    overflow-wrap: anywhere;
+}
+
+.member-you {
+    font-weight: 400;
+    color: var(--text-tertiary);
+}
+
+.member-role {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--primary-color);
+    color: #fff;
+}
+
+/* Admin-set label next to a member's name (panel and message sender line) */
+.member-tag {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: middle;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.5;
+    padding: 0 7px;
+    border-radius: 10px;
+    background: rgba(118, 75, 162, 0.15);
+    color: var(--secondary-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.dark-theme .member-tag {
+    background: rgba(160, 174, 255, 0.18);
+    color: #c3cbff;
+}
+
+.member-tag-form {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.member-tag-form input {
+    flex: 1 1 140px;
+}
+
+.group-leave-confirm {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid var(--danger-color);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Announcement-only: members see a notice instead of the composer controls */
+.composer-locked-notice {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 22px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.composer-locked-notice[hidden] {
+    display: none;
+}
+
+.composer-locked-notice svg {
+    flex-shrink: 0;
+}
+
+.message-input-container.composer-locked #attachBtn,
+.message-input-container.composer-locked #messageInput,
+.message-input-container.composer-locked #emojiBtn,
+.message-input-container.composer-locked #composerHint,
+.message-input-container.composer-locked #sendBtn {
+    display: none;
+}
+
+/* Join page */
+.join-card {
+    max-width: 440px;
+}
+
+.join-loading {
+    text-align: center;
+    color: var(--text-tertiary);
+}
+
+.join-preview,
+.join-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+}
+
+.join-avatar {
+    width: 88px;
+    height: 88px;
+    min-width: 88px;
+    font-size: 2.2rem;
+}
+
+.join-group-name,
+.join-message-title {
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.join-member-count {
+    color: var(--text-tertiary);
+    font-size: 0.9rem;
+}
+
+.join-description {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.join-status {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.join-status:empty {
+    display: none;
+}
+
+.join-error .join-message-title {
+    color: var(--danger-color);
+}
+
+.join-actions {
+    margin: 8px 0 20px;
+}
+
+@media (max-width: 480px) {
+    .invite-create-form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .invite-create-form .group-field {
+        flex: none;
+    }
+
+    .group-info-section .btn {
+        flex: 1 1 auto;
+    }
+
+    .invite-item {
+        flex-wrap: wrap;
+    }
+
+    .join-request-actions {
+        width: 100%;
+    }
+
+    .join-request-actions .btn {
+        flex: 1;
+    }
+
+    .composer-locked-notice {
+        font-size: 0.85rem;
+        padding: 10px 12px;
+        border-radius: 14px;
+    }
+}

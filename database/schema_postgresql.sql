@@ -2,6 +2,8 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS chat_join_requests CASCADE;
+DROP TABLE IF EXISTS chat_invites CASCADE;
 DROP TABLE IF EXISTS deleted_chats CASCADE;
 DROP TABLE IF EXISTS pinned_messages CASCADE;
 DROP TABLE IF EXISTS deleted_messages CASCADE;
@@ -90,6 +92,10 @@ CREATE TABLE chats (
     id SERIAL PRIMARY KEY,
     chat_type chat_type NOT NULL,
     chat_name VARCHAR(100), -- For group chats
+    description VARCHAR(500) NULL, -- group profile
+    avatar_url VARCHAR(255) NULL, -- path under uploads/
+    approve_new_members BOOLEAN NOT NULL DEFAULT FALSE, -- invite-link joins wait for an admin
+    announcement_only BOOLEAN NOT NULL DEFAULT FALSE, -- only admins can send messages
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -107,6 +113,7 @@ CREATE TABLE group_members (
     last_read_message_id INTEGER NULL, -- read position for unread counts
     muted_until TIMESTAMP NULL, -- NULL = not muted; '9999-12-31' = muted until unmuted ("always")
     archived_at TIMESTAMP NULL, -- NULL = in the main list
+    member_tag VARCHAR(30) NULL, -- short label set by admins, shown next to the name
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(chat_id, user_id)
 );
@@ -243,6 +250,37 @@ CREATE TABLE deleted_chats (
 
 CREATE INDEX idx_deleted_chats_chat_id ON deleted_chats(chat_id);
 CREATE INDEX idx_deleted_chats_user_id ON deleted_chats(user_id);
+
+-- Invite links (only a SHA-256 hash of the 128-bit token is stored; token_hint = its first 4 characters)
+CREATE TABLE chat_invites (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    token_hint VARCHAR(8) NOT NULL,
+    created_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+    expires_at TIMESTAMP NULL, -- NULL = never
+    max_uses INTEGER NULL, -- NULL = unlimited
+    use_count INTEGER NOT NULL DEFAULT 0,
+    revoked_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_invites_chat_id ON chat_invites(chat_id);
+
+-- Requests to join a group that has "Approve new members" on (one row per user and group)
+CREATE TABLE chat_join_requests (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    invite_id INTEGER NULL REFERENCES chat_invites(id) ON DELETE SET NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'declined'
+    decided_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+    decided_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (chat_id, user_id)
+);
+
+CREATE INDEX idx_join_requests_chat_status ON chat_join_requests(chat_id, status);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

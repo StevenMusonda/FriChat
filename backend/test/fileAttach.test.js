@@ -41,6 +41,7 @@ function createWorld(dbType) {
         const sql = rawSql.replace(/\$\d+/g, '?');
 
         if (/^SELECT id FROM group_members WHERE chat_id/.test(sql)) return [{ id: 1 }];
+        if (/^SELECT gm.id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.chat_id = \? AND gm.user_id = \?/.test(sql)) return [{ id: 1, role: 'member', chat_type: 'group', announcement_only: false }];
 
         // Files
         if (/^INSERT INTO files/.test(sql)) {

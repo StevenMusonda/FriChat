@@ -509,6 +509,8 @@ async function openChat(chatId) {
 
     currentChatId = chatId;
     currentChatMembers = [];
+    // Composer lock, header avatar and join-request badge belong to the chat being left (groups.js)
+    resetGroupState();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();
@@ -584,9 +586,14 @@ async function loadChatDetails(chatId) {
                 }
             }
             
+            if (chat.id !== currentChatId) return;
+
             document.getElementById('chatName').textContent = displayName;
             document.getElementById('chatInitial').textContent = displayInitial;
             document.getElementById('chatStatus').textContent = displayStatus;
+
+            // Group avatar, announcement-only composer and join-request badge (groups.js)
+            applyChatDetails(chat);
         }
     } catch (error) {
         console.error('Load chat details error:', error);

@@ -3,6 +3,43 @@
  * Handles user registration, login, logout, and token management
  */
 
+// Invite codes: 22 base64url characters (128 bits), see backend/utils/invites.js
+const INVITE_CODE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+
+/**
+ * Remember an invite link across sign-in/sign-up (this tab only)
+ */
+function rememberPendingInvite(code) {
+    try {
+        if (INVITE_CODE_PATTERN.test(code)) sessionStorage.setItem(CONFIG.STORAGE_KEYS.PENDING_INVITE, code);
+    } catch (e) {
+        // Storage unavailable: the user can open the link again
+    }
+}
+
+/**
+ * Read and forget the remembered invite code (null if none or not a valid code)
+ */
+function takePendingInvite() {
+    try {
+        const code = sessionStorage.getItem(CONFIG.STORAGE_KEYS.PENDING_INVITE);
+        sessionStorage.removeItem(CONFIG.STORAGE_KEYS.PENDING_INVITE);
+        return code && INVITE_CODE_PATTERN.test(code) ? code : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * ?next= target after login. Only an invite page is accepted, so the parameter can't
+ * send anyone to another site (no open redirect).
+ */
+function getSafeNextUrl(search = window.location.search) {
+    const next = new URLSearchParams(search).get('next');
+    const match = next && /^join\.html\?code=([A-Za-z0-9_-]{22})$/.exec(next);
+    return match ? `join.html?code=${match[1]}` : null;
+}
+
 /**
  * Make API request with authentication
  */

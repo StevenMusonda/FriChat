@@ -18,6 +18,10 @@ let starHandlers = [];
 let messageDeletedHandlers = [];
 let linkPreviewHandlers = [];
 let socketErrorHandlers = [];
+let groupEventHandlers = [];
+
+// Group profile/settings, members, leaving and join requests (handled in groups.js)
+const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
 
 /**
  * Initialize WebSocket connection
@@ -134,6 +138,12 @@ function initializeWebSocket() {
     // A message's link preview arrived (server fetched it) or its sender removed it
     socket.on('message_link_preview', (data) => {
         linkPreviewHandlers.forEach(handler => handler(data));
+    });
+
+    GROUP_EVENTS.forEach((event) => {
+        socket.on(event, (data) => {
+            groupEventHandlers.forEach(handler => handler(event, data));
+        });
     });
 
     // A request this socket made was refused (e.g. send_message: not a member, bad reply target)
@@ -370,6 +380,13 @@ function onLinkPreview(handler) {
 
 function onSocketError(handler) {
     socketErrorHandlers.push(handler);
+}
+
+/**
+ * Register handler(event, data) for the group events in GROUP_EVENTS
+ */
+function onGroupEvent(handler) {
+    groupEventHandlers.push(handler);
 }
 
 /**

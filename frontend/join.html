@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FriChat - Join group</title>
+    <meta name="referrer" content="no-referrer">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#667eea" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a202c" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="icons/favicon-32.png" type="image/png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="FriChat">
+    <script src="js/pwa.js" defer></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card join-card">
+            <div class="auth-header">
+                <h1>FriChat</h1>
+                <p>You've been invited to a group</p>
+            </div>
+
+            <!-- Filled in by js/join.js -->
+            <div class="join-content" id="joinContent" aria-live="polite">
+                <p class="join-loading">Loading invite…</p>
+            </div>
+
+            <div class="auth-footer">
+                <p><a href="chat.html">Back to your chats</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/join.js"></script>
+</body>
+</html>

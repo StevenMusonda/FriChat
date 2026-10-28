@@ -718,6 +718,7 @@ Don't re-run the schema file. Run the migrations you haven't run yet, in this or
 | 8 | `add_file_attachment_claim.sql` (run once) | `add_file_attachment_claim_postgresql.sql` |
 | 9 | `add_mentions_and_link_previews.sql` (run once) | `add_mentions_and_link_previews_postgresql.sql` |
 | 10 | `reactions_one_per_user.sql` | `reactions_one_per_user_postgresql.sql` |
+| 11 | `add_group_invites_and_settings.sql` (run once) | `add_group_invites_and_settings_postgresql.sql` |
 
 ```bash
 # MySQL, one file at a time
@@ -746,6 +747,133 @@ A user has at most one reaction on a message. Reacting with a different emoji re
 - [ ] A clicks ❤️ again: the reaction disappears for both.
 - [ ] B reacts 👍, A reacts 👍: both see 👍 2; A clicks it: 👍 1.
 - [ ] Reload: counts match what was shown live.
+
+
+---
+
+## Phase 5: Invite links, join approval, group profile and announcement-only mode
+
+Groups get a profile (description and photo), invite links with an optional QR code, an optional approval step for people who join by link, an announcement-only mode, member tags, and a group info panel with a Leave action. Invite links can be switched off with `ENABLE_INVITE_LINKS=false` until the phase 6 safety work is done.
+
+### What it does
+
+- **Invite links.** Admins create links that expire after 1 hour, 1 day, 7 days or never, with an optional maximum number of uses (1–1000). A link looks like `<FRONTEND_URL>/join.html?code=<22 characters>`. The code is 128 random bits. The database keeps only its SHA-256 hash and its first 4 characters (the "hint" admins see in the list), so the full link is shown once, right after it's created, with Copy, a QR code and Download QR code. Admins can list and revoke links.
+- **Join page.** Opening a link while signed in shows the group name, photo, description and member count, plus a **Join group** button (or **Request to join**). When signed out, the page sends the user to `login.html?next=join.html?code=…`. After login they come back to the page. `next` accepts only a join-page URL, so it can't be used as an open redirect. Signing up instead of logging in also comes back, because the code is kept in `sessionStorage` and `chat.html` picks it up.
+- **Clear failures.** An expired, revoked, used-up, unknown or malformed link gets its own message and reveals nothing about the group (`410` with `code` `EXPIRED`, `REVOKED` or `USED_UP`; `404` `INVALID`; `400` for a malformed code). The last use of a link is claimed with one conditional `UPDATE`, so two people can't both take it. Opening a link you've already used, or one you have a pending request for, doesn't use it up.
+- **Approve new members.** With this group setting on, joining by link creates a pending request. All admins get a toast and a badge on the ⓘ button, and the panel lists the requests with **Approve** and **Decline**. The requester is told live (`join_request_decided`). When approved, the chat appears in their list and their open tabs join the room straight away. A declined user can ask again. A request does use one link use.
+- **Group profile.** Admins edit the name (1–100 characters) and description (up to 500), and upload or remove a photo: JPEG, PNG or WebP, up to 2 MB (`GROUP_AVATAR_MAX_BYTES`). The type is checked from the file's bytes, not its name or mime type. With `sharp` installed, the photo is re-encoded as a 256×256 WebP, which also strips EXIF data such as GPS position. Files get random names under `uploads/group-avatars/`, and the old file is deleted when a photo is replaced. The photo shows in the chat header, the group panel and the join page.
+- **Announcement-only.** With this on, only admins can send. Members see a locked composer saying "Only admins can send messages in this group". The server enforces it on every send path: `POST /api/messages`, `POST /api/messages/upload` with a `chatId`, `POST /api/messages/forward` into the group, and the `send_message` socket event. All of them go through `checkCanPost` in `backend/utils/groups.js`. Reactions, reading and editing your own earlier messages still work.
+- **Leaving.** **Leave group** is at the bottom of the panel. If you're the only admin, you pick who becomes admin, and the longest-standing member (earliest `joined_at`) is preselected. Over the API, `newAdminId` is optional, and without it the longest-standing member is promoted. If two admins leave at the same moment, a check after the delete still promotes someone. Removing yourself with `DELETE /api/chats/:id/members/:yourId` follows the same rule.
+- **Member tags.** Admins give any member a short label (up to 30 characters). It shows next to the name in the panel and on that member's messages.
+- **Group info panel** (ⓘ in a group). It shows the profile, the settings (admins can toggle them; members see a note), invite links, join requests, members with **Admin** badges and tags, and Leave. Every value from users is inserted with `textContent`.
+
+Two fixes in the same code:
+- Removing a member (or leaving) now takes that user's open sockets out of the chat room, so they stop receiving its live messages without a reconnect.
+- The ⓘ button used to show the direct-chat layout for groups, because it checked `chat.type` instead of `chat.chat_type`.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_group_invites_and_settings.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_group_invites_and_settings_postgresql.sql
+
+# Optional image resizing for group photos
+cd backend && npm install
+```
+
+The migration adds `chats.description`, `chats.avatar_url`, `chats.approve_new_members`, `chats.announcement_only`, `group_members.member_tag`, and the `chat_invites` and `chat_join_requests` tables. Fresh installs get all of these from `schema.sql` / `schema_postgresql.sql`. Run the migration before starting the new code, because every send now reads `chats.announcement_only`.
+
+- New env variables (in `backend/.env.example`):
+  - `ENABLE_INVITE_LINKS` (default `true`). With `false`, creating, listing, previewing and joining by link return `404` with `code: "DISABLED"`, and the panel says links are off. Revoking existing links and handling pending requests still work.
+  - `GROUP_AVATAR_MAX_BYTES` (default `2097152`). The frontend checks the default 2 MB before uploading, so if you raise it, also change `GROUP_AVATAR_MAX_BYTES` in `frontend/js/groups.js`.
+- New npm package: `sharp` (`optionalDependencies`, `^0.34.5`). If it fails to install, uploads still work, but photos are stored as uploaded (type and size checks still apply, no resize, no EXIF stripping).
+- Frontend: `frontend/vendor/qrcode-generator/qrcode.js` (MIT, Kazuhiko Arase, v2.0.4, unchanged; licence next to it) is served locally, so there is no CDN. `frontend/sw.js` `CACHE_VERSION` is now `frichat-shell-v5`, and the shell includes `join.html`, `js/groups.js`, `js/join.js` and the QR library.
+- Invite URLs use `FRONTEND_URL` (falls back to `CORS_ORIGIN`), the same as password reset links. Set it to the public address of the `frontend/` folder.
+
+### New endpoints
+
+All require `Authorization: Bearer <token>`. Group routes return `403` to non-members ("Access denied to this chat") and to members who aren't admins ("Only group admins can do this"), and `400` for direct chats. Rate limits are per IP: 30/min for group actions, 10/min for avatar upload and removal, 20/min for invite preview and join.
+
+| Method | Endpoint | Body | Who | Notes |
+|---|---|---|---|---|
+| GET | `/api/chats/:chatId` | – | members | Now also returns `description`, `avatar_url`, `approve_new_members`, `announcement_only`, `my_role`, `can_post`, `invite_links_enabled`, `pending_request_count` (admins), and participants with `member_tag` and `joined_at`, longest-standing first |
+| PATCH | `/api/chats/:chatId/settings` | any of `chatName`, `description`, `approveNewMembers`, `announcementOnly` | admins | An empty `description` clears it. Broadcasts `group_updated` |
+| POST | `/api/chats/:chatId/avatar` | multipart `avatar` | admins | JPEG/PNG/WebP up to `GROUP_AVATAR_MAX_BYTES`. Returns the profile with `avatarUrl` and `resized` |
+| DELETE | `/api/chats/:chatId/avatar` | – | admins | |
+| POST | `/api/chats/:chatId/invites` | `{ expiresIn?: '1h'\|'1d'\|'7d'\|'never', maxUses?: 1-1000 \| null }` | admins | `201` with `code` and `url`. This is the only response that contains them |
+| GET | `/api/chats/:chatId/invites` | – | admins | `[{ id, tokenHint, createdByUsername, createdAt, expiresAt, maxUses, useCount, revokedAt, status }]`, where `status` is `active`, `revoked`, `expired` or `used_up` |
+| DELETE | `/api/chats/:chatId/invites/:inviteId` | – | admins | `409` if already revoked, `404` if it isn't this group's |
+| GET | `/api/chats/:chatId/join-requests` | – | admins | Pending requests, oldest first |
+| POST | `/api/chats/:chatId/join-requests/:requestId/approve` | – | admins | `409` if already handled |
+| POST | `/api/chats/:chatId/join-requests/:requestId/decline` | – | admins | `409` if already handled |
+| PUT | `/api/chats/:chatId/members/:userId/tag` | `{ tag: string \| null }` | admins | Up to 30 characters, trimmed. `null` or `''` clears it. `404` if the user isn't a member |
+| POST | `/api/chats/:chatId/leave` | `{ newAdminId? }` | members | Returns `newAdmin: { userId, username } \| null` |
+| GET | `/api/invites/:code` | – | any signed-in user | Preview `{ chatId, chatName, description, avatarUrl, memberCount, approvalRequired, joinState }`, where `joinState` is `none`, `member`, `pending` or `declined` |
+| POST | `/api/invites/:code/join` | – | any signed-in user | `201` `joined`, `202` `pending`, or `200` `already_member` / `pending` |
+
+Changed: `POST /api/messages`, `POST /api/messages/upload` (with `chatId`) and `POST /api/messages/forward` return `403` with `code: "ANNOUNCEMENT_ONLY"` when a non-admin posts into an announcement-only group.
+
+### New Socket.IO events
+
+All are server → client. No new client → server events.
+
+| Event | Sent to | Payload | When |
+|---|---|---|---|
+| `group_updated` | `chat_<id>` | `{ chatId, chatName, description, avatarUrl, approveNewMembers, announcementOnly }` | Settings, name, description or photo changed. The composer locks or unlocks live |
+| `group_members_updated` | `chat_<id>` | `{ chatId }` | Someone joined, left, was removed, was approved or got a tag. Clients refetch the chat |
+| `group_left` | `user_<id>` | `{ chatId }` | You left or were removed. Every tab drops the chat |
+| `join_request_created` | each admin's `user_<id>` | `{ chatId, chatName, requestId, user: { id, username, fullName }, pendingCount }` | Someone asked to join |
+| `join_requests_updated` | each admin's `user_<id>` | `{ chatId, pendingCount }` | A request was approved or declined |
+| `join_request_decided` | requester's `user_<id>` | `{ chatId, chatName, status: 'approved' \| 'declined' }` | |
+
+Changed: `send_message` from a non-admin in an announcement-only group is refused with `error { event: 'send_message', message: 'Only admins can send messages in this group', code: 'ANNOUNCEMENT_ONLY' }`. Nothing is stored or broadcast.
+
+### Manual test checklist
+
+Use four users. A is the admin of a group with B and C. D is not in it. Use a private window for D.
+
+- [ ] A: open the group and click ⓘ. The panel shows the profile, Settings, Invite links, Members (A has an **Admin** badge) and Leave. B's panel has no admin controls.
+- [ ] A: **Edit name & description**, enter `<b>x</b>` in both, and save. Everyone sees the literal text. The header and sidebar name update live in B's window.
+- [ ] A: **Add photo** with a JPEG over 2 MB: it is refused. A GIF, or a `.txt` file renamed to `.png`: refused. A normal photo: it shows in the header, the panel and on the join page as a 256×256 WebP.
+- [ ] A: create a link with **1 hour** and max uses **1**. The link, Copy, a QR code and **Download QR code** appear. Scan the QR code with a phone: it opens the link.
+- [ ] D (signed out): open the link. You land on the login page, and after logging in you're back on the join page with the group name, photo, description and member count. Click **Join group**: the chat opens, and A, B and C see D in the member list.
+- [ ] Open the same link as another user: "This invite link has reached its maximum number of uses." In A's list the link shows **Used up**.
+- [ ] A: create a link and click **Revoke**. Opening it says "This invite link has been revoked by a group admin."
+- [ ] Expired: create a **1 hour** link, then in the database run `UPDATE chat_invites SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE id = <id>` (MySQL: `INTERVAL 1 MINUTE`). Opening it says "This invite link has expired."
+- [ ] `join.html?code=oops` and a made-up 22-character code both say the link is invalid. `login.html?next=https://example.com` goes to `chat.html` after login, not to example.com.
+- [ ] A: turn on **Approve new members** and create a link. D (removed first, or a fifth user) clicks **Request to join**: "Request sent". A gets a toast and a red badge on ⓘ. **Approve**: D gets "You've been accepted into …" and the chat appears without a reload. Try **Decline** with another user: they get the declined toast, and the join page says they can ask again.
+- [ ] A: turn on **Announcement-only**. B's composer turns into the lock notice live. B can't type, attach or send, but can still react. A can send.
+- [ ] Bypass attempt as B: in the browser console, run `socket.emit('send_message', { chatId: <id>, messageType: 'text', content: 'x' })`. You get an error toast, and nothing appears for anyone. `fetch` to `POST /api/messages` gets `403 ANNOUNCEMENT_ONLY`. Forwarding a message into the group is refused too.
+- [ ] Direct API calls as B: `PATCH /api/chats/<id>/settings`, `POST /api/chats/<id>/invites`, `PUT /api/chats/<id>/members/<C>/tag` and `POST /api/chats/<id>/join-requests/<r>/approve` all return `403`, and nothing changes.
+- [ ] A: **Add tag** for B with `Design lead`. The tag shows next to B's name in the panel and on B's messages. Entering 31 characters is cut at 30 by the input, and the server refuses longer ones. **Clear** removes it.
+- [ ] A (the only admin): **Leave group**. The picker preselects the longest-standing member, marked "longest in the group". Pick C and confirm: A's chat closes and disappears from A's list in every tab, and C has the **Admin** badge.
+- [ ] Set `ENABLE_INVITE_LINKS=false` and restart. The panel says invite links are off, existing links say "Invite links are turned off on this server.", and links can still be revoked.
+- [ ] Dark theme and a 360px-wide phone: the panel, the invite form (stacked), the QR code (white background), the join page and the lock notice fit with no sideways scrolling.
+
+### Tests
+
+`cd backend && npm test` (404 tests, 73 new).
+- `test/groups.test.js` (both fake drivers) covers:
+  - Invites: the code format, that only the hash and hint are stored, the expiry SQL, and that listing never leaks the code.
+  - Joining: preview, joining with the use count, socket room join and `deleted_chats` cleanup, and repeat joins.
+  - Failing links: expired, revoked, used-up and unknown links both on preview and join, the lost-race case, direct-chat links, and `ENABLE_INVITE_LINKS`.
+  - Approval: request, admin notice, approve, double decision (`409`), decline and asking again.
+  - Permissions: every admin endpoint as a non-admin (`403`, nothing changed), as a non-member, and on a direct chat.
+  - Announcement-only: REST send, upload, forward, the socket event (no insert, no broadcast) and `GET /chats/:id` `can_post`.
+  - Leaving: longest-standing member, picked successor, invalid picks, another admin remaining, and self-removal.
+  - Validation rules, avatar type sniffing, resize to 256×256 WebP, and safe deletion.
+- `test/groupsFrontend.test.js` loads the real `auth.js`, `chat.js`, `groups.js` and the vendored QR library. It covers the `next=` open-redirect guard, the pending-invite storage, the avatar URL whitelist, tag escaping in sender lines, the composer lock, and that the QR library draws a valid code.
+- The test doubles in `fileAttach`, `mentions`, `messageActions`, `sendMessage` and `textRule` were taught the new posting-check query. Their assertions are unchanged.
+
+### Known limitations
+
+- MySQL wasn't run against a live server. On PostgreSQL 18, a fresh `schema_postgresql.sql` install matched an older schema plus the new migration (run twice) column for column, and the real server was driven end to end over REST and Socket.IO, and in headless Edge (light/dark, 375px).
+- Phase 6 items: anyone who has a valid link can join, including someone an admin removed earlier (there are no bans yet). Join requests have no per-user limit beyond the link's max uses and the per-IP rate limit. Rate limits are in memory and per IP, as elsewhere.
+- A requester who is offline when their request is decided gets no push notification. They see the result when they next open FriChat (the chat is in their list) or the join page.
+- Only admins can tag. There is no promote or demote endpoint besides the leave hand-over (not in this phase).
+- Changing `chats` settings bumps `chats.updated_at` (existing `ON UPDATE` / trigger), so a settings change moves the group up the sidebar like a new message.
 
 ---
 

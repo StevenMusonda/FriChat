@@ -39,6 +39,10 @@ function createWorld(dbType) {
         if (/^SELECT id FROM group_members WHERE chat_id = \? AND user_id = \?/.test(sql)) {
             return isMember(params[0], params[1]) ? [{ id: 1 }] : [];
         }
+        // Posting check (utils/groups.js)
+        if (/^SELECT gm.id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.chat_id = \? AND gm.user_id = \?/.test(sql)) {
+            return isMember(params[0], params[1]) ? [{ id: 1, role: 'member', chat_type: world.chats[params[0]].type, announcement_only: false }] : [];
+        }
 
         // resolveMentions
         if (/FROM group_members gm JOIN chats c ON c.id = gm.chat_id AND c.chat_type = 'group' JOIN users u/.test(sql)) {

@@ -20,6 +20,7 @@ function sendHandler(dbType) {
 
     return (sql, params) => {
         if (/^SELECT id FROM group_members WHERE chat_id/.test(sql)) return [{ id: 1 }];
+        if (/^SELECT gm.id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.chat_id = (\?|\$1) AND gm.user_id = (\?|\$2)/.test(sql)) return [{ id: 1, role: 'member', chat_type: 'group', announcement_only: false }];
         if (/^INSERT INTO messages/.test(sql)) return inserted(NEW_MESSAGE_ID, sql);
         if (/^UPDATE/.test(sql)) return written();
         if (/^SELECT last_read_message_id FROM group_members/.test(sql)) return [{ last_read_message_id: NEW_MESSAGE_ID - 1 }];

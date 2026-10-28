@@ -336,7 +336,7 @@ function renderMessageHtml(message) {
             <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
                 <div class="message-avatar">${senderInitial}</div>
                 <div class="message-content">
-                    ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
+                    ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
                     <div class="message-bubble">
                         <div class="message-deleted">🚫 This message was deleted</div>
                     </div>
@@ -367,7 +367,7 @@ function renderMessageHtml(message) {
             </div>
             <div class="message-avatar">${senderInitial}</div>
             <div class="message-content">
-                ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}</div>` : ''}
+                ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
                 <div class="message-bubble">
                     ${message.is_forwarded ? `<div class="message-forwarded">${FORWARD_ICON_SVG}<span>Forwarded</span></div>` : ''}
                     ${renderReplyQuote(message.reply_to)}
@@ -917,6 +917,12 @@ function initializeMessageInput() {
     fileInput.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files);
 
+        if (typeof canPostInCurrentChat === 'function' && !canPostInCurrentChat()) {
+            fileInput.value = '';
+            showNotification('Only admins can send messages in this group', 'error');
+            return;
+        }
+
         // An open reply applies to the first file only
         let replyToMessageId = getReplyTargetId();
         if (replyToMessageId) clearComposerContext();
@@ -994,6 +1000,12 @@ async function sendMessage() {
     const content = messageInput.value.trim();
     
     if (!content || !currentChatId) {
+        return;
+    }
+
+    // Announcement-only group and not an admin (groups.js); the server refuses it too
+    if (typeof canPostInCurrentChat === 'function' && !canPostInCurrentChat()) {
+        showNotification('Only admins can send messages in this group', 'error');
         return;
     }
 

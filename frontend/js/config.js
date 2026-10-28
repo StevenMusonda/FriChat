@@ -34,6 +34,18 @@ const CONFIG = {
         ARCHIVE_CHAT: (chatId) => `/chats/${chatId}/archive`,
         MENTIONS_ONLY: (chatId) => `/chats/${chatId}/mentions-only`,
 
+        // Groups
+        GROUP_SETTINGS: (chatId) => `/chats/${chatId}/settings`,
+        GROUP_AVATAR: (chatId) => `/chats/${chatId}/avatar`,
+        GROUP_INVITES: (chatId) => `/chats/${chatId}/invites`,
+        GROUP_INVITE: (chatId, inviteId) => `/chats/${chatId}/invites/${inviteId}`,
+        JOIN_REQUESTS: (chatId) => `/chats/${chatId}/join-requests`,
+        JOIN_REQUEST_DECISION: (chatId, requestId, decision) => `/chats/${chatId}/join-requests/${requestId}/${decision}`,
+        MEMBER_TAG: (chatId, userId) => `/chats/${chatId}/members/${userId}/tag`,
+        LEAVE_GROUP: (chatId) => `/chats/${chatId}/leave`,
+        INVITE_PREVIEW: (code) => `/invites/${encodeURIComponent(code)}`,
+        INVITE_JOIN: (code) => `/invites/${encodeURIComponent(code)}/join`,
+
         // Messages
         MESSAGES: (chatId) => `/messages/chat/${chatId}`,
         SEND_MESSAGE: '/messages',
@@ -67,7 +79,9 @@ const CONFIG = {
         USER_DATA: 'userData',
         THEME: 'theme',
         CURRENT_CHAT: 'currentChat',
-        ARCHIVED_EXPANDED: 'archivedExpanded'
+        ARCHIVED_EXPANDED: 'archivedExpanded',
+        // Invite code to come back to after signing in (sessionStorage)
+        PENDING_INVITE: 'pendingInvite'
     }
 };
 

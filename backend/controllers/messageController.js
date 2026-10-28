@@ -12,6 +12,7 @@ const { saveMentions, replaceMentions, attachMentions } = require('../utils/ment
 const { attachLinkPreview } = require('../utils/linkPreview');
 const reactionRules = require('../utils/reactions');
 const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
+const { checkCanPost, postingError } = require('../utils/groups');
 const {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
@@ -176,16 +177,13 @@ async function sendMessage(req, res) {
             });
         }
 
-        // Check if user is a member of this chat
-        const membership = await queryOne(
-            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
-            [chatId, userId]
-        );
-
-        if (!membership) {
-            return res.status(403).json({
+        // Member of the chat, and an admin if the group is announcement-only
+        const postError = await checkCanPost(chatId, userId);
+        if (postError) {
+            return res.status(postError.status).json({
                 success: false,
-                message: 'Access denied to this chat'
+                message: postError.message,
+                code: postError.code
             });
         }
 
@@ -310,16 +308,13 @@ async function uploadFile(req, res) {
             });
         }
 
-        // Check if user is a member of this chat
-        const membership = await queryOne(
-            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
-            [chatId, userId]
-        );
-
-        if (!membership) {
-            return res.status(403).json({
+        // Member of the chat, and an admin if the group is announcement-only
+        const postError = await checkCanPost(chatId, userId);
+        if (postError) {
+            return res.status(postError.status).json({
                 success: false,
-                message: 'Access denied to this chat'
+                message: postError.message,
+                code: postError.code
             });
         }
 
@@ -1006,7 +1001,7 @@ async function forwardMessages(req, res) {
         }
 
         const memberships = await executeQuery(
-            `SELECT chat_id FROM group_members WHERE user_id = ? AND chat_id IN (${chatIds.map(() => '?').join(', ')})`,
+            `SELECT gm.chat_id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.user_id = ? AND gm.chat_id IN (${chatIds.map(() => '?').join(', ')})`,
             [userId, ...chatIds]
         );
 
@@ -1015,6 +1010,15 @@ async function forwardMessages(req, res) {
             return res.status(404).json({
                 success: false,
                 message: 'One or more chats were not found. You can only forward to chats you are a member of.'
+            });
+        }
+
+        // Forwarding is posting: announcement-only groups take it from admins only
+        if (memberships.some(membership => postingError(membership))) {
+            return res.status(403).json({
+                success: false,
+                message: 'One or more of those groups only allow admins to send messages',
+                code: 'ANNOUNCEMENT_ONLY'
             });
         }
 

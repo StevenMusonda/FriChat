@@ -6,6 +6,15 @@ const { body, param, query, validationResult } = require('express-validator');
 const { isValidTimezone } = require('./notificationSettings');
 const { MAX_MESSAGE_LENGTH, MAX_FORWARD_MESSAGES, MAX_FORWARD_CHATS } = require('../config/messages');
 const { isValidEmoji } = require('./reactions');
+const { stripControlChars } = require('./messageText');
+const { TOKEN_PATTERN } = require('./invites');
+const {
+    GROUP_NAME_MAX_LENGTH,
+    GROUP_DESCRIPTION_MAX_LENGTH,
+    MEMBER_TAG_MAX_LENGTH,
+    INVITE_EXPIRY_OPTIONS,
+    INVITE_MAX_USES_LIMIT
+} = require('../config/groups');
 
 /**
  * Validation rules for user registration
@@ -247,6 +256,135 @@ const validateMentionsOnly = [
         .withMessage('enabled must be true or false')
 ];
 
+const chatIdParamRule = param('chatId')
+    .isInt({ min: 1 })
+    .withMessage('Invalid chat ID')
+    .toInt();
+
+/**
+ * Validation rules for group routes that only take :chatId
+ */
+const validateChatIdParam = [
+    chatIdParamRule
+];
+
+// Optional text field: string (control characters stripped, trimmed) within a length limit
+function groupTextRule(field, max, label) {
+    return body(field)
+        .optional({ values: 'null' })
+        .isString()
+        .withMessage(`${label} must be text`)
+        .bail()
+        .customSanitizer(value => stripControlChars(value).trim())
+        .isLength({ max })
+        .withMessage(`${label} must be at most ${max} characters`);
+}
+
+/**
+ * Validation rules for changing a group's profile and settings (admins only; send only what changes)
+ */
+const validateGroupSettings = [
+    chatIdParamRule,
+
+    groupTextRule('chatName', GROUP_NAME_MAX_LENGTH, 'Group name')
+        .bail()
+        .isLength({ min: 1 })
+        .withMessage('Group name cannot be empty'),
+
+    groupTextRule('description', GROUP_DESCRIPTION_MAX_LENGTH, 'Description'),
+
+    body(['approveNewMembers', 'announcementOnly'])
+        .optional()
+        .isBoolean({ strict: true })
+        .withMessage('Settings must be true or false'),
+
+    body()
+        .custom(value => ['chatName', 'description', 'approveNewMembers', 'announcementOnly'].some(key => value && value[key] !== undefined))
+        .withMessage('Nothing to update')
+];
+
+/**
+ * Validation rules for creating an invite link
+ */
+const validateCreateInvite = [
+    chatIdParamRule,
+
+    body('expiresIn')
+        .optional()
+        .isIn(INVITE_EXPIRY_OPTIONS)
+        .withMessage(`expiresIn must be one of ${INVITE_EXPIRY_OPTIONS.join(', ')}`),
+
+    body('maxUses')
+        .optional({ values: 'null' })
+        .isInt({ min: 1, max: INVITE_MAX_USES_LIMIT })
+        .withMessage(`maxUses must be between 1 and ${INVITE_MAX_USES_LIMIT}`)
+        .toInt()
+];
+
+/**
+ * Validation rules for revoking an invite link
+ */
+const validateInviteIdParam = [
+    chatIdParamRule,
+
+    param('inviteId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid invite ID')
+        .toInt()
+];
+
+/**
+ * Validation rules for approving or declining a join request
+ */
+const validateJoinRequestParam = [
+    chatIdParamRule,
+
+    param('requestId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid request ID')
+        .toInt()
+];
+
+/**
+ * Validation rules for setting a member's tag (null or empty clears it)
+ */
+const validateMemberTag = [
+    chatIdParamRule,
+
+    param('userId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid user ID')
+        .toInt(),
+
+    body('tag')
+        .exists()
+        .withMessage('tag is required (null clears it)'),
+
+    groupTextRule('tag', MEMBER_TAG_MAX_LENGTH, 'Tag')
+];
+
+/**
+ * Validation rules for leaving a group (newAdminId: who takes over when the last admin leaves)
+ */
+const validateLeaveGroup = [
+    chatIdParamRule,
+
+    body('newAdminId')
+        .optional({ values: 'null' })
+        .isInt({ min: 1 })
+        .withMessage('Invalid new admin')
+        .toInt()
+];
+
+/**
+ * Validation rules for invite-link preview and join. A malformed code gets the same answer as an unknown one.
+ */
+const validateInviteCode = [
+    param('code')
+        .matches(TOKEN_PATTERN)
+        .withMessage('This invite link is invalid. Check that you copied the whole link.')
+];
+
 // Push service endpoints are public HTTPS URLs; refuse anything that points the server at itself
 // or at a raw IP, since the server will POST to this URL
 function isPushEndpoint(value) {
@@ -381,6 +519,14 @@ module.exports = {
     validateStarredQuery,
     validateCreateChat,
     validateMentionsOnly,
+    validateChatIdParam,
+    validateGroupSettings,
+    validateCreateInvite,
+    validateInviteIdParam,
+    validateJoinRequestParam,
+    validateMemberTag,
+    validateLeaveGroup,
+    validateInviteCode,
     validatePushSubscription,
     validatePushUnsubscribe,
     validateNotificationSettings,

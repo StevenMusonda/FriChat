@@ -70,9 +70,12 @@
     <script>
         // Initialize login form
         document.addEventListener('DOMContentLoaded', () => {
+            // After login, go back to an invite link if one sent us here (validated, same site only)
+            const nextUrl = getSafeNextUrl();
+
             // Check if already logged in
             if (localStorage.getItem('authToken')) {
-                window.location.href = 'chat.html';
+                window.location.href = nextUrl || 'chat.html';
             }
 
             const loginForm = document.getElementById('loginForm');
@@ -95,8 +98,8 @@
                     const result = await login(username, password);
                     
                     if (result.success) {
-                        // Redirect to chat
-                        window.location.href = 'chat.html';
+                        // Redirect to chat (or back to the invite link)
+                        window.location.href = nextUrl || 'chat.html';
                     } else {
                         errorMessage.textContent = result.message || 'Login failed';
                         errorMessage.style.display = 'block';

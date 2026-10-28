@@ -13,6 +13,9 @@ const {
     setArchived,
     setMentionsOnly
 } = require('../utils/chatState');
+const { getMembership, leaveGroup, removeUserFromChatRoom, emitMembersUpdated } = require('../utils/groups');
+const { getGroupDetailsForMember } = require('./groupController');
+const { toBool } = require('../utils/messageQueries');
 
 /**
  * Get all chats for current user
@@ -156,11 +159,8 @@ async function getChatById(req, res) {
         const { chatId } = req.params;
         const userId = req.user.id;
 
-        // Check if user is a member of this chat
-        const membership = await queryOne(
-            'SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?',
-            [chatId, userId]
-        );
+        // Check if user is a member of this chat (role and announcement mode come with it)
+        const membership = await getMembership(chatId, userId);
 
         if (!membership) {
             return res.status(403).json({
@@ -182,7 +182,7 @@ async function getChatById(req, res) {
             });
         }
 
-        // Get participants
+        // Get participants (longest-standing first, the order admin passes down in)
         const participants = await executeQuery(`
             SELECT 
                 u.id,
@@ -190,13 +190,26 @@ async function getChatById(req, res) {
                 u.full_name,
                 u.avatar_url,
                 u.status,
-                gm.role
+                gm.role,
+                gm.member_tag,
+                gm.joined_at
             FROM group_members gm
             JOIN users u ON gm.user_id = u.id
             WHERE gm.chat_id = ?
+            ORDER BY gm.joined_at ASC, gm.id ASC
         `, [chatId]);
 
         chat.participants = participants;
+        chat.approve_new_members = toBool(chat.approve_new_members);
+        chat.announcement_only = toBool(chat.announcement_only);
+
+        // Your role, whether you can post, invite links on/off and (admins) pending join requests
+        if (chat.chat_type === 'group') {
+            Object.assign(chat, await getGroupDetailsForMember(chatId, membership));
+        } else {
+            chat.my_role = membership.role;
+            chat.can_post = true;
+        }
 
         res.json({
             success: true,
@@ -378,11 +391,26 @@ async function removeMember(req, res) {
             });
         }
 
-        // Remove member
-        await executeQuery(
-            'DELETE FROM group_members WHERE chat_id = ? AND user_id = ?',
-            [chatId, removeUserId]
-        );
+        // Removing yourself is leaving, so the last admin still hands admin on
+        if (Number(removeUserId) === Number(currentUserId)) {
+            const result = await leaveGroup(chatId, currentUserId);
+            if (result.error) {
+                return res.status(result.error.status).json({ success: false, message: result.error.message });
+            }
+        } else {
+            // Remove member
+            await executeQuery(
+                'DELETE FROM group_members WHERE chat_id = ? AND user_id = ?',
+                [chatId, removeUserId]
+            );
+        }
+
+        // Their open tabs stop receiving the chat's live events
+        removeUserFromChatRoom(req.io, removeUserId, chatId);
+        emitMembersUpdated(req.io, chatId);
+        if (req.io) {
+            req.io.to(`user_${removeUserId}`).emit('group_left', { chatId: Number(chatId) });
+        }
 
         res.json({
             success: true,

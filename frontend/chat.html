@@ -127,12 +127,14 @@
                                 <circle cx="12" cy="19" r="1"></circle>
                             </svg>
                         </button>
-                        <button class="icon-btn" id="chatInfoBtn" title="Chat Info">
+                        <button class="icon-btn chat-info-btn" id="chatInfoBtn" title="Chat Info" aria-label="Chat info">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <line x1="12" y1="16" x2="12" y2="12"></line>
                                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
                             </svg>
+                            <!-- Pending join requests (admins) -->
+                            <span class="chat-info-badge" id="chatInfoBadge" aria-hidden="true" hidden></span>
                         </button>
                         <button class="icon-btn close-chat-btn" id="closeChatBtn" title="Close Chat" style="display: none;">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -191,6 +193,15 @@
                             </svg>
                             Forward
                         </button>
+                    </div>
+
+                    <!-- Announcement-only group, user isn't an admin (groups.js) -->
+                    <div class="composer-locked-notice" id="composerLockedNotice" role="status" hidden>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        <span>Only admins can send messages in this group. You can still read and react.</span>
                     </div>
 
                     <button class="icon-btn" id="attachBtn" title="Attach File">
@@ -375,8 +386,8 @@
     <div class="modal" id="chatInfoModal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Chat Information</h3>
-                <button class="modal-close" id="closeChatInfoModal">&times;</button>
+                <h3 id="chatInfoTitle">Chat Information</h3>
+                <button class="modal-close" id="closeChatInfoModal" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="chatInfoContent">
@@ -537,6 +548,8 @@
     <script src="js/messageActions.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/notifications.js"></script>
+    <script src="vendor/qrcode-generator/qrcode.js"></script>
+    <script src="js/groups.js"></script>
     
     <script>
         // Initialize chat application
@@ -544,6 +557,13 @@
             // Check authentication
             if (!isAuthenticated()) {
                 window.location.href = 'login.html';
+                return;
+            }
+
+            // Signed in on the way to an invite link (e.g. through signup): go back to it
+            const pendingInvite = takePendingInvite();
+            if (pendingInvite) {
+                window.location.href = `join.html?code=${encodeURIComponent(pendingInvite)}`;
                 return;
             }
 
@@ -641,6 +661,9 @@
 
             // Reply/edit bar, multi-select, forward dialog and starred panel
             initializeMessageActions();
+
+            // Group info panel, announcement-only composer and live group events
+            initializeGroups();
 
             // Older pages on scroll up, read state and jump button near the bottom
             initializeMessageScroll();

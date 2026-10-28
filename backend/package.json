@@ -35,5 +35,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.5"
   }
 }

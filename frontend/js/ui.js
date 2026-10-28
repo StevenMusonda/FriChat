@@ -497,6 +497,15 @@ function showChatInfo() {
         console.error('Chat not found:', currentChatId);
         return;
     }
+
+    // Groups get the full panel: profile, settings, invite links, requests, members, leave (groups.js)
+    if (chat.chat_type === 'group') {
+        openGroupInfo(chat.id);
+        return;
+    }
+
+    const chatInfoTitle = document.getElementById('chatInfoTitle');
+    if (chatInfoTitle) chatInfoTitle.textContent = 'Chat Information';
     
     // Parse participants if it's a JSON string
     let participants = [];

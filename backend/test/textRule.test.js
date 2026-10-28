@@ -55,6 +55,13 @@ function createWorld(dbType) {
         if (/^SELECT chat_id FROM group_members WHERE user_id = \? AND chat_id IN/.test(sql)) {
             return params.slice(1).filter(isMember).map(chat_id => ({ chat_id }));
         }
+        // Posting checks (utils/groups.js): send, and forward targets
+        if (/^SELECT gm.id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.chat_id = \? AND gm.user_id = \?/.test(sql)) {
+            return isMember(params[0]) ? [{ id: 1, role: 'member', chat_type: 'group', announcement_only: false }] : [];
+        }
+        if (/^SELECT gm.chat_id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.user_id = \? AND gm.chat_id IN/.test(sql)) {
+            return params.slice(1).filter(isMember).map(chat_id => ({ chat_id, role: 'member', chat_type: 'group', announcement_only: false }));
+        }
 
         // Edit
         if (/AS within_window FROM messages m JOIN group_members gm/.test(sql)) {
