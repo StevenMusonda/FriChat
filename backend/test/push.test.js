@@ -91,8 +91,10 @@ describe('notification preview', () => {
 
 for (const dbType of ['mysql', 'postgresql']) {
     describe(`notifyNewMessage (${dbType})`, () => {
-        // Members as the recipients query returns them (muted / deleted chats are filtered in SQL)
+        // Members as the recipients query returns them (deleted chats are filtered in SQL, mute in JS
+        // so that @mentions can get through a "mentions only" chat)
         const MEMBER_ROWS = [
+            { user_id: 7, is_muted: 1 },                                        // muted, not mentioned: no push
             { user_id: 2 },                                                     // no settings row: notify
             { user_id: 3, dnd_enabled: dbType === 'mysql' ? 1 : true },         // manual DND
             { user_id: 4, quiet_hours_enabled: true, quiet_start: utcTime(-60), quiet_end: utcTime(60), timezone: 'UTC' },
@@ -102,7 +104,8 @@ for (const dbType of ['mysql', 'postgresql']) {
         const SUBSCRIPTIONS = [
             { id: 10, user_id: 2, endpoint: 'https://push.example/ok', p256dh: 'k', auth: 'a' },
             { id: 11, user_id: 2, endpoint: 'https://push.example/gone', p256dh: 'k', auth: 'a' },
-            { id: 12, user_id: 6, endpoint: 'https://push.example/hidden', p256dh: 'k', auth: 'a' }
+            { id: 12, user_id: 6, endpoint: 'https://push.example/hidden', p256dh: 'k', auth: 'a' },
+            { id: 13, user_id: 7, endpoint: 'https://push.example/muted', p256dh: 'k', auth: 'a' }
         ];
 
         function setup() {
@@ -156,7 +159,7 @@ for (const dbType of ['mysql', 'postgresql']) {
             // Recipient query excludes the sender, muted members and deleted chats
             const recipientsQuery = calls.find(c => /LEFT JOIN notification_settings/.test(c.sql));
             assert.deepEqual(recipientsQuery.params, [CHAT_ID, SENDER_ID]);
-            assert.match(recipientsQuery.sql, /gm.muted_until IS NULL OR gm.muted_until <= CURRENT_TIMESTAMP/);
+            assert.match(recipientsQuery.sql, /gm.muted_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_muted/);
             assert.match(recipientsQuery.sql, /dc.id IS NULL/);
 
             // Subscriptions are only looked up for users 2 and 6

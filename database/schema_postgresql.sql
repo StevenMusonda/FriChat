@@ -2,6 +2,7 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS message_mentions CASCADE;
 DROP TABLE IF EXISTS starred_messages CASCADE;
 DROP TABLE IF EXISTS notification_settings CASCADE;
 DROP TABLE IF EXISTS push_subscriptions CASCADE;
@@ -10,6 +11,7 @@ DROP TABLE IF EXISTS message_reactions CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS group_members CASCADE;
 DROP TABLE IF EXISTS chats CASCADE;
+DROP TABLE IF EXISTS link_previews CASCADE;
 DROP TABLE IF EXISTS files CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
@@ -98,6 +100,7 @@ CREATE TABLE group_members (
     chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role member_role DEFAULT 'member',
+    mentions_only BOOLEAN NOT NULL DEFAULT FALSE, -- push only for @mentions; mentions also get through a mute
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(chat_id, user_id)
 );
@@ -121,6 +124,19 @@ CREATE TABLE files (
 
 CREATE INDEX idx_uploaded_by ON files(uploaded_by);
 
+-- Server-side Open Graph cache, one row per URL (url_hash = SHA-256 of the URL)
+CREATE TABLE link_previews (
+    id SERIAL PRIMARY KEY,
+    url_hash CHAR(64) NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    status VARCHAR(10) NOT NULL, -- 'ok' | 'failed' (failed URLs aren't refetched until the cache expires)
+    title VARCHAR(300) NULL,
+    description VARCHAR(500) NULL,
+    image_url TEXT NULL,
+    site_name VARCHAR(200) NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Messages table
 CREATE TABLE messages (
     id SERIAL PRIMARY KEY,
@@ -136,6 +152,8 @@ CREATE TABLE messages (
     deleted_at TIMESTAMP NULL, -- Delete for everyone
     deleted_by INTEGER NULL,
     deleted_for_everyone BOOLEAN DEFAULT FALSE,
+    link_preview_id INTEGER NULL REFERENCES link_previews(id) ON DELETE SET NULL, -- preview card under the message
+    link_preview_dismissed BOOLEAN NOT NULL DEFAULT FALSE, -- the sender removed the preview
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_messages_deleted_by FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL
@@ -168,6 +186,17 @@ CREATE TABLE starred_messages (
 );
 
 CREATE INDEX idx_starred_message_id ON starred_messages(message_id);
+
+-- Who a message mentions (group chats only)
+CREATE TABLE message_mentions (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (message_id, user_id)
+);
+
+CREATE INDEX idx_mentions_user_message ON message_mentions(user_id, message_id);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

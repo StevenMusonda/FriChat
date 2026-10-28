@@ -558,4 +558,131 @@ There are no new env variables or npm packages. `UPLOAD_PATH` (already in `.env.
 
 ---
 
+## Phase 4: Formatting, @mentions and link previews
+
+### Formatting
+
+Messages support a small set of formatting marks. `frontend/js/formatter.js` turns them into HTML with a whitelist: every character of the text is escaped first, and the only markup it ever adds is the fixed set below. User-typed HTML such as `<script>` or `<b>` always shows as plain text. There is no Markdown library and no raw HTML path.
+
+| Type | Shows as |
+|---|---|
+| `**bold**` | **bold** |
+| `_italic_` | *italic* |
+| `~strike~` | ~~strike~~ |
+| `` `code` `` | inline code |
+| ` ```js` … ` ``` ` | a code block with a language label and a **Copy** button |
+| `https://…` | a link (http/https only), opened in a new tab with `rel="noopener noreferrer nofollow ugc"` |
+
+- Marks don't cross lines. `_` and `~` must sit at a word boundary, so `snake_case_names` stay as typed. Crossed or unclosed marks stay literal text, and the formatter's own tags are always balanced.
+- Nothing inside code is formatted, linked or treated as a mention.
+- The composer is now a growing textarea. **Enter** sends, **Shift+Enter** adds a line, **Ctrl/Cmd+B** wraps the selection in `**`, and **Ctrl/Cmd+I** wraps it in `_`. A one-line hint under the composer lists the marks on desktop. It is hidden at phone widths.
+- Message text keeps its line breaks now (`white-space: pre-wrap`).
+
+### @mentions (group chats)
+
+- Typing `@` in a group opens a list of the chat's members. Use **↑/↓** to move, **Enter** or **Tab** to insert `@username`, and **Esc** to close. The list matches usernames first, then words of the full name.
+- The server decides who was mentioned (`backend/utils/mentions.js`). It reads `@username` (3–50 letters, digits or `_`, case-insensitive). It skips e-mail addresses and code. It keeps only members of that group chat, never the sender, at most 20 per message. Mentions are stored in `message_mentions`. Direct chats have no mentions.
+- Edits re-sync the mentions (removed names are dropped, new ones are added). An edit never sends a push. Forwarded copies don't carry mentions.
+- Messages that mention you get an orange outline, and your own `@name` is highlighted. Only stored mentions are styled, so `@whatever` typed by hand stays plain text.
+- The sidebar row shows an orange **@** badge while you have an unread message that mentions you. It disappears once your read position passes that message.
+- **Notify only for @mentions**: a checkbox in a group's ⋯ chat options menu (`group_members.mentions_only`). Push rules per member:
+
+  | Chat muted? | Mentions only? | Not mentioned | Mentioned |
+  |---|---|---|---|
+  | no | no | push | push |
+  | no | yes | – | push |
+  | yes | no | – | – |
+  | yes | yes | – | push |
+
+  Do-not-disturb, quiet hours, a deleted chat and a visible tab on the chat still suppress every push, mentions included. A mention push has the title *"Alice mentioned you in Team"* and `mentioned: true` in its payload.
+
+### Link previews
+
+When a text message contains a URL, the server fetches the first one (`backend/utils/linkPreview.js`) after the message has been sent and broadcast. The send never waits for the fetch. The server reads `og:title`, `og:description`, `og:image` and `og:site_name`, falling back to Twitter tags, `<title>` and `<meta name="description">`. It stores the result in `link_previews` and links it from `messages.link_preview_id`. Then it broadcasts `message_link_preview`. The card shows the site, title, description and image. The **sender** can remove it with ✕. A removed preview never comes back, not even after an edit. An edit to a different link fetches a new preview, and an edit that removes the link clears it.
+
+SSRF protection for the server-side fetch:
+- Only `http:`/`https:` is fetched. URLs with `user:password@`, `localhost`/`*.localhost` names and URLs over 2048 characters are refused.
+- Every address a hostname resolves to must be public unicast. The fetch refuses loopback, private (10/8, 172.16/12, 192.168/16), link-local (169.254/16, fe80::/10), CGNAT, multicast, broadcast, unspecified, unique-local (fc00::/7), IPv4-mapped/NAT64/6to4 IPv6, and documentation, benchmark and reserved ranges. If any answer is private, the whole host is refused.
+- The check runs inside the socket's own DNS lookup, so the connection goes to exactly the address that was checked. A DNS answer can't change between the check and the connect. IP literals, including encodings like `http://2130706433/` or `0x7f.0.0.1`, are normalized and checked before connecting.
+- Redirects are followed by hand, at most 3, and every hop goes through the same checks.
+- One 5-second deadline covers the whole chain (`TIMEOUT_MS`). At most 512 KB of body is read, counted after gzip/deflate/br decompression, so compressed bombs are capped too. Only `text/html` responses are parsed.
+- Each sender gets at most 20 preview fetches per minute. Concurrent sends of the same URL share one fetch.
+- Results are cached by SHA-256 of the URL: good previews for 24 hours, failures (including refused URLs) for 1 hour.
+- The image is loaded by the viewer's browser, not by the server. It is dropped if it isn't http(s) or points at a localhost name or a private IP literal, and it loads with `referrerpolicy="no-referrer"`.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_mentions_and_link_previews.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_mentions_and_link_previews_postgresql.sql
+```
+
+The migration adds the `message_mentions` and `link_previews` tables, `group_members.mentions_only`, `messages.link_preview_id` (FK, `ON DELETE SET NULL`) and `messages.link_preview_dismissed`. Fresh installs get these from `schema.sql` / `schema_postgresql.sql`. Run the migration before starting the new code, because sends and the chat list read the new columns.
+
+- New env variable (in `backend/.env.example`): `LINK_PREVIEWS_ENABLED` (default `true`). Set it to `false` to switch previews off.
+- `ipaddr.js` is now listed in `backend/package.json`. It was already installed as an Express dependency, so run `cd backend && npm install` and nothing new is downloaded.
+- `frontend/sw.js` `CACHE_VERSION` is now `frichat-shell-v4`, and the shell includes `js/formatter.js` and `js/mentions.js`.
+
+### New and changed endpoints
+
+All require `Authorization: Bearer <token>`.
+
+| Method | Endpoint | Body | Notes |
+|---|---|---|---|
+| PUT | `/api/chats/:chatId/mentions-only` | `{ enabled: boolean }` | Non-member: `403`. `400` unless `enabled` is a real boolean. Returns the chat settings (now with `mentionsOnly`). Rate limited to 30/min. |
+| DELETE | `/api/messages/:messageId/link-preview` | – | Sender only (`403`). Non-member: `404`. Broadcasts `message_link_preview` with `preview: null`. Shares the 60/min message-action limit. |
+| GET | `/api/chats` | – | Each chat adds `unread_mention_count` and `mentions_only` |
+| GET | `/api/messages/chat/:id`, `new_message`, send responses | – | Messages add `mentions: [{ user_id, username }]` and `link_preview: { url, title, description, image_url, site_name }` or `null` |
+| PUT `/mute`, `/archive`, `/mentions-only` | | | `chat_settings_updated` and the responses add `mentionsOnly` |
+
+### New and changed Socket.IO events
+
+| Event | Direction | Payload | Notes |
+|---|---|---|---|
+| `message_link_preview` | server → `chat_<id>` | `{ messageId, chatId, preview }` | Sent when a preview is attached, replaced or removed. `preview` is `null` when removed. |
+| `message_edited` | server → `chat_<id>` | adds `mentions` | |
+| `read_position_updated` | server → the user's own tabs | adds `unreadMentionCount` | Drives the @ badge |
+| `send_message` | client → server | unchanged | Mentions are parsed from `content` on the server, after the membership check |
+
+No new client → server events.
+
+### Manual test checklist
+
+Use three users (A, B, C) in one group, and A and B in a direct chat.
+
+- [ ] Send `<script>alert(1)</script>` and `<b>hi</b> <img src=x onerror=alert(1)>`. Both show as literal text for sender and receiver, with no alert. Repeat inside `**…**`, `` `…` `` and a ` ``` ` block.
+- [ ] Send `` **bold** _italic_ ~strike~ `code` ``. Each renders. `snake_case_name` and `2~3` stay as typed.
+- [ ] Shift+Enter, then a fenced block with ` ```js `. The block shows `js` and a Copy button. Copy, paste elsewhere: the exact code is pasted.
+- [ ] Select a word, press Ctrl+B (Cmd+B on macOS): it becomes `**word**`. Ctrl+I with nothing selected puts the caret between `_` `_`.
+- [ ] A types `@` in the group: B and C are listed, A is not. ↑/↓ and Enter insert `@b_username `. Enter doesn't send while the list is open. Esc closes it, and Esc doesn't cancel an open reply bar while the list is open.
+- [ ] Typing `@` in the direct chat opens nothing.
+- [ ] A sends `hi @<B>`. B sees the message outlined and their name highlighted. B's sidebar row shows **@** until B opens the chat and scrolls to it. The badge also clears in B's other tab.
+- [ ] B: ⋯ → **Notify only for @mentions**. With B's tab hidden, a message from A without a mention gives no push, and one with `@<B>` does, titled "A mentioned you in <group>". Mute the chat as well: mentions still notify. Untick the option: the muted chat is silent again. Turn on DND: no pushes at all.
+- [ ] A sends `https://example.com`. A preview card appears for both a moment later. A sees ✕, B doesn't. A clicks ✕: the card disappears for both and stays gone after a reload.
+- [ ] A sends `http://localhost:3000/api/health`, `http://169.254.169.254/latest/meta-data/` and `http://127.0.0.1:3000/`. No card appears, and the server log shows `Link preview skipped … EBLOCKED`.
+- [ ] A edits a message to a different link: the card changes. A edits the link out: the card disappears.
+- [ ] Dark theme: code blocks, inline code, links, mentions, the @ badge, the suggestion list and preview cards stay readable in sent and received bubbles.
+- [ ] At a phone width (360px) the suggestion list fits above the composer, the hint is hidden, the textarea grows to about 4 lines, and preview cards fit the bubble.
+
+### Tests
+
+`cd backend && npm test` (299 tests).
+- `test/richText.test.js` loads the real `frontend/js/formatter.js`, `mentions.js` and `messages.js`. It covers XSS payloads, a 3000-input fuzz that checks only whitelisted, balanced tags come out, every mark, links, code blocks, mention highlighting, escaping of preview cards and the autocomplete helpers.
+- `test/mentions.test.js` (both fake drivers) covers parsing, storage on REST and socket sends, member-only and group-only rules, edit re-sync, unread-mention counts, the mentions-only endpoint and its validation, and push routing (the full mute × mentions-only × mentioned table, plus DND).
+- `test/linkPreview.test.js` covers address ranges and URL rules. It refuses `localhost`, `169.254.x.x`, private, IPv6, encoded and mapped addresses, and DNS answers pointing inside, and checks that the real policy never connects to a loopback test server. Redirects to internal targets, the redirect limit, the timeout and the size cap (also for a gzip bomb) are tested against local servers. It also covers Open Graph parsing, the cache, the per-sender budget, `LINK_PREVIEWS_ENABLED`, dismissing and the dismiss endpoint.
+- `test/push.test.js` was updated, because muting is now decided after the query so that mentions can get through.
+
+### Known limitations
+
+- MySQL wasn't run against a live server. The PostgreSQL migration, a fresh `schema_postgresql.sql` install and the real queries were checked on a scratch PostgreSQL database.
+- The UI wasn't driven in a real browser here. Rendering is covered by the tests above, but the composer, autocomplete, Copy button and layout need the manual checklist.
+- The @ badge counts from the server's read position. If a mentioning message is deleted for everyone while unread, the badge stays until the next read or reload.
+- Previews are fetched without a proxy and from the web process (no queue), and the per-sender budget is in memory, so this is single-server only, like the rate limiters. A page that needs JavaScript to set its `og:` tags gives no preview.
+- Preview images load directly from the third-party site in viewers' browsers (no image proxy). That site sees the viewer's IP address, but not the referrer.
+- Only the first link in a message gets a preview.
+
+---
+
 **Enjoy the new features! 🎉**

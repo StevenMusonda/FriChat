@@ -5,6 +5,7 @@
 
 const { queryOne, dbType } = require('../config/database');
 const { EDIT_WINDOW_MINUTES, REPLY_SNIPPET_LENGTH } = require('../config/messages');
+const { attachMentions } = require('./mentions');
 
 // Select list for `FROM messages m ${MESSAGE_JOINS}`
 const MESSAGE_COLUMNS = `
@@ -33,14 +34,20 @@ const MESSAGE_COLUMNS = `
     rm.message_type as reply_message_type,
     rm.content as reply_content,
     rf.original_name as reply_file_name,
-    rm.deleted_for_everyone as reply_deleted`;
+    rm.deleted_for_everyone as reply_deleted,
+    lp.url as link_preview_url,
+    lp.title as link_preview_title,
+    lp.description as link_preview_description,
+    lp.image_url as link_preview_image_url,
+    lp.site_name as link_preview_site_name`;
 
 const MESSAGE_JOINS = `
     JOIN users u ON m.sender_id = u.id
     LEFT JOIN files f ON m.file_id = f.id
     LEFT JOIN messages rm ON rm.id = m.reply_to_message_id
     LEFT JOIN users ru ON ru.id = rm.sender_id
-    LEFT JOIN files rf ON rf.id = rm.file_id`;
+    LEFT JOIN files rf ON rf.id = rm.file_id
+    LEFT JOIN link_previews lp ON lp.id = m.link_preview_id AND lp.status = 'ok'`;
 
 // MySQL returns 0/1 (sometimes as strings), PostgreSQL true/false
 function toBool(value) {
@@ -79,6 +86,18 @@ function shapeMessage(row) {
         delete row[key];
     }
 
+    // Server-fetched preview card (utils/linkPreview.js); null when none or dismissed
+    row.link_preview = row.link_preview_url ? {
+        url: row.link_preview_url,
+        title: row.link_preview_title || null,
+        description: row.link_preview_description || null,
+        image_url: row.link_preview_image_url || null,
+        site_name: row.link_preview_site_name || null
+    } : null;
+    for (const key of ['link_preview_url', 'link_preview_title', 'link_preview_description', 'link_preview_image_url', 'link_preview_site_name']) {
+        delete row[key];
+    }
+
     row.is_forwarded = toBool(row.is_forwarded);
     if ('is_starred' in row) row.is_starred = toBool(row.is_starred);
     return row;
@@ -94,7 +113,10 @@ async function getMessageById(messageId) {
         ${MESSAGE_JOINS}
         WHERE m.id = ?
     `, [messageId]);
-    return shapeMessage(row);
+    if (!row) return row;
+    const message = shapeMessage(row);
+    await attachMentions([message]);
+    return message;
 }
 
 /**

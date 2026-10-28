@@ -171,7 +171,7 @@ async function withSocket(dbType, world, fn) {
 
 /**
  * The frontend render helpers, loaded from the real files into a sandbox
- * (escapeHtml from chat.js, message rendering from messages.js)
+ * (escapeHtml from chat.js, the formatter from formatter.js, message rendering from messages.js)
  */
 function loadFrontendRenderer() {
     const frontend = path.join(__dirname, '..', '..', 'frontend', 'js');
@@ -185,8 +185,10 @@ function loadFrontendRenderer() {
         FORWARD_ICON_SVG: '',
         CONFIG: { SOCKET_URL: 'http://localhost:3000', API_BASE_URL: 'http://localhost:3000/api' }
     };
+    sandbox.URL = URL;
     vm.createContext(sandbox);
     vm.runInContext(escapeSource, sandbox);
+    vm.runInContext(fs.readFileSync(path.join(frontend, 'formatter.js'), 'utf8'), sandbox);
     vm.runInContext(fs.readFileSync(path.join(frontend, 'messages.js'), 'utf8'), sandbox);
     return sandbox;
 }

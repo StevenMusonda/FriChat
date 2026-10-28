@@ -6,6 +6,8 @@
 let currentChatId = null;
 let allChats = [];
 let selectedUsers = [];
+// Members of the open group chat, for @mention suggestions (empty for direct chats)
+let currentChatMembers = [];
 
 // Whether the sidebar's Archived section is open (remembered per browser)
 let archivedExpanded = false;
@@ -180,6 +182,7 @@ function renderChatList(chats) {
                     </div>
                     <div class="chat-item-preview">${escapeHtml(lastMessageText)}</div>
                 </div>
+                ${chat.unread_mention_count > 0 ? `<div class="mention-badge" title="You were mentioned" aria-label="Unread mention">@</div>` : ''}
                 ${unreadCount > 0 ? `<div class="unread-badge ${chat.is_muted ? 'muted' : ''}" aria-label="${unreadCount} unread">${unreadLabel}</div>` : ''}
                 <button class="chat-delete-btn" onclick="event.stopPropagation(); deleteChat(${chat.id})">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -280,6 +283,10 @@ function applyIncomingMessageToChatList(message, countAsUnread) {
     chat.updated_at = message.created_at;
     if (countAsUnread) {
         chat.unread_count = (chat.unread_count || 0) + 1;
+        // The @ badge stays until the mentioning message is read
+        if (isMessageMentioningMe(message)) {
+            chat.unread_mention_count = (chat.unread_mention_count || 0) + 1;
+        }
     }
     // Same rule the server applies: a new message brings an archived chat back unless it's muted
     if (chat.archived_at && !chat.is_muted) {
@@ -304,6 +311,9 @@ function applyReadPosition(data) {
     }
 
     chat.unread_count = data.unreadCount;
+    if (data.unreadMentionCount !== undefined) {
+        chat.unread_mention_count = data.unreadMentionCount;
+    }
     refreshChatList();
 }
 
@@ -317,6 +327,9 @@ function applyChatSettings(data) {
     chat.muted_until = data.mutedUntil;
     chat.is_muted = data.isMuted;
     chat.archived_at = data.archivedAt;
+    if (data.mentionsOnly !== undefined) {
+        chat.mentions_only = data.mentionsOnly;
+    }
 
     refreshChatList();
     if (chat.id === currentChatId) {
@@ -370,6 +383,12 @@ function toggleChatOptionsMenu(event) {
     menu.innerHTML = (chat.is_muted
         ? `<div class="chat-options-note">${escapeHtml(getMuteStatusText(chat))}</div>` + item('mute:off', 'Unmute')
         : item('mute:8h', 'Mute for 8 hours') + item('mute:1w', 'Mute for 1 week') + item('mute:always', 'Mute always'))
+        + (chat.chat_type === 'group'
+            ? '<div class="chat-options-separator" role="separator"></div>'
+              + `<button type="button" class="message-action-item chat-options-check" role="menuitemcheckbox" aria-checked="${chat.mentions_only ? 'true' : 'false'}" data-action="mentions:${chat.mentions_only ? 'off' : 'on'}">`
+              + `<span class="chat-options-checkmark" aria-hidden="true">${chat.mentions_only ? '✓' : ''}</span>Notify only for @mentions</button>`
+              + (chat.mentions_only ? `<div class="chat-options-note">${chat.is_muted ? 'Muted, but @mentions still notify you' : 'Other messages don\'t notify you'}</div>` : '')
+            : '')
         + '<div class="chat-options-separator" role="separator"></div>'
         + (chat.archived_at ? item('archive:off', 'Unarchive chat') : item('archive:on', 'Archive chat'));
 
@@ -381,6 +400,8 @@ function toggleChatOptionsMenu(event) {
         closeChatOptionsMenu();
         if (kind === 'mute') {
             setChatMute(chat.id, value);
+        } else if (kind === 'mentions') {
+            setChatMentionsOnly(chat.id, value === 'on');
         } else {
             setChatArchived(chat.id, value === 'on');
         }
@@ -440,6 +461,27 @@ async function setChatMute(chatId, duration) {
     }
 }
 
+/**
+ * Push only for @mentions in this chat (mentions also get through a mute)
+ */
+async function setChatMentionsOnly(chatId, enabled) {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.MENTIONS_ONLY(chatId), {
+            method: 'PUT',
+            body: JSON.stringify({ enabled })
+        });
+
+        if (response.success) {
+            applyChatSettings(response.data);
+        } else {
+            showNotification(response.message || 'Failed to update notification setting', 'error');
+        }
+    } catch (error) {
+        console.error('Mentions-only error:', error);
+        showNotification('Failed to update notification setting', 'error');
+    }
+}
+
 async function setChatArchived(chatId, archived) {
     try {
         const response = await apiRequest(CONFIG.ENDPOINTS.ARCHIVE_CHAT(chatId), {
@@ -466,6 +508,7 @@ async function openChat(chatId) {
     resetMessageActionState();
 
     currentChatId = chatId;
+    currentChatMembers = [];
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();
@@ -519,6 +562,13 @@ async function loadChatDetails(chatId) {
         if (response.success) {
             const chat = response.data;
             const currentUser = getCurrentUser();
+
+            // @mention suggestions (mentions.js) only exist in groups, and only for the chat still open
+            if (chat.id === currentChatId) {
+                currentChatMembers = chat.chat_type === 'group'
+                    ? chat.participants.filter(p => p.id !== currentUser.userId)
+                    : [];
+            }
             
             // Update chat header
             let displayName = chat.chat_name;

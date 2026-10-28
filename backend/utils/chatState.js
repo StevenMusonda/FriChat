@@ -29,6 +29,23 @@ async function getUnreadCount(chatId, userId) {
 }
 
 /**
+ * Unread messages that mention the user (the sidebar's @ badge; stays until the message is read)
+ */
+async function getUnreadMentionCount(chatId, userId) {
+    const row = await queryOne(`
+        SELECT COUNT(*) AS count
+        FROM message_mentions mm
+        JOIN messages m ON m.id = mm.message_id
+        JOIN group_members gm ON gm.chat_id = m.chat_id AND gm.user_id = mm.user_id
+        WHERE mm.user_id = ?
+        AND m.chat_id = ?
+        AND m.id > COALESCE(gm.last_read_message_id, 0)
+        AND (m.deleted_for_everyone IS NULL OR m.deleted_for_everyone = FALSE)
+    `, [userId, chatId]);
+    return row ? parseInt(row.count) || 0 : 0;
+}
+
+/**
  * Move the user's read position forward to messageId (or the newest message when omitted).
  * Never moves it backwards. Tells the user's other tabs, and tells the chat when
  * messages became read so senders can update their receipts.
@@ -74,7 +91,8 @@ async function markChatRead(io, chatId, userId, messageId = null) {
     const state = {
         chatId: parseInt(chatId),
         lastReadMessageId: advanced ? target : (membership.last_read_message_id || null),
-        unreadCount: await getUnreadCount(chatId, userId)
+        unreadCount: await getUnreadCount(chatId, userId),
+        unreadMentionCount: await getUnreadMentionCount(chatId, userId)
     };
 
     if (io) {
@@ -113,7 +131,8 @@ async function getChatSettings(chatId, userId) {
         SELECT
             muted_until,
             CASE WHEN muted_until IS NOT NULL AND muted_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_muted,
-            archived_at
+            archived_at,
+            mentions_only
         FROM group_members
         WHERE chat_id = ? AND user_id = ?
     `, [chatId, userId]);
@@ -123,7 +142,8 @@ async function getChatSettings(chatId, userId) {
         chatId: parseInt(chatId),
         mutedUntil: row.muted_until,
         isMuted: !!parseInt(row.is_muted),
-        archivedAt: row.archived_at
+        archivedAt: row.archived_at,
+        mentionsOnly: row.mentions_only === true || row.mentions_only === 1 || row.mentions_only === '1'
     };
 }
 
@@ -158,9 +178,21 @@ async function setArchived(chatId, userId, archived) {
     );
 }
 
+/**
+ * Push only for @mentions in this chat (and let mentions through a mute)
+ */
+async function setMentionsOnly(chatId, userId, enabled) {
+    await executeQuery(
+        'UPDATE group_members SET mentions_only = ? WHERE chat_id = ? AND user_id = ?',
+        [!!enabled, chatId, userId]
+    );
+}
+
 module.exports = {
     MUTE_DURATIONS,
     getUnreadCount,
+    getUnreadMentionCount,
+    setMentionsOnly,
     markChatRead,
     recordNewMessage,
     getChatSettings,

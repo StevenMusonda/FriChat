@@ -352,9 +352,10 @@ function renderMessageHtml(message) {
     if (isDeleted) return '';
 
     const isSelected = typeof selectedMessageIds !== 'undefined' && selectedMessageIds.has(message.id);
-    
+    const mentionsMe = isMessageMentioningMe(message);
+
     return `
-        <div class="message ${isSent ? 'sent' : 'received'} ${isSelected ? 'selected' : ''}" data-message-id="${message.id}">
+        <div class="message ${isSent ? 'sent' : 'received'} ${isSelected ? 'selected' : ''} ${mentionsMe ? 'mentioned' : ''}" data-message-id="${message.id}">
             <div class="message-actions">
                 <button class="message-action-btn" onclick="showMessageActions(${message.id}, event)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -390,6 +391,129 @@ function renderMessageHtml(message) {
             </div>
         </div>
     `;
+}
+
+/**
+ * Does this message @mention the current user? (mentions come from the server)
+ */
+function isMessageMentioningMe(message) {
+    const currentUser = getCurrentUser();
+    return !!(message && currentUser && Array.isArray(message.mentions)
+        && message.mentions.some(m => Number(m.user_id) === Number(currentUser.userId)));
+}
+
+/**
+ * Server-fetched link preview card under a text message. Every field is escaped; the link and the
+ * image must be http(s). The sender gets a button to remove it.
+ */
+function renderLinkPreview(message) {
+    const preview = message.link_preview;
+    if (!preview) return '';
+
+    const href = safeHttpUrl(preview.url);
+    if (!href || (!preview.title && !preview.description)) return '';
+    const image = preview.image_url ? safeHttpUrl(preview.image_url) : null;
+    const isSent = message.sender_id === getCurrentUser().userId;
+
+    return `
+        <div class="link-preview">
+            <a class="link-preview-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer nofollow ugc">
+                ${image ? `<img class="link-preview-image" src="${escapeHtml(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
+                <span class="link-preview-body">
+                    ${preview.site_name ? `<span class="link-preview-site">${escapeHtml(preview.site_name)}</span>` : ''}
+                    ${preview.title ? `<span class="link-preview-title">${escapeHtml(preview.title)}</span>` : ''}
+                    ${preview.description ? `<span class="link-preview-description">${escapeHtml(preview.description)}</span>` : ''}
+                </span>
+            </a>
+            ${isSent ? `<button type="button" class="link-preview-dismiss" data-dismiss-preview="${parseInt(message.id)}" title="Remove preview" aria-label="Remove preview">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>` : ''}
+        </div>
+    `;
+}
+
+/**
+ * A preview arrived for a message, or was removed (message_link_preview)
+ */
+function applyLinkPreview(data) {
+    if (!data || data.chatId !== currentChatId) return;
+    const message = currentMessages.find(m => m.id === data.messageId);
+    if (!message) return;
+
+    const wasNearBottom = isNearBottom();
+    message.link_preview = data.preview || null;
+    rerenderMessage(message);
+    if (wasNearBottom) scrollToBottom();
+}
+
+/**
+ * Sender removes the preview card from their message
+ */
+async function dismissLinkPreview(messageId) {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.LINK_PREVIEW(messageId), { method: 'DELETE' });
+        if (response.success) {
+            applyLinkPreview(response.data);
+        } else {
+            showNotification(response.message || 'Failed to remove the preview', 'error');
+        }
+    } catch (error) {
+        console.error('Dismiss link preview error:', error);
+        showNotification('Failed to remove the preview', 'error');
+    }
+}
+
+/**
+ * Copy a code block's text (the button sits in the block's header)
+ */
+async function copyCodeBlock(button) {
+    const code = button.closest('.code-block').querySelector('code').textContent;
+    try {
+        await navigator.clipboard.writeText(code);
+    } catch (e) {
+        // Older browsers / insecure origins: copy through a temporary textarea
+        const area = document.createElement('textarea');
+        area.value = code;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        const ok = document.execCommand('copy');
+        area.remove();
+        if (!ok) {
+            showNotification('Could not copy the code', 'error');
+            return;
+        }
+    }
+    button.textContent = 'Copied';
+    button.classList.add('copied');
+    setTimeout(() => {
+        button.textContent = 'Copy';
+        button.classList.remove('copied');
+    }, 1500);
+}
+
+/**
+ * Clicks inside message bodies: code copy buttons and preview dismiss buttons
+ * (delegated, so nothing user-written ever ends up in an inline handler)
+ */
+function initializeMessageContentActions() {
+    document.getElementById('messagesContainer').addEventListener('click', (e) => {
+        const copyButton = e.target.closest('[data-copy-code]');
+        if (copyButton) {
+            e.stopPropagation();
+            copyCodeBlock(copyButton);
+            return;
+        }
+
+        const dismissButton = e.target.closest('[data-dismiss-preview]');
+        if (dismissButton) {
+            e.preventDefault();
+            e.stopPropagation();
+            dismissLinkPreview(parseInt(dismissButton.dataset.dismissPreview));
+        }
+    });
 }
 
 /**
@@ -466,7 +590,11 @@ function renderMessageContent(message) {
     console.log('Rendering message:', message.id, 'type:', message.message_type, 'upload_path:', message.upload_path);
     switch (message.message_type) {
         case 'text':
-            return `<div class="message-text">${escapeHtml(message.content)}</div>`;
+            // Whitelist formatter (formatter.js): the text is escaped, only fixed tags are added
+            return `<div class="message-text">${formatMessageText(message.content, {
+                mentions: message.mentions,
+                currentUserId: getCurrentUser().userId
+            })}</div>${renderLinkPreview(message)}`;
         
         case 'image':
             const imageUrl = getFileUrl(message.upload_path);
@@ -766,7 +894,20 @@ function initializeMessageInput() {
     const fileInput = document.getElementById('fileInput');
     
     let typingTimeout;
-    
+
+    // The composer grows with its text (Shift+Enter adds lines)
+    messageInput.addEventListener('input', autoResizeComposer);
+
+    // Ctrl/Cmd+B and Ctrl/Cmd+I wrap the selection in ** or _
+    messageInput.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+        const key = e.key.toLowerCase();
+        if (key === 'b' || key === 'i') {
+            e.preventDefault();
+            wrapComposerSelection(key === 'b' ? '**' : '_');
+        }
+    });
+
     // Typing indicator
     messageInput.addEventListener('input', () => {
         if (currentChatId) {
@@ -840,6 +981,35 @@ function initializeMessageInput() {
 }
 
 /**
+ * Fit the composer textarea to its content (up to the CSS max-height)
+ */
+function autoResizeComposer() {
+    const input = document.getElementById('messageInput');
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+}
+
+/**
+ * Wrap the selected text in a formatting marker, or insert a pair and put the caret inside
+ */
+function wrapComposerSelection(marker) {
+    const input = document.getElementById('messageInput');
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const selected = input.value.slice(start, end);
+
+    input.setRangeText(`${marker}${selected}${marker}`, start, end, 'select');
+    if (selected) {
+        input.setSelectionRange(start + marker.length, end + marker.length);
+    } else {
+        input.setSelectionRange(start + marker.length, start + marker.length);
+    }
+    input.focus();
+    autoResizeComposer();
+}
+
+/**
  * Send message
  */
 async function sendMessage() {
@@ -860,6 +1030,7 @@ async function sendMessage() {
     
     // Clear input and the reply bar
     messageInput.value = '';
+    autoResizeComposer();
     clearComposerContext();
     
     // Send via WebSocket (faster) or API

@@ -26,6 +26,8 @@ const { notifyNewMessage } = require('./utils/push');
 const { getMessageById, checkReplyTarget } = require('./utils/messageQueries');
 const { cleanMessageText } = require('./utils/messageText');
 const { claimUploadedFile, releaseUploadedFile, guardStaticPath } = require('./utils/uploads');
+const { saveMentions } = require('./utils/mentions');
+const { attachLinkPreview } = require('./utils/linkPreview');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
@@ -279,6 +281,9 @@ io.on('connection', (socket) => {
                 throw error;
             }
 
+            // @mentions of group members (before reading the message back, so it carries them)
+            await saveMentions(chatId, messageId, senderId, content);
+
             // Update chat timestamp
             await executeQuery(
                 'UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -302,6 +307,9 @@ io.on('connection', (socket) => {
 
             // Push to members who aren't watching (not awaited - never delays or fails the send)
             notifyNewMessage(io, message);
+
+            // Preview card for the first link, broadcast as message_link_preview when ready (not awaited)
+            attachLinkPreview(io, message);
 
         } catch (error) {
             console.error('Send message error:', error);

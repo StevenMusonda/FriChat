@@ -6,7 +6,15 @@ const express = require('express');
 const router = express.Router();
 const chatController = require('../controllers/chatController');
 const { authenticateToken } = require('../middleware/auth');
-const { validateCreateChat, checkValidation } = require('../utils/validation');
+const { rateLimit } = require('../middleware/rateLimit');
+const { validateCreateChat, validateMentionsOnly, checkValidation } = require('../utils/validation');
+
+// Per-chat notification settings
+const chatSettingsLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: 'Too many setting changes. Please wait a moment.'
+});
 
 // All routes require authentication
 router.use(authenticateToken);
@@ -27,6 +35,7 @@ router.get('/search/users', chatController.searchUsers);
 router.post('/:chatId/read', chatController.markRead);
 router.put('/:chatId/mute', chatController.updateMute);
 router.put('/:chatId/archive', chatController.updateArchive);
+router.put('/:chatId/mentions-only', chatSettingsLimiter, validateMentionsOnly, checkValidation, chatController.updateMentionsOnly);
 
 // Delete chat
 router.delete('/:chatId', chatController.deleteChat);

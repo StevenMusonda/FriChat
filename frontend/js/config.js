@@ -32,6 +32,7 @@ const CONFIG = {
         MARK_READ: (chatId) => `/chats/${chatId}/read`,
         MUTE_CHAT: (chatId) => `/chats/${chatId}/mute`,
         ARCHIVE_CHAT: (chatId) => `/chats/${chatId}/archive`,
+        MENTIONS_ONLY: (chatId) => `/chats/${chatId}/mentions-only`,
 
         // Messages
         MESSAGES: (chatId) => `/messages/chat/${chatId}`,
@@ -44,6 +45,7 @@ const CONFIG = {
         STAR_MESSAGE: (messageId) => `/messages/${messageId}/star`,
         STARRED_MESSAGES: '/messages/starred',
         FORWARD_MESSAGES: '/messages/forward',
+        LINK_PREVIEW: (messageId) => `/messages/${messageId}/link-preview`,
 
         // Notifications
         PUSH_CONFIG: '/notifications/push-config',

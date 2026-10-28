@@ -162,6 +162,9 @@
                 </div>
 
                 <div class="message-input-container">
+                    <!-- @mention suggestions (mentions.js), float above the composer -->
+                    <div class="mention-suggestions" id="mentionSuggestions" role="listbox" aria-label="Mention a member" hidden></div>
+
                     <!-- Reply / edit bar, floats above the composer -->
                     <div class="composer-context" id="composerContext" role="status" hidden>
                         <span class="composer-context-icon" aria-hidden="true"></span>
@@ -196,12 +199,13 @@
                         </svg>
                     </button>
                     <input type="file" id="fileInput" style="display: none;" multiple>
-                    <input 
-                        type="text" 
-                        id="messageInput" 
-                        placeholder="Type a message..." 
+                    <textarea
+                        id="messageInput"
+                        rows="1"
+                        placeholder="Type a message..."
                         autocomplete="off"
-                    >
+                        aria-describedby="composerHint"
+                    ></textarea>
                     <button class="icon-btn" id="emojiBtn" title="Emoji">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="10"></circle>
@@ -210,6 +214,15 @@
                             <line x1="15" y1="9" x2="15.01" y2="9"></line>
                         </svg>
                     </button>
+                    <div class="composer-hint" id="composerHint">
+                        <span><b>**bold**</b></span>
+                        <span><i>_italic_</i></span>
+                        <span><s>~strike~</s></span>
+                        <span><code>`code`</code></span>
+                        <span><code>```block```</code></span>
+                        <span>@ to mention</span>
+                        <span class="composer-hint-keys">Ctrl+B / Ctrl+I · Shift+Enter new line</span>
+                    </div>
                     <button class="btn btn-primary" id="sendBtn">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -518,6 +531,8 @@
     <script src="js/auth.js"></script>
     <script src="js/websocket.js"></script>
     <script src="js/chat.js"></script>
+    <script src="js/formatter.js"></script>
+    <script src="js/mentions.js"></script>
     <script src="js/messages.js"></script>
     <script src="js/messageActions.js"></script>
     <script src="js/ui.js"></script>
@@ -592,6 +607,11 @@
                 applyMessageDeleted(data);
             });
 
+            // A link preview arrived for a message, or its sender removed it
+            onLinkPreview((data) => {
+                applyLinkPreview(data);
+            });
+
             // send_message (and reply) failures would otherwise be silent
             onSocketError((data) => {
                 showNotification(data.message || 'Something went wrong', 'error');
@@ -612,6 +632,12 @@
 
             // Initialize message input
             initializeMessageInput();
+
+            // @mention suggestions in the composer
+            initializeMentionAutocomplete();
+
+            // Copy buttons on code blocks, removing link previews
+            initializeMessageContentActions();
 
             // Reply/edit bar, multi-select, forward dialog and starred panel
             initializeMessageActions();

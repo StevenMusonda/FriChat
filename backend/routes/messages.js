@@ -61,6 +61,9 @@ router.patch('/:messageId', messageActionLimiter, validateEditMessage, checkVali
 router.post('/:messageId/star', messageActionLimiter, validateMessageIdParam, checkValidation, messageController.starMessage);
 router.delete('/:messageId/star', messageActionLimiter, validateMessageIdParam, checkValidation, messageController.unstarMessage);
 
+// Remove the link preview card (sender only)
+router.delete('/:messageId/link-preview', messageActionLimiter, validateMessageIdParam, checkValidation, messageController.dismissLinkPreview);
+
 // Reaction routes
 router.post('/:messageId/reactions', messageController.addReaction);
 router.delete('/:messageId/reactions', messageController.removeReaction);

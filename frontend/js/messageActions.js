@@ -422,6 +422,7 @@ function startEdit(messageId) {
 
     composerContext = { mode: 'edit', messageId, draft };
     input.value = message.content || '';
+    autoResizeComposer();
     renderComposerContext();
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
@@ -523,6 +524,7 @@ function applyMessageEdit(data) {
         if (message) {
             message.content = data.content;
             message.edited_at = data.editedAt;
+            if (Array.isArray(data.mentions)) message.mentions = data.mentions;
             rerenderMessage(message);
         }
 

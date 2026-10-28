@@ -132,13 +132,26 @@ async function hasActiveViewer(io, userId, chatId) {
 }
 
 /**
- * Members who should get a push for a new message: not the sender, not muted,
- * chat not deleted on their side, DND off, and no visible tab on the chat
+ * Does this member's per-chat setting allow a push? Not mentioned: only when the chat is
+ * neither muted nor "mentions only". Mentioned: when not muted, or when "mentions only" is on
+ * (that setting is how a muted chat still notifies on mentions).
+ */
+function chatAllowsPush({ isMuted, mentionsOnly, mentioned }) {
+    if (mentioned) return !isMuted || mentionsOnly;
+    return !isMuted && !mentionsOnly;
+}
+
+/**
+ * Members who should get a push for a new message: not the sender, allowed by their
+ * mute / "mentions only" setting, chat not deleted on their side, DND off, and no visible tab on the chat
  */
 async function findRecipients(io, message, now = new Date()) {
+    const mentioned = new Set((message.mentions || []).map(m => Number(m.user_id)));
     const rows = await executeQuery(`
         SELECT
             gm.user_id,
+            CASE WHEN gm.muted_until IS NOT NULL AND gm.muted_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_muted,
+            gm.mentions_only,
             ns.dnd_enabled,
             ns.quiet_hours_enabled,
             ns.quiet_start,
@@ -149,12 +162,17 @@ async function findRecipients(io, message, now = new Date()) {
         LEFT JOIN deleted_chats dc ON dc.chat_id = gm.chat_id AND dc.user_id = gm.user_id
         WHERE gm.chat_id = ?
         AND gm.user_id <> ?
-        AND (gm.muted_until IS NULL OR gm.muted_until <= CURRENT_TIMESTAMP)
         AND dc.id IS NULL
     `, [message.chat_id, message.sender_id]);
 
     const recipients = [];
     for (const row of rows) {
+        const allowed = chatAllowsPush({
+            isMuted: !!parseInt(row.is_muted),
+            mentionsOnly: row.mentions_only === true || row.mentions_only === 1 || row.mentions_only === '1',
+            mentioned: mentioned.has(Number(row.user_id))
+        });
+        if (!allowed) continue;
         if (isDndActive(fromRow(row), now)) continue;
         if (await hasActiveViewer(io, row.user_id, message.chat_id)) continue;
         recipients.push(row.user_id);
@@ -238,13 +256,18 @@ async function notifyNewMessage(io, message) {
         const preview = buildPreview(message);
         const isGroup = chat.chat_type === 'group' && chat.chat_name;
 
+        const mentioned = new Set((message.mentions || []).map(m => Number(m.user_id)));
+
         const outcomes = await Promise.all(subscriptions.map(subscription => sendToSubscription(subscription, {
             type: 'message',
             chatId: message.chat_id,
             messageId: message.id,
             senderName,
-            title: isGroup ? String(chat.chat_name) : senderName,
-            body: isGroup ? `${senderName}: ${preview}` : preview,
+            mentioned: mentioned.has(Number(subscription.user_id)),
+            title: isGroup
+                ? (mentioned.has(Number(subscription.user_id)) ? `${senderName} mentioned you in ${chat.chat_name}` : String(chat.chat_name))
+                : senderName,
+            body: isGroup && !mentioned.has(Number(subscription.user_id)) ? `${senderName}: ${preview}` : preview,
             url: `chat.html?chat=${message.chat_id}`,
             badge: unreadTotals[subscription.user_id] || 0
         })));
@@ -267,6 +290,7 @@ module.exports = {
     saveSubscription,
     deleteSubscription,
     buildPreview,
+    chatAllowsPush,
     findRecipients,
     notifyNewMessage
 };

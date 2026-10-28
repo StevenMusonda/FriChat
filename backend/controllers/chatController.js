@@ -10,7 +10,8 @@ const {
     markChatRead,
     getChatSettings,
     setMute,
-    setArchived
+    setArchived,
+    setMentionsOnly
 } = require('../utils/chatState');
 
 /**
@@ -34,6 +35,16 @@ async function getUserChats(req, res) {
                 gm.muted_until,
                 CASE WHEN gm.muted_until IS NOT NULL AND gm.muted_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_muted,
                 gm.archived_at,
+                gm.mentions_only,
+                (
+                    SELECT COUNT(*)
+                    FROM message_mentions mm
+                    JOIN messages mmsg ON mmsg.id = mm.message_id
+                    WHERE mm.user_id = ?
+                    AND mmsg.chat_id = c.id
+                    AND mmsg.id > COALESCE(gm.last_read_message_id, 0)
+                    AND (mmsg.deleted_for_everyone IS NULL OR mmsg.deleted_for_everyone = FALSE)
+                ) AS unread_mention_count,
                 (
                     SELECT COUNT(*)
                     FROM messages um
@@ -47,7 +58,7 @@ async function getUserChats(req, res) {
             LEFT JOIN deleted_chats dc ON c.id = dc.chat_id AND dc.user_id = ?
             WHERE dc.id IS NULL
             ORDER BY c.updated_at DESC
-        `, [userId, userId, userId]);
+        `, [userId, userId, userId, userId]);
 
         console.log('Found chats:', chats.length);
 
@@ -116,6 +127,8 @@ async function getUserChats(req, res) {
         for (const chat of chats) {
             chat.unread_count = parseInt(chat.unread_count) || 0;
             chat.is_muted = !!parseInt(chat.is_muted);
+            chat.unread_mention_count = parseInt(chat.unread_mention_count) || 0;
+            chat.mentions_only = chat.mentions_only === true || chat.mentions_only === 1 || chat.mentions_only === '1';
             chat.participants = JSON.stringify(participantsByChat[chat.id] || []);
             chat.lastMessage = lastMessageByChat[chat.id] ? JSON.stringify(lastMessageByChat[chat.id]) : null;
         }
@@ -589,7 +602,44 @@ async function updateArchive(req, res) {
     }
 }
 
+/**
+ * Notify only on @mentions in this chat (mentions also get through a mute)
+ * Body: { enabled: true | false } (validated by validateMentionsOnly)
+ */
+async function updateMentionsOnly(req, res) {
+    try {
+        const { chatId } = req.params;
+        const userId = req.user.id;
+
+        if (!(await getChatSettings(chatId, userId))) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied to this chat'
+            });
+        }
+
+        await setMentionsOnly(chatId, userId, req.body.enabled);
+        const settings = await getChatSettings(chatId, userId);
+
+        // Keep the user's other tabs in sync
+        req.io.to(`user_${userId}`).emit('chat_settings_updated', settings);
+
+        res.json({
+            success: true,
+            data: settings
+        });
+    } catch (error) {
+        console.error('Update mentions-only error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update notification setting',
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
+    updateMentionsOnly,
     getUserChats,
     getChatById,
     createChat,

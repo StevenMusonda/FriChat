@@ -16,6 +16,7 @@ let notificationSettingsHandlers = [];
 let messageEditedHandlers = [];
 let starHandlers = [];
 let messageDeletedHandlers = [];
+let linkPreviewHandlers = [];
 let socketErrorHandlers = [];
 
 /**
@@ -128,6 +129,11 @@ function initializeWebSocket() {
     // Someone in a chat deleted a message for everyone
     socket.on('message_deleted', (data) => {
         messageDeletedHandlers.forEach(handler => handler(data));
+    });
+
+    // A message's link preview arrived (server fetched it) or its sender removed it
+    socket.on('message_link_preview', (data) => {
+        linkPreviewHandlers.forEach(handler => handler(data));
     });
 
     // A request this socket made was refused (e.g. send_message: not a member, bad reply target)
@@ -358,6 +364,10 @@ function onMessageDeleted(handler) {
 /**
  * Register handler for errors the server reports on this socket
  */
+function onLinkPreview(handler) {
+    linkPreviewHandlers.push(handler);
+}
+
 function onSocketError(handler) {
     socketErrorHandlers.push(handler);
 }

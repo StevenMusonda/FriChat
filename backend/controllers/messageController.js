@@ -8,6 +8,8 @@ const { cleanMessageText } = require('../utils/messageText');
 const path = require('path');
 const { recordNewMessage } = require('../utils/chatState');
 const { notifyNewMessage } = require('../utils/push');
+const { saveMentions, replaceMentions, attachMentions } = require('../utils/mentions');
+const { attachLinkPreview } = require('../utils/linkPreview');
 const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
 const {
     MESSAGE_COLUMNS,
@@ -88,8 +90,12 @@ async function getMessages(req, res) {
             if (toBool(message.deleted_for_everyone)) {
                 message.content = null;
                 message.reply_to = null;
+                message.link_preview = null;
             }
         }
+
+        // Who each message mentions (one query, only for pages with '@' in them)
+        await attachMentions(messages);
 
         // Reactions for the whole page in one query
         if (messages.length > 0) {
@@ -218,6 +224,9 @@ async function sendMessage(req, res) {
             throw error;
         }
 
+        // @mentions of group members (before reading the message back, so it carries them)
+        await saveMentions(chatId, messageId, userId, cleaned.text);
+
         // Update chat updated_at
         await executeQuery(
             'UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -237,6 +246,9 @@ async function sendMessage(req, res) {
 
         // Push to members who aren't watching (not awaited - never delays or fails the send)
         notifyNewMessage(req.io, message);
+
+        // Preview card for the first link, broadcast as message_link_preview when ready (not awaited)
+        attachLinkPreview(req.io, message);
 
         res.status(201).json({
             success: true,
@@ -861,6 +873,9 @@ async function editMessage(req, res) {
                 m.message_type,
                 m.is_forwarded,
                 m.deleted_for_everyone,
+                m.content AS old_content,
+                m.link_preview_id,
+                m.link_preview_dismissed,
                 CASE WHEN dm.id IS NULL THEN 0 ELSE 1 END AS deleted_for_me,
                 CASE WHEN ${editWindowCondition()} THEN 1 ELSE 0 END AS within_window
             FROM messages m
@@ -913,15 +928,33 @@ async function editMessage(req, res) {
 
         const updated = await queryOne('SELECT content, edited_at FROM messages WHERE id = ?', [messageId]);
 
+        // Mentions follow the new text (no push for an edit); only looked up when either version has an '@'
+        let mentions = [];
+        if (String(message.old_content || '').includes('@') || content.includes('@')) {
+            mentions = await replaceMentions(message.chat_id, message.id, userId, content);
+        }
+
         const payload = {
             messageId: message.id,
             chatId: message.chat_id,
             content: updated ? updated.content : content,
-            editedAt: updated ? updated.edited_at : new Date()
+            editedAt: updated ? updated.edited_at : new Date(),
+            mentions: mentions.map(m => ({ user_id: Number(m.user_id), username: m.username }))
         };
 
         if (req.io) {
             req.io.to(`chat_${message.chat_id}`).emit('message_edited', payload);
+        }
+
+        // The preview follows the first link of the new text, unless the sender dismissed it (not awaited)
+        if (!toBool(message.link_preview_dismissed)) {
+            attachLinkPreview(req.io, {
+                id: message.id,
+                chat_id: message.chat_id,
+                sender_id: userId,
+                message_type: 'text',
+                content: payload.content
+            }, { hadPreview: !!message.link_preview_id });
         }
 
         res.json({
@@ -1035,6 +1068,8 @@ async function forwardMessages(req, res) {
                         req.io.to(`chat_${chatId}`).emit('new_message', message);
                     }
                     notifyNewMessage(req.io, message);
+                    // Copies get their own preview (usually straight from the cache); mentions are not copied
+                    attachLinkPreview(req.io, message);
                 }
             }
 
@@ -1251,7 +1286,64 @@ async function getStarredMessages(req, res) {
     }
 }
 
+/**
+ * Remove the link preview from a message (sender only). It is never re-attached, also not after an edit.
+ * Broadcasts message_link_preview with preview: null.
+ */
+async function dismissLinkPreview(req, res) {
+    try {
+        const { messageId } = req.params;
+        const userId = req.user.id;
+
+        // Membership is part of the lookup: to a non-member the message doesn't exist
+        const message = await queryOne(`
+            SELECT m.id, m.chat_id, m.sender_id
+            FROM messages m
+            JOIN group_members gm ON gm.chat_id = m.chat_id AND gm.user_id = ?
+            WHERE m.id = ?
+        `, [userId, messageId]);
+
+        if (!message) {
+            return res.status(404).json({
+                success: false,
+                message: 'Message not found or access denied'
+            });
+        }
+
+        if (message.sender_id !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the sender can remove a link preview'
+            });
+        }
+
+        await executeQuery(
+            'UPDATE messages SET link_preview_id = NULL, link_preview_dismissed = TRUE WHERE id = ? AND sender_id = ?',
+            [messageId, userId]
+        );
+
+        const payload = { messageId: message.id, chatId: message.chat_id, preview: null };
+        if (req.io) {
+            req.io.to(`chat_${message.chat_id}`).emit('message_link_preview', payload);
+        }
+
+        res.json({
+            success: true,
+            message: 'Link preview removed',
+            data: payload
+        });
+    } catch (error) {
+        console.error('Dismiss link preview error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to remove link preview',
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
+    dismissLinkPreview,
     getMessages,
     sendMessage,
     uploadFile,

@@ -209,6 +209,20 @@ const validateCreateChat = [
         .withMessage('At least one participant is required')
 ];
 
+/**
+ * Validation rules for the per-chat "mentions only" setting
+ */
+const validateMentionsOnly = [
+    param('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    body('enabled')
+        .isBoolean({ strict: true })
+        .withMessage('enabled must be true or false')
+];
+
 // Push service endpoints are public HTTPS URLs; refuse anything that points the server at itself
 // or at a raw IP, since the server will POST to this URL
 function isPushEndpoint(value) {
@@ -340,6 +354,7 @@ module.exports = {
     validateForward,
     validateStarredQuery,
     validateCreateChat,
+    validateMentionsOnly,
     validatePushSubscription,
     validatePushUnsubscribe,
     validateNotificationSettings,
