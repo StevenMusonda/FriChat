@@ -2,6 +2,9 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS deleted_chats CASCADE;
+DROP TABLE IF EXISTS pinned_messages CASCADE;
+DROP TABLE IF EXISTS deleted_messages CASCADE;
 DROP TABLE IF EXISTS message_mentions CASCADE;
 DROP TABLE IF EXISTS starred_messages CASCADE;
 DROP TABLE IF EXISTS notification_settings CASCADE;
@@ -101,6 +104,9 @@ CREATE TABLE group_members (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role member_role DEFAULT 'member',
     mentions_only BOOLEAN NOT NULL DEFAULT FALSE, -- push only for @mentions; mentions also get through a mute
+    last_read_message_id INTEGER NULL, -- read position for unread counts
+    muted_until TIMESTAMP NULL, -- NULL = not muted; '9999-12-31' = muted until unmuted ("always")
+    archived_at TIMESTAMP NULL, -- NULL = in the main list
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(chat_id, user_id)
 );
@@ -163,6 +169,8 @@ CREATE INDEX idx_msg_chat_id ON messages(chat_id);
 CREATE INDEX idx_msg_sender_id ON messages(sender_id);
 CREATE INDEX idx_msg_created_at ON messages(created_at);
 CREATE INDEX idx_messages_deleted_at ON messages(deleted_at);
+-- Cursor pagination (WHERE chat_id = ? AND id < ? ORDER BY id DESC) and unread counts (id > last_read)
+CREATE INDEX idx_msg_chat_id_id ON messages(chat_id, id);
 
 -- Message reactions table
 CREATE TABLE message_reactions (
@@ -197,6 +205,44 @@ CREATE TABLE message_mentions (
 );
 
 CREATE INDEX idx_mentions_user_message ON message_mentions(user_id, message_id);
+
+-- Messages a user deleted for themselves only
+CREATE TABLE deleted_messages (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (message_id, user_id)
+);
+
+CREATE INDEX idx_deleted_messages_message_id ON deleted_messages(message_id);
+CREATE INDEX idx_deleted_messages_user_id ON deleted_messages(user_id);
+
+-- Pinned messages (one pin per message, expires at pinned_until)
+CREATE TABLE pinned_messages (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    pinned_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pinned_until TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (message_id)
+);
+
+CREATE INDEX idx_pinned_messages_chat_id ON pinned_messages(chat_id);
+CREATE INDEX idx_pinned_messages_pinned_until ON pinned_messages(pinned_until);
+
+-- Chats a user removed from their own list (soft delete)
+CREATE TABLE deleted_chats (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (chat_id, user_id)
+);
+
+CREATE INDEX idx_deleted_chats_chat_id ON deleted_chats(chat_id);
+CREATE INDEX idx_deleted_chats_user_id ON deleted_chats(user_id);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

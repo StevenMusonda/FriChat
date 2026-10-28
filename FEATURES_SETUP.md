@@ -685,4 +685,48 @@ Use three users (A, B, C) in one group, and A and B in a direct chat.
 
 ---
 
+## Database: fresh install vs. upgrade
+
+`schema.sql` and `schema_postgresql.sql` now contain everything the migration files create, including the `deleted_messages`, `pinned_messages` and `deleted_chats` tables from `schema_updates*.sql` and the read-state columns (`group_members.last_read_message_id`, `muted_until`, `archived_at`) and `idx_msg_chat_id_id` index from `add_read_state*.sql`. Earlier versions of the schema files were missing these.
+
+### Fresh install (empty database)
+
+Run only the schema file. Don't run any migration afterwards. The MySQL migrations marked "run once" fail on columns that already exist.
+
+```bash
+# MySQL
+mysql -u root -p frichat < database/schema.sql
+# PostgreSQL
+psql -U postgres -d frichat -f database/schema_postgresql.sql
+```
+
+The schema files start by dropping every FriChat table, so never run them on a database whose data you want to keep. `sample_data.sql` is optional, for demo data.
+
+### Upgrade (existing database)
+
+Don't re-run the schema file. Run the migrations you haven't run yet, in this order. Each header says whether that file is safe to run more than once.
+
+| # | MySQL | PostgreSQL |
+|---|-------|------------|
+| 1 | — | `fix_reactions_constraint.sql` (only databases created before the reaction-constraint fix) |
+| 2 | `schema_updates.sql` | `schema_updates_postgresql.sql` |
+| 3 | `add_message_delete_columns.sql` | `add_message_delete_columns_postgresql.sql` (or the older `add_message_columns_postgresql.sql`; same result) |
+| 4 | `add_password_resets.sql` | `add_password_resets_postgresql.sql` |
+| 5 | `add_read_state.sql` (run once) | `add_read_state_postgresql.sql` |
+| 6 | `add_push_notifications.sql` | `add_push_notifications_postgresql.sql` |
+| 7 | `add_message_actions.sql` (run once) | `add_message_actions_postgresql.sql` |
+| 8 | `add_file_attachment_claim.sql` (run once) | `add_file_attachment_claim_postgresql.sql` |
+| 9 | `add_mentions_and_link_previews.sql` (run once) | `add_mentions_and_link_previews_postgresql.sql` |
+
+```bash
+# MySQL, one file at a time
+mysql -u root -p frichat < database/<file>.sql
+# PostgreSQL: every migration is safe to re-run, so you can run them all in order
+psql -U postgres -d frichat -f database/<file>_postgresql.sql
+```
+
+On PostgreSQL, a database built from the initial-commit schema plus all the migrations above matches a fresh `schema_postgresql.sql` install: same tables, columns, types, defaults, indexes, constraints, views, triggers and enum types. The only difference is the column order inside a table, because `ALTER TABLE ADD COLUMN` adds columns at the end. Running all the migrations on top of a fresh install is a no-op. The MySQL files were updated the same way but not checked against a live MySQL server.
+
+---
+
 **Enjoy the new features! 🎉**

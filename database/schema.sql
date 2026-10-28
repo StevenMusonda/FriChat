@@ -2,6 +2,9 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS deleted_chats;
+DROP TABLE IF EXISTS pinned_messages;
+DROP TABLE IF EXISTS deleted_messages;
 DROP TABLE IF EXISTS message_mentions;
 DROP TABLE IF EXISTS starred_messages;
 DROP TABLE IF EXISTS notification_settings;
@@ -89,6 +92,9 @@ CREATE TABLE group_members (
     user_id INT NOT NULL,
     role ENUM('admin', 'member') DEFAULT 'member',
     mentions_only BOOLEAN NOT NULL DEFAULT FALSE, -- push only for @mentions; mentions also get through a mute
+    last_read_message_id INT NULL, -- read position for unread counts
+    muted_until DATETIME NULL, -- NULL = not muted; '9999-12-31' = "always". DATETIME because TIMESTAMP stops at 2038.
+    archived_at DATETIME NULL, -- NULL = in the main list
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -155,7 +161,8 @@ CREATE TABLE messages (
     INDEX idx_chat_id (chat_id),
     INDEX idx_sender_id (sender_id),
     INDEX idx_created_at (created_at),
-    INDEX idx_messages_deleted_at (deleted_at)
+    INDEX idx_messages_deleted_at (deleted_at),
+    INDEX idx_msg_chat_id_id (chat_id, id) -- cursor pagination and unread counts
 );
 
 -- Message reactions table
@@ -193,6 +200,48 @@ CREATE TABLE message_mentions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY unique_message_mention (message_id, user_id),
     INDEX idx_mentions_user_message (user_id, message_id)
+);
+
+-- Messages a user deleted for themselves only
+CREATE TABLE deleted_messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    message_id INT NOT NULL,
+    user_id INT NOT NULL,
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_message (message_id, user_id),
+    INDEX idx_message_id (message_id),
+    INDEX idx_user_id (user_id)
+);
+
+-- Pinned messages (one pin per message, expires at pinned_until)
+CREATE TABLE pinned_messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    message_id INT NOT NULL,
+    chat_id INT NOT NULL,
+    pinned_by INT NOT NULL,
+    pinned_until TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (pinned_by) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_message_pin (message_id),
+    INDEX idx_chat_id (chat_id),
+    INDEX idx_pinned_until (pinned_until)
+);
+
+-- Chats a user removed from their own list (soft delete)
+CREATE TABLE deleted_chats (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    user_id INT NOT NULL,
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_chat (chat_id, user_id),
+    INDEX idx_chat_id (chat_id),
+    INDEX idx_user_id (user_id)
 );
 
 -- Create a view for easy message retrieval with user info
