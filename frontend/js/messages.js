@@ -11,6 +11,12 @@ let oldestMessageCursor = null;
 let loadingOlderMessages = false;
 let messagesLoadToken = 0; // bumps on every chat open so late responses for the old chat are dropped
 
+// After jumping to an older message (search, quote, star) the newest page isn't loaded:
+// newer pages load as the user scrolls down, and live messages wait behind the jump button
+let hasNewerMessages = false;
+let newestMessageCursor = null;
+let loadingNewerMessages = false;
+
 // Read position
 let lastReadAtOpen = null;   // server read position when the chat was opened (places the divider)
 let unreadDividerId = null;  // message the "New messages" line sits above
@@ -51,6 +57,88 @@ async function loadMessages(chatId) {
 }
 
 /**
+ * Load a page centred on a message that may be far back in the history.
+ * Returns true when the message is in the thread afterwards.
+ */
+async function loadMessagesAround(chatId, messageId) {
+    const loadToken = ++messagesLoadToken;
+    resetThreadState();
+
+    try {
+        const response = await apiRequest(
+            `${CONFIG.ENDPOINTS.MESSAGES(chatId)}?limit=${CONFIG.MESSAGE_PAGE_SIZE}&around=${encodeURIComponent(messageId)}`
+        );
+
+        if (loadToken !== messagesLoadToken || !response.success) return false;
+
+        const pagination = response.pagination || {};
+        currentMessages = response.data || [];
+        hasOlderMessages = !!pagination.hasMore;
+        oldestMessageCursor = pagination.nextCursor || null;
+        hasNewerMessages = !!pagination.hasNewer;
+        newestMessageCursor = pagination.newerCursor || null;
+        lastReadAtOpen = response.lastReadMessageId || 0;
+        unreadDividerId = findFirstUnreadId(currentMessages, lastReadAtOpen);
+
+        renderMessages(currentMessages);
+        updateJumpButton();
+
+        // Only when the page reaches the newest message does opening it count as reading it
+        if (!hasNewerMessages) markChatAsRead(chatId);
+
+        return currentMessages.some(m => m.id === messageId);
+    } catch (error) {
+        console.error('Load messages around error:', error);
+        return false;
+    }
+}
+
+/**
+ * Fetch the page after the newest loaded message (only after a jump into the history)
+ */
+async function loadNewerMessages() {
+    if (!hasNewerMessages || loadingNewerMessages || !currentChatId) return;
+
+    const chatId = currentChatId;
+    const loadToken = messagesLoadToken;
+    loadingNewerMessages = true;
+
+    try {
+        const response = await apiRequest(
+            `${CONFIG.ENDPOINTS.MESSAGES(chatId)}?limit=${CONFIG.MESSAGE_PAGE_SIZE}&after=${newestMessageCursor}`
+        );
+
+        if (loadToken !== messagesLoadToken || !response.success) return;
+
+        const pagination = response.pagination || {};
+        hasNewerMessages = !!pagination.hasNewer;
+        newestMessageCursor = pagination.newerCursor || null;
+
+        const newer = (response.data || []).filter(m => !currentMessages.some(existing => existing.id === m.id));
+        currentMessages = currentMessages.concat(newer);
+        document.getElementById('messagesContainer').insertAdjacentHTML('beforeend', renderMessagesHtml(newer));
+
+        // Caught up with the live thread: arrivals behind the button are in this page now
+        if (!hasNewerMessages) newWhileScrolledUp = 0;
+        updateJumpButton();
+    } catch (error) {
+        console.error('Load newer messages error:', error);
+    } finally {
+        if (loadToken === messagesLoadToken) loadingNewerMessages = false;
+    }
+}
+
+/**
+ * Leave the history and show the newest page at the bottom
+ */
+async function returnToLatestMessages() {
+    if (!currentChatId) return;
+    await loadMessages(currentChatId);
+    scrollToBottom();
+    updateJumpButton();
+}
+
+/**
  * Forget everything about the previously open thread
  */
 function resetThreadState() {
@@ -58,6 +146,9 @@ function resetThreadState() {
     hasOlderMessages = false;
     oldestMessageCursor = null;
     loadingOlderMessages = false;
+    hasNewerMessages = false;
+    newestMessageCursor = null;
+    loadingNewerMessages = false;
     lastReadAtOpen = null;
     unreadDividerId = null;
     lastMarkedReadId = 0;
@@ -195,7 +286,7 @@ function updateJumpButton() {
     if (!button) return;
 
     const count = button.querySelector('.jump-to-latest-count');
-    button.hidden = isNearBottom();
+    button.hidden = isNearBottom() && !hasNewerMessages;
     button.classList.toggle('has-count', newWhileScrolledUp > 0);
     count.textContent = newWhileScrolledUp > 0 ? `${newWhileScrolledUp > 99 ? '99+' : newWhileScrolledUp} new` : '';
     button.setAttribute('aria-label', newWhileScrolledUp > 0
@@ -207,7 +298,8 @@ function updateJumpButton() {
  * The user is looking at the bottom of the thread: everything there counts as read
  */
 function handleReachedLatest() {
-    if (!currentChatId || document.hidden || !isNearBottom()) return;
+    // In the history the bottom of the view isn't the latest message
+    if (!currentChatId || document.hidden || hasNewerMessages || !isNearBottom()) return;
 
     if (newWhileScrolledUp > 0) {
         newWhileScrolledUp = 0;
@@ -227,11 +319,18 @@ function initializeMessageScroll() {
         if (container.scrollTop < LOAD_OLDER_THRESHOLD_PX) {
             loadOlderMessages();
         }
+        if (hasNewerMessages && container.scrollHeight - container.scrollTop - container.clientHeight < LOAD_OLDER_THRESHOLD_PX) {
+            loadNewerMessages();
+        }
         updateJumpButton();
         handleReachedLatest();
     }, { passive: true });
 
     jumpButton.addEventListener('click', () => {
+        if (hasNewerMessages) {
+            returnToLatestMessages();
+            return;
+        }
         container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     });
 }
@@ -512,6 +611,23 @@ function initializeMessageContentActions() {
             e.preventDefault();
             e.stopPropagation();
             dismissLinkPreview(parseInt(dismissButton.dataset.dismissPreview));
+            return;
+        }
+
+        // Photos and videos open full screen with the chat's other media (media.js)
+        const media = e.target.closest('[data-lightbox]');
+        if (media) {
+            e.preventDefault();
+            e.stopPropagation();
+            openLightbox(currentChatId, parseInt(media.dataset.lightbox));
+        }
+    });
+
+    // Keyboard users open a photo with Enter or Space
+    document.getElementById('messagesContainer').addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('img[data-lightbox]')) {
+            e.preventDefault();
+            openLightbox(currentChatId, parseInt(e.target.dataset.lightbox));
         }
     });
 }
@@ -599,22 +715,30 @@ function renderMessageContent(message) {
         case 'image':
             const imageUrl = getFileUrl(message.upload_path);
             console.log('Image URL:', imageUrl);
+            // Clicking opens the lightbox (media.js) on this message
             return `
                 <div class="message-media">
-                    <img src="${imageUrl}" 
+                    <img src="${escapeHtml(imageUrl)}"
                          alt="${escapeHtml(message.file_name)}"
-                         onclick="openImageModal('${imageUrl}')">
+                         loading="lazy"
+                         role="button"
+                         tabindex="0"
+                         aria-label="Open ${escapeHtml(message.file_name || 'photo')} full screen"
+                         data-lightbox="${parseInt(message.id)}">
                 </div>
             `;
-        
+
         case 'video':
             const videoUrl = getFileUrl(message.upload_path);
             return `
                 <div class="message-media">
-                    <video controls>
-                        <source src="${videoUrl}" type="${message.mime_type || 'video/mp4'}">
+                    <video controls preload="metadata">
+                        <source src="${escapeHtml(videoUrl)}" type="${escapeHtml(message.mime_type || 'video/mp4')}">
                         Your browser does not support video playback.
                     </video>
+                    <button type="button" class="message-media-expand" data-lightbox="${parseInt(message.id)}" title="Full screen" aria-label="Open video full screen">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                    </button>
                 </div>
             `;
         
@@ -733,42 +857,6 @@ async function sendTextMessage(chatId, content, replyToMessageId = null) {
 }
 
 /**
- * Upload and send file
- */
-async function uploadFile(chatId, file, replyToMessageId = null) {
-    try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('chatId', chatId);
-        if (replyToMessageId) {
-            formData.append('replyToMessageId', replyToMessageId);
-        }
-        
-        const token = await getAccessToken();
-        
-        const response = await fetch(`${CONFIG.API_BASE_URL}${CONFIG.ENDPOINTS.UPLOAD_FILE}`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Message will be added via WebSocket
-            return data;
-        }
-        
-        return data;
-    } catch (error) {
-        console.error('Upload file error:', error);
-        return { success: false, message: 'Failed to upload file' };
-    }
-}
-
-/**
  * Toggle reaction on message. The server applies the rule (one reaction per user:
  * a different emoji replaces it, the same emoji removes it) and broadcasts the result.
  */
@@ -797,6 +885,18 @@ function addMessageToUI(message) {
     const container = document.getElementById('messagesContainer');
     const currentUser = getCurrentUser();
     const isOwn = message.sender_id === currentUser.userId;
+
+    // Viewing older history: the gap to the newest message isn't loaded, so don't append past it
+    if (hasNewerMessages) {
+        if (isOwn) {
+            // Sending takes the user back to the latest messages
+            returnToLatestMessages();
+            return true;
+        }
+        newWhileScrolledUp++;
+        updateJumpButton();
+        return false;
+    }
     const wasNearBottom = isNearBottom();
     const seen = isOwn || (wasNearBottom && !document.hidden);
 
@@ -867,9 +967,7 @@ function updateMessageStatusInUI(messageId, status) {
 function initializeMessageInput() {
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
-    const attachBtn = document.getElementById('attachBtn');
-    const fileInput = document.getElementById('fileInput');
-    
+
     let typingTimeout;
 
     // The composer grows with its text (Shift+Enter adds lines)
@@ -897,70 +995,20 @@ function initializeMessageInput() {
         }
     });
     
-    // Send message on Enter
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+    // Enter sends and Shift+Enter adds a line, or the other way round (Settings > Chat; composer.js).
+    // Ctrl/Cmd+Enter always sends. The @mention list handles Enter first and prevents the default.
+    messageInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.defaultPrevented || e.isComposing || e.altKey) return;
+        if (isSendShortcut(e)) {
             e.preventDefault();
             sendMessage();
         }
     });
-    
+
     // Send button
     sendBtn.addEventListener('click', sendMessage);
-    
-    // Attach button
-    attachBtn.addEventListener('click', () => {
-        fileInput.click();
-    });
-    
-    // File input
-    fileInput.addEventListener('change', async (e) => {
-        const files = Array.from(e.target.files);
 
-        if (typeof canPostInCurrentChat === 'function' && !canPostInCurrentChat()) {
-            fileInput.value = '';
-            showNotification('Only admins can send messages in this group', 'error');
-            return;
-        }
-
-        // An open reply applies to the first file only
-        let replyToMessageId = getReplyTargetId();
-        if (replyToMessageId) clearComposerContext();
-        
-        for (const file of files) {
-            if (!currentChatId) {
-                alert('Please select a chat first');
-                return;
-            }
-            
-            // Show uploading indicator
-            const uploadingMessage = document.createElement('div');
-            uploadingMessage.className = 'message sent';
-            uploadingMessage.innerHTML = `
-                <div class="message-content">
-                    <div class="message-bubble">
-                        <div class="message-text">Uploading ${escapeHtml(file.name)}...</div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('messagesContainer').appendChild(uploadingMessage);
-            scrollToBottom();
-            
-            // Upload file
-            const result = await uploadFile(currentChatId, file, replyToMessageId);
-            replyToMessageId = null;
-            
-            // Remove uploading indicator
-            uploadingMessage.remove();
-            
-            if (!result.success) {
-                alert(result.message || 'Failed to upload file');
-            }
-        }
-        
-        // Clear file input
-        fileInput.value = '';
-    });
+    // Attach button, drag-and-drop, paste and the upload tray live in composer.js
 }
 
 /**
@@ -998,8 +1046,10 @@ function wrapComposerSelection(marker) {
 async function sendMessage() {
     const messageInput = document.getElementById('messageInput');
     const content = messageInput.value.trim();
-    
-    if (!content || !currentChatId) {
+    // Files waiting in the upload tray (composer.js) go out with the text
+    const hasTrayFiles = !isEditingMessage() && hasPendingUploads();
+
+    if ((!content && !hasTrayFiles) || !currentChatId) {
         return;
     }
 
@@ -1016,17 +1066,30 @@ async function sendMessage() {
     }
 
     const replyToMessageId = getReplyTargetId();
-    
-    // Clear input and the reply bar
+
+    // Clear input, the saved draft and the reply bar
     messageInput.value = '';
     autoResizeComposer();
     clearComposerContext();
-    
-    // Send via WebSocket (faster) or API
+    clearDraft(currentChatId);
+
+    // Files first (the reply goes on the first one), then the text
+    if (hasTrayFiles) {
+        sendPendingUploads(currentChatId, replyToMessageId, content);
+        return;
+    }
+
+    await sendTextContent(currentChatId, content, replyToMessageId);
+}
+
+/**
+ * Send composer text via WebSocket (faster) or the API
+ */
+async function sendTextContent(chatId, content, replyToMessageId = null) {
     if (window.socket && window.socket.connected) {
-        sendMessageViaSocket(currentChatId, 'text', content, null, replyToMessageId);
+        sendMessageViaSocket(chatId, 'text', content, null, replyToMessageId);
     } else {
-        const result = await sendTextMessage(currentChatId, content, replyToMessageId);
+        const result = await sendTextMessage(chatId, content, replyToMessageId);
         if (result && result.success === false) {
             showNotification(result.message || 'Failed to send message', 'error');
         }

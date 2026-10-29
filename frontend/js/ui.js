@@ -588,6 +588,11 @@ function showChatInfo() {
     `;
     
     chatInfoContent.innerHTML = infoHTML;
+
+    // Media, Files and Links tabs (media.js)
+    resetSharedMediaSection();
+    chatInfoContent.appendChild(renderSharedMediaSection(chat.id));
+
     chatInfoModal.style.display = 'flex';
 }
 
@@ -606,9 +611,11 @@ function initializeMobileBackButton() {
         
         if (chatMain) chatMain.classList.remove('active');
         if (chatSidebar) chatSidebar.classList.remove('hidden');
-        
-        // Clear current chat
+
+        // Keep unsent text as this chat's draft (composer.js), then clear current chat
+        saveCurrentDraft();
         currentChatId = null;
+        refreshChatList();
     });
 }
 
@@ -628,13 +635,12 @@ function initializeCloseChatButton() {
         if (activeChat) activeChat.style.display = 'none';
         if (chatWelcome) chatWelcome.style.display = 'flex';
         
-        // Clear current chat
+        // Keep unsent text as this chat's draft (composer.js), then clear current chat
+        saveCurrentDraft();
         currentChatId = null;
-        
-        // Remove active class from all chat items
-        document.querySelectorAll('.chat-item').forEach(item => {
-            item.classList.remove('active');
-        });
+
+        // No active item, and the closed chat shows its "Draft:" preview
+        refreshChatList();
     });
 }
 

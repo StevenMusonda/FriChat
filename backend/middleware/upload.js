@@ -40,16 +40,24 @@ const storage = multer.diskStorage({
     }
 });
 
-// File filter for validation
-const fileFilter = (req, file, cb) => {
-    // Get allowed types from environment
+/**
+ * Allowed MIME types and the size cap from the environment. The composer fetches them
+ * (GET /api/messages/upload-limits) to refuse a file before uploading it.
+ */
+function getUploadLimits() {
     const allowedImages = (process.env.ALLOWED_IMAGE_TYPES || 'image/jpeg,image/png,image/gif,image/webp').split(',');
     const allowedVideos = (process.env.ALLOWED_VIDEO_TYPES || 'video/mp4,video/webm,video/quicktime').split(',');
     const allowedFiles = (process.env.ALLOWED_FILE_TYPES || 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip,application/x-zip-compressed').split(',');
-    
-    const allAllowed = [...allowedImages, ...allowedVideos, ...allowedFiles];
-    
-    if (allAllowed.includes(file.mimetype)) {
+
+    return {
+        maxFileSize: parseInt(process.env.MAX_FILE_SIZE) || 104857600, // 100MB default
+        allowedTypes: [...allowedImages, ...allowedVideos, ...allowedFiles]
+    };
+}
+
+// File filter for validation
+const fileFilter = (req, file, cb) => {
+    if (getUploadLimits().allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
         cb(new Error(`File type ${file.mimetype} not allowed`), false);
@@ -61,7 +69,7 @@ const upload = multer({
     storage: storage,
     fileFilter: fileFilter,
     limits: {
-        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 104857600 // 100MB default
+        fileSize: getUploadLimits().maxFileSize
     }
 });
 
@@ -89,5 +97,6 @@ const handleUploadError = (err, req, res, next) => {
 
 module.exports = {
     upload,
-    handleUploadError
+    handleUploadError,
+    getUploadLimits
 };

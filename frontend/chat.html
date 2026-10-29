@@ -71,6 +71,9 @@
 
             <div class="sidebar-search">
                 <input type="text" id="chatSearch" placeholder="Search chats...">
+                <button type="button" class="icon-btn starred-btn" id="messageSearchBtn" title="Search messages in all chats" aria-label="Search messages in all chats">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </button>
                 <button type="button" class="icon-btn starred-btn" id="starredBtn" title="Starred messages" aria-label="Starred messages">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
                 </button>
@@ -126,6 +129,9 @@
                         </div>
                     </div>
                     <div class="chat-actions">
+                        <button class="icon-btn" id="chatSearchBtn" title="Search in this chat (Ctrl+Shift+F)" aria-label="Search in this chat">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        </button>
                         <button class="icon-btn" id="chatOptionsBtn" title="Mute and archive" aria-haspopup="menu" aria-expanded="false" onclick="toggleChatOptionsMenu(event)">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="5" r="1"></circle>
@@ -169,7 +175,13 @@
                     <span></span> is typing...
                 </div>
 
+                <!-- Shown while files are dragged over the chat (composer.js) -->
+                <div class="drop-overlay" aria-hidden="true"><span>Drop files to add them to your message</span></div>
+
                 <div class="message-input-container">
+                    <!-- Files waiting to be sent: previews, progress, remove/cancel (composer.js) -->
+                    <div class="upload-tray" id="uploadTray" role="list" aria-label="Files to send" hidden></div>
+
                     <!-- @mention suggestions (mentions.js), float above the composer -->
                     <div class="mention-suggestions" id="mentionSuggestions" role="listbox" aria-label="Mention a member" hidden></div>
 
@@ -343,6 +355,17 @@
                     </label>
                 </section>
 
+                <section class="settings-section" aria-labelledby="settingsChatHeading">
+                    <h4 id="settingsChatHeading">Chat</h4>
+                    <label class="settings-row" for="enterToSendToggle">
+                        <span class="settings-row-text">
+                            <span class="settings-row-title">Press Enter to send</span>
+                            <span class="settings-row-hint">On: Enter sends, Shift+Enter adds a line. Off: Enter adds a line, Shift+Enter sends. Ctrl+Enter always sends.</span>
+                        </span>
+                        <input type="checkbox" class="switch" id="enterToSendToggle" checked>
+                    </label>
+                </section>
+
                 <section class="settings-section" aria-labelledby="settingsDndHeading">
                     <h4 id="settingsDndHeading">Do not disturb</h4>
                     <label class="settings-row" for="dndToggle">
@@ -481,6 +504,49 @@
         </div>
     </div>
 
+    <!-- Message Search (search.js) -->
+    <div class="modal" id="searchModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="searchModalTitle">
+        <div class="modal-content search-modal">
+            <div class="modal-header">
+                <h3 id="searchModalTitle">Search messages</h3>
+                <button class="modal-close" id="closeSearchModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="search-controls">
+                <input type="search" id="messageSearchInput" placeholder="Search messages..." autocomplete="off" maxlength="200" aria-label="Search text">
+                <div class="search-scope" role="radiogroup" aria-label="Where to search">
+                    <label><input type="radio" name="searchScope" id="searchScopeChat" value="chat"> <span id="searchScopeChatLabel">In this chat</span></label>
+                    <label><input type="radio" name="searchScope" id="searchScopeAll" value="all" checked> All chats</label>
+                </div>
+                <div class="search-filters">
+                    <label for="searchSender">Sender
+                        <select id="searchSender"><option value="">Anyone</option></select>
+                    </label>
+                    <label for="searchHas">Contains
+                        <select id="searchHas">
+                            <option value="">Anything</option>
+                            <option value="image">Photo</option>
+                            <option value="video">Video</option>
+                            <option value="file">File</option>
+                            <option value="link">Link</option>
+                        </select>
+                    </label>
+                    <label for="searchFrom">From date
+                        <input type="date" id="searchFrom">
+                    </label>
+                    <label for="searchTo">To date
+                        <input type="date" id="searchTo">
+                    </label>
+                    <button type="button" class="btn btn-secondary btn-small" id="searchClearFilters">Clear filters</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <p class="search-status" id="searchStatus" role="status" aria-live="polite"></p>
+                <div class="search-results" id="searchResults"></div>
+                <button type="button" class="btn btn-secondary starred-load-more" id="searchLoadMore" hidden>Load more</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Emoji Picker -->
     <div class="emoji-picker" id="emojiPicker" style="display: none;">
         <div class="emoji-grid">
@@ -600,6 +666,9 @@
     <script src="js/security.js"></script>
     <script src="vendor/qrcode-generator/qrcode.js"></script>
     <script src="js/groups.js"></script>
+    <script src="js/composer.js"></script>
+    <script src="js/media.js"></script>
+    <script src="js/search.js"></script>
     
     <script>
         // Initialize chat application
@@ -709,6 +778,13 @@
 
             // Initialize message input
             initializeMessageInput();
+
+            // Upload tray (attach, drag-and-drop, paste), drafts and the Enter-to-send setting
+            initializeComposer();
+
+            // Lightbox keys; message search panel
+            initializeMedia();
+            initializeSearch();
 
             // @mention suggestions in the composer
             initializeMentionAutocomplete();

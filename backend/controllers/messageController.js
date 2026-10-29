@@ -14,6 +14,7 @@ const reactionRules = require('../utils/reactions');
 const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
 const { checkCanPost, postingError } = require('../utils/groups');
 const { checkDirectChatBlock } = require('../utils/blocks');
+const { getUploadLimits: getUploadLimitSettings } = require('../middleware/upload');
 const {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
@@ -28,9 +29,47 @@ const DEFAULT_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 100;
 
 /**
- * Get a page of messages for a chat, newest first from the server's point of view
- * Query: limit (default 30, max 100), before (message id cursor - returns messages older than it)
- * Response data is oldest-first; pagination.nextCursor is passed back as `before` for the next older page
+ * One run of a chat's messages as the user sees them, in the given id order.
+ * Messages deleted "for me" are filtered here so they don't eat into the page.
+ * cursorSql is a fixed comparison ('m.id < ?', 'm.id <= ?', 'm.id > ?') or ''.
+ */
+async function fetchMessageRows(userId, chatId, cursorSql, cursorValue, order, limit) {
+    const params = [userId, userId, chatId];
+    if (cursorSql) params.push(cursorValue);
+
+    // Ids only ever increase, so they make a stable cursor (timestamps can tie).
+    // limit is a validated integer, inlined because mysql2 rejects a bound LIMIT on some servers.
+    return executeQuery(`
+        SELECT
+            ${MESSAGE_COLUMNS},
+            m.deleted_at,
+            m.deleted_for_everyone,
+            CASE
+                WHEN m.deleted_for_everyone = TRUE THEN TRUE
+                WHEN dm.id IS NOT NULL THEN TRUE
+                ELSE FALSE
+            END as is_deleted,
+            CASE WHEN sm.id IS NULL THEN FALSE ELSE TRUE END as is_starred
+        FROM messages m
+        ${MESSAGE_JOINS}
+        LEFT JOIN deleted_messages dm ON m.id = dm.message_id AND dm.user_id = ?
+        LEFT JOIN starred_messages sm ON m.id = sm.message_id AND sm.user_id = ?
+        WHERE m.chat_id = ?
+        ${cursorSql ? `AND ${cursorSql}` : ''}
+        AND (dm.id IS NULL OR m.deleted_for_everyone = TRUE)
+        ORDER BY m.id ${order === 'ASC' ? 'ASC' : 'DESC'}
+        LIMIT ${parseInt(limit) + 1}
+    `, params);
+}
+
+/**
+ * Get a page of messages for a chat
+ * Query: limit (default 30, max 100) and at most one cursor:
+ *   before - messages older than it (scrolling up)
+ *   after  - messages newer than it (scrolling down after a jump)
+ *   around - a page centred on that message (jumping to a search result, quote or star)
+ * Response data is always oldest-first. pagination.nextCursor goes back as `before` for the next
+ * older page (when hasMore); pagination.newerCursor goes back as `after` (when hasNewer).
  */
 async function getMessages(req, res) {
     try {
@@ -38,6 +77,8 @@ async function getMessages(req, res) {
         const userId = req.user.id;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
         const before = parseInt(req.query.before) || null;
+        const after = parseInt(req.query.after) || null;
+        const around = parseInt(req.query.around) || null;
 
         // Check if user is a member of this chat
         const membership = await queryOne(
@@ -52,41 +93,30 @@ async function getMessages(req, res) {
             });
         }
 
-        const params = [userId, userId, chatId];
-        let cursorClause = '';
-        if (before) {
-            cursorClause = 'AND m.id < ?';
-            params.push(before);
+        let messages;
+        let hasMore = false;
+        let hasNewer = false;
+
+        if (around) {
+            // The message itself plus older ones, then newer ones (the extra row of each says if more exist)
+            const olderLimit = Math.ceil(limit / 2);
+            const newerLimit = Math.max(limit - olderLimit, 1);
+            const older = await fetchMessageRows(userId, chatId, 'm.id <= ?', around, 'DESC', olderLimit);
+            const newer = await fetchMessageRows(userId, chatId, 'm.id > ?', around, 'ASC', newerLimit);
+            hasMore = older.length > olderLimit;
+            hasNewer = newer.length > newerLimit;
+            messages = older.slice(0, olderLimit).reverse().concat(newer.slice(0, newerLimit));
+        } else if (after) {
+            const rows = await fetchMessageRows(userId, chatId, 'm.id > ?', after, 'ASC', limit);
+            hasNewer = rows.length > limit;
+            messages = rows.slice(0, limit);
+        } else {
+            const rows = await fetchMessageRows(userId, chatId, before ? 'm.id < ?' : '', before, 'DESC', limit);
+            hasMore = rows.length > limit;
+            messages = rows.slice(0, limit).reverse(); // Oldest first
         }
 
-        // Ids only ever increase, so they make a stable cursor (timestamps can tie).
-        // Messages deleted "for me" are filtered here so they don't eat into the page.
-        // limit is a validated integer, inlined because mysql2 rejects a bound LIMIT on some servers.
-        const rows = await executeQuery(`
-            SELECT
-                ${MESSAGE_COLUMNS},
-                m.deleted_at,
-                m.deleted_for_everyone,
-                CASE
-                    WHEN m.deleted_for_everyone = TRUE THEN TRUE
-                    WHEN dm.id IS NOT NULL THEN TRUE
-                    ELSE FALSE
-                END as is_deleted,
-                CASE WHEN sm.id IS NULL THEN FALSE ELSE TRUE END as is_starred
-            FROM messages m
-            ${MESSAGE_JOINS}
-            LEFT JOIN deleted_messages dm ON m.id = dm.message_id AND dm.user_id = ?
-            LEFT JOIN starred_messages sm ON m.id = sm.message_id AND sm.user_id = ?
-            WHERE m.chat_id = ?
-            ${cursorClause}
-            AND (dm.id IS NULL OR m.deleted_for_everyone = TRUE)
-            ORDER BY m.id DESC
-            LIMIT ${limit + 1}
-        `, params);
-
-        // The extra row only tells us whether an older page exists
-        const hasMore = rows.length > limit;
-        const messages = rows.slice(0, limit).map(shapeMessage);
+        messages = messages.map(shapeMessage);
 
         // Nothing of a deleted message goes out, including what it quoted
         for (const message of messages) {
@@ -129,7 +159,8 @@ async function getMessages(req, res) {
             }
         }
 
-        messages.reverse(); // Oldest first
+        const first = messages.length > 0 ? messages[0].id : null;
+        const last = messages.length > 0 ? messages[messages.length - 1].id : null;
 
         res.json({
             success: true,
@@ -137,7 +168,10 @@ async function getMessages(req, res) {
             pagination: {
                 hasMore: hasMore,
                 // Oldest message on this page; send as `before` to get the next older page
-                nextCursor: hasMore ? messages[0].id : null
+                nextCursor: hasMore ? first : null,
+                hasNewer: hasNewer,
+                // Newest message on this page; send as `after` to get the next newer page
+                newerCursor: hasNewer ? last : null
             },
             lastReadMessageId: membership.last_read_message_id || null
         });
@@ -1348,8 +1382,20 @@ async function dismissLinkPreview(req, res) {
     }
 }
 
+/**
+ * File size cap and allowed types, so the composer can refuse a file before uploading it
+ * (multer enforces the same values on POST /upload)
+ */
+function getUploadLimits(req, res) {
+    res.json({
+        success: true,
+        data: getUploadLimitSettings()
+    });
+}
+
 module.exports = {
     dismissLinkPreview,
+    getUploadLimits,
     getMessages,
     sendMessage,
     uploadFile,

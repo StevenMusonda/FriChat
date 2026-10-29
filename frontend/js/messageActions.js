@@ -461,6 +461,7 @@ function renderComposerContext() {
         bar.hidden = true;
         document.getElementById('messageInput').placeholder = 'Type a message...';
         if (composerContext && !message) composerContext = null;
+        positionUploadTray();
         return;
     }
 
@@ -474,6 +475,8 @@ function renderComposerContext() {
         getMessagePreviewText(message.message_type, message.content, message.file_name);
     document.getElementById('messageInput').placeholder = editing ? 'Edit your message...' : 'Type a reply...';
     bar.hidden = false;
+    // The upload tray (composer.js) sits above this bar
+    positionUploadTray();
 }
 
 /**
@@ -928,38 +931,29 @@ function renderStarredItem(message) {
     return item;
 }
 
-/* ===== Jump to a message (quotes and starred list) ===== */
-
-const MAX_PAGES_TO_FIND_MESSAGE = 50;
+/* ===== Jump to a message (quotes, starred list, search results, shared media) ===== */
 
 /**
- * Load older pages until the message is in the thread (or there's nothing older)
+ * Make sure the message is in the thread: if it isn't loaded, load the page around it
+ * (messages.js), however far back it is
  */
 async function ensureMessageLoaded(messageId) {
-    for (let page = 0; page <= MAX_PAGES_TO_FIND_MESSAGE; page++) {
-        if (currentMessages.some(m => m.id === messageId)) return true;
-
-        // Already past it: it was deleted for this user
-        if (!hasOlderMessages || (currentMessages.length > 0 && currentMessages[0].id < messageId)) return false;
-
-        // A scroll-triggered load may be running; wait for it instead of skipping a page
-        while (loadingOlderMessages) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        await loadOlderMessages();
-    }
-    return false;
+    if (currentMessages.some(m => m.id === messageId)) return true;
+    if (!currentChatId) return false;
+    return loadMessagesAround(currentChatId, messageId);
 }
 
 /**
- * Open the chat if needed, scroll the message into view and flash it
+ * Open the chat if needed (straight at the message), scroll the message into view and flash it
  */
 async function jumpToMessage(chatId, messageId) {
+    let found;
     if (chatId !== currentChatId) {
-        await openChat(chatId);
+        await openChat(chatId, { aroundMessageId: messageId });
+        found = currentChatId === chatId && currentMessages.some(m => m.id === messageId);
+    } else {
+        found = await ensureMessageLoaded(messageId);
     }
-
-    const found = await ensureMessageLoaded(messageId);
     const element = found && document.querySelector(`#messagesContainer [data-message-id="${messageId}"]`);
     if (!element) {
         showNotification('That message is no longer available', 'error');

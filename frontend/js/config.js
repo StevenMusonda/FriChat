@@ -47,6 +47,7 @@ const CONFIG = {
         MUTE_CHAT: (chatId) => `/chats/${chatId}/mute`,
         ARCHIVE_CHAT: (chatId) => `/chats/${chatId}/archive`,
         MENTIONS_ONLY: (chatId) => `/chats/${chatId}/mentions-only`,
+        SHARED_MEDIA: (chatId) => `/chats/${chatId}/media`,
 
         // Groups
         GROUP_SETTINGS: (chatId) => `/chats/${chatId}/settings`,
@@ -72,6 +73,8 @@ const CONFIG = {
         STARRED_MESSAGES: '/messages/starred',
         FORWARD_MESSAGES: '/messages/forward',
         LINK_PREVIEW: (messageId) => `/messages/${messageId}/link-preview`,
+        SEARCH_MESSAGES: '/messages/search',
+        UPLOAD_LIMITS: '/messages/upload-limits',
 
         // Notifications
         PUSH_CONFIG: '/notifications/push-config',
@@ -87,6 +90,13 @@ const CONFIG = {
     MAX_FORWARD_MESSAGES: 5,
     MAX_FORWARD_CHATS: 10,
 
+    // Files waiting in the composer's upload tray at once (each is its own upload request)
+    MAX_TRAY_FILES: 10,
+
+    // Search results and shared media items per request
+    SEARCH_PAGE_SIZE: 20,
+    MEDIA_PAGE_SIZE: 30,
+
     // Storage Keys
     STORAGE_KEYS: {
         // Legacy: tokens are no longer stored; auth.js deletes this key if an old version left it
@@ -95,6 +105,10 @@ const CONFIG = {
         THEME: 'theme',
         CURRENT_CHAT: 'currentChat',
         ARCHIVED_EXPANDED: 'archivedExpanded',
+        // '0' = Enter adds a new line and Shift+Enter sends (default: Enter sends)
+        ENTER_TO_SEND: 'enterToSend',
+        // Unsent composer text, per user and chat: draft:<userId>:<chatId>
+        DRAFT_PREFIX: 'draft:',
         // Invite code to come back to after signing in (sessionStorage)
         PENDING_INVITE: 'pendingInvite'
     }

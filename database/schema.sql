@@ -175,7 +175,9 @@ CREATE TABLE messages (
     INDEX idx_sender_id (sender_id),
     INDEX idx_created_at (created_at),
     INDEX idx_messages_deleted_at (deleted_at),
-    INDEX idx_msg_chat_id_id (chat_id, id) -- cursor pagination and unread counts
+    INDEX idx_msg_chat_id_id (chat_id, id), -- cursor pagination and unread counts
+    INDEX idx_msg_chat_type_id (chat_id, message_type, id), -- shared media panel
+    FULLTEXT INDEX ft_messages_content (content) -- message search (MATCH ... AGAINST)
 );
 
 -- Message reactions table

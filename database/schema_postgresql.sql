@@ -175,6 +175,8 @@ CREATE TABLE messages (
     link_preview_dismissed BOOLEAN NOT NULL DEFAULT FALSE, -- the sender removed the preview
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- message search: word prefixes, no stemming (to_tsquery('simple', 'term:*'))
+    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, COALESCE(content, ''))) STORED,
     CONSTRAINT fk_messages_deleted_by FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -184,6 +186,9 @@ CREATE INDEX idx_msg_created_at ON messages(created_at);
 CREATE INDEX idx_messages_deleted_at ON messages(deleted_at);
 -- Cursor pagination (WHERE chat_id = ? AND id < ? ORDER BY id DESC) and unread counts (id > last_read)
 CREATE INDEX idx_msg_chat_id_id ON messages(chat_id, id);
+-- Message search and the shared media panel
+CREATE INDEX idx_messages_search ON messages USING GIN (search_vector);
+CREATE INDEX idx_msg_chat_type_id ON messages(chat_id, message_type, id);
 
 -- Message reactions table
 CREATE TABLE message_reactions (

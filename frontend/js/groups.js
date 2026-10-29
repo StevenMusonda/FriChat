@@ -183,6 +183,8 @@ async function openGroupInfo(chatId) {
 
     if (groupInfoOpenFor !== chatId) lastCreatedInvite = null;
     groupInfoOpenFor = chatId;
+    // Fresh tabs each time the panel opens; refreshes while it's open keep them (media.js)
+    resetSharedMediaSection();
     if (title) title.textContent = 'Group info';
     content.replaceChildren(h('p', { className: 'group-info-loading', text: 'Loading…' }));
     modal.style.display = 'flex';
@@ -245,6 +247,7 @@ function renderGroupInfo(chat, invites, requests, bans = []) {
         isAdmin ? renderInviteSection(chat, invites) : null,
         isAdmin && (chat.approve_new_members || requests.length > 0) ? renderRequestsSection(chat, requests) : null,
         renderMembersSection(chat, isAdmin),
+        renderSharedMediaSection(chat.id),
         isAdmin && bans.length > 0 ? renderBansSection(chat, bans) : null,
         renderLeaveSection(chat)
     ].filter(Boolean));

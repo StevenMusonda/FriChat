@@ -6,6 +6,7 @@ const express = require('express');
 const router = express.Router();
 const chatController = require('../controllers/chatController');
 const groupController = require('../controllers/groupController');
+const searchController = require('../controllers/searchController');
 const { authenticateToken } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { uploadGroupAvatar, handleAvatarUploadError } = require('../middleware/groupAvatarUpload');
@@ -23,6 +24,7 @@ const {
     validateRemoveMember,
     validateMemberRole,
     validateChatUserParams,
+    validateSharedMediaQuery,
     checkValidation
 } = require('../utils/validation');
 
@@ -45,6 +47,14 @@ const groupAvatarLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 10,
     message: 'Too many avatar uploads. Please wait a moment.'
+});
+
+// Shared media panel and lightbox paging
+const sharedMediaLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    message: 'Too many requests. Please wait a moment.',
+    keyGenerator: (req) => `user:${req.user.id}`
 });
 
 // All routes require authentication
@@ -84,6 +94,9 @@ router.post('/:chatId/join-requests/:requestId/decline', groupActionLimiter, val
 // Member tags (admins) and leaving
 router.put('/:chatId/members/:userId/tag', groupActionLimiter, validateMemberTag, checkValidation, groupController.setMemberTag);
 router.post('/:chatId/leave', groupActionLimiter, validateLeaveGroup, checkValidation, groupController.leaveGroup);
+
+// Shared media panel: ?type=media|files|links, ?before= / ?after= message id cursors
+router.get('/:chatId/media', sharedMediaLimiter, validateSharedMediaQuery, checkValidation, searchController.getSharedMedia);
 
 // User search
 router.get('/search/users', chatController.searchUsers);

@@ -162,6 +162,9 @@ function renderChatList(chats) {
             lastMessageTime = formatTime(createdAt);
         }
         
+        // Unsent text saved for this chat (composer.js); not shown for the chat being typed in
+        const draft = chat.id !== currentChatId ? getDraftPreview(chat.id) : '';
+
         // Get unread count (grey when muted)
         const unreadCount = chat.unread_count || 0;
         const unreadLabel = unreadCount > 99 ? '99+' : unreadCount;
@@ -179,7 +182,9 @@ function renderChatList(chats) {
                         </span>
                         <span class="chat-item-time">${lastMessageTime}</span>
                     </div>
-                    <div class="chat-item-preview">${escapeHtml(lastMessageText)}</div>
+                    ${draft
+                        ? `<div class="chat-item-preview has-draft"><span class="chat-item-draft">Draft:</span> ${escapeHtml(draft)}</div>`
+                        : `<div class="chat-item-preview">${escapeHtml(lastMessageText)}</div>`}
                 </div>
                 ${chat.unread_mention_count > 0 ? `<div class="mention-badge" title="You were mentioned" aria-label="Unread mention">@</div>` : ''}
                 ${unreadCount > 0 ? `<div class="unread-badge ${chat.is_muted ? 'muted' : ''}" aria-label="${unreadCount} unread">${unreadLabel}</div>` : ''}
@@ -524,12 +529,23 @@ async function setChatArchived(chatId, archived) {
 
 /**
  * Open a specific chat
+ * options.aroundMessageId: open at that message instead of the newest one (search, stars, quotes)
  */
-async function openChat(chatId) {
+async function openChat(chatId, options = {}) {
+    // Unsent text stays with the chat being left (composer.js); read before an edit is cancelled
+    const leavingChatId = currentChatId;
+    saveCurrentDraft();
+
     // Reply/edit/selection belong to the chat being left (messageActions.js)
     resetMessageActionState();
 
     currentChatId = chatId;
+
+    // Files waiting in the tray belong to the chat being left; bring back this chat's draft
+    if (leavingChatId !== chatId) {
+        resetUploadTray();
+        restoreDraft(chatId);
+    }
     currentChatMembers = [];
     // Composer lock, header avatar and join-request badge belong to the chat being left (groups.js)
     resetGroupState();
@@ -537,13 +553,10 @@ async function openChat(chatId) {
     closeChatOptionsMenu();
     updateChatHeaderState();
     
-    // Update UI to show active chat
-    document.querySelectorAll('.chat-item').forEach(item => {
-        item.classList.remove('active');
-        if (parseInt(item.dataset.chatId) === chatId) {
-            item.classList.add('active');
-        }
-    });
+    // Update UI to show active chat (re-rendered so the left chat shows its "Draft:" preview)
+    if (leavingChatId !== chatId) {
+        refreshChatList();
+    }
     
     // Hide welcome, show chat
     document.querySelector('.chat-welcome').style.display = 'none';
@@ -566,8 +579,12 @@ async function openChat(chatId) {
     // Load chat details
     await loadChatDetails(chatId);
     
-    // Load messages
-    await loadMessages(chatId);
+    // Load messages: the newest page, or the page around the message being jumped to
+    if (options.aroundMessageId) {
+        await loadMessagesAround(chatId, options.aroundMessageId);
+    } else {
+        await loadMessages(chatId);
+    }
     
     // Load pinned messages
     await loadPinnedMessages(chatId);

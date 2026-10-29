@@ -720,6 +720,7 @@ Don't re-run the schema file. Run the migrations you haven't run yet, in this or
 | 10 | `reactions_one_per_user.sql` | `reactions_one_per_user_postgresql.sql` |
 | 11 | `add_group_invites_and_settings.sql` (run once) | `add_group_invites_and_settings_postgresql.sql` |
 | 12 | `add_security_layer.sql` (run once) | `add_security_layer_postgresql.sql` |
+| 13 | `add_message_search.sql` (run once) | `add_message_search_postgresql.sql` (PostgreSQL 12+) |
 
 ```bash
 # MySQL, one file at a time
@@ -1068,6 +1069,135 @@ Use users A, B and C, a second browser (or a private window) for A's second devi
 - `Secure` cookies over plain `http://localhost` work in Chrome, Edge and Firefox. Older Safari needs `COOKIE_SECURE=false` for local http testing. For deployments where the frontend and API are on different sites, set `COOKIE_SAMESITE=none` (HTTPS only).
 - `sample_data.sql` users are unverified on a fresh install (see the SQL above). The sample data itself wasn't changed.
 - The block confirm, remove and ban dialogs use the browser's `confirm()` box.
+
+## Phase 7: Message search, shared media, lightbox and a better composer
+
+Find old messages fast, browse what a chat has shared, and send files more easily.
+
+### What it does
+
+- **Message search.** The 🔍 button in the chat header searches the open chat. The 🔍 button next to "Search chats..." in the sidebar searches every chat you're in. Ctrl/Cmd+Shift+F also opens it. The search uses the database's full-text index: MySQL `FULLTEXT`, or PostgreSQL `tsvector` with a GIN index. Every word you type must match, as the start of a word, so "deplo" finds "deployment".
+  - Filters: sender, "contains" (photo, video, file or link), and a from/to date. Both dates are included.
+  - Each result shows a snippet with the matching words highlighted. Clicking it opens the chat at that message, even if it's thousands of messages back. The server loads the page around the message, and newer pages load as you scroll down. A "jump to latest" button takes you back to the newest messages.
+  - Only chats you're a member of are searched. Messages deleted for everyone, or deleted just for you, never show up. Global search also leaves out chats you removed from your list.
+- **Shared media** in chat info, for both direct chats and groups. It has three tabs:
+  - **Media**: a grid of photos and videos. Tapping one opens the lightbox.
+  - **Files**: tap a file to show its message in the chat, or download it.
+  - **Links**: http(s) links from text messages, each with a **Show in chat** button.
+
+  Each tab loads 30 items at a time and has a **Load more** button.
+- **Lightbox.** Click a photo, or the ⤢ button on a video, to open it full screen.
+  - ←/→ (or swiping on a phone) moves through every photo and video in the chat, loading more at either end.
+  - Esc closes it.
+  - **Download** saves the file, and **Show in chat** jumps to its message.
+- **Composer uploads.** The 📎 button, dragging files onto the chat, and pasting (for example a screenshot) all put files in a preview tray above the composer.
+  - Remove any file with × before sending.
+  - Send uploads the files one at a time, with a progress bar each, then sends the text. A reply applies to the first file.
+  - × during an upload cancels it.
+  - The tray holds up to 10 files. Files that are too large or of a type the server doesn't allow are refused before upload. The limits come from the server's `MAX_FILE_SIZE` / `ALLOWED_*_TYPES`, and the server still enforces them.
+- **Drafts.** Unsent text is saved per chat, and per account, in this browser's localStorage. It comes back when you reopen the chat. The chat list shows it as "**Draft:** …" until you send it or clear the text.
+- **Enter key setting.** Settings → Chat → **Press Enter to send**.
+  - On (the default): Enter sends and Shift+Enter adds a line.
+  - Off: Enter adds a line and Shift+Enter sends.
+  - Ctrl/Cmd+Enter always sends. The hint under the composer follows the setting.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_message_search.sql
+# PostgreSQL 12+ (safe to run more than once)
+psql -U postgres -d frichat -f database/add_message_search_postgresql.sql
+```
+
+The migration adds:
+- **MySQL:** `FULLTEXT INDEX ft_messages_content (content)` and `INDEX idx_msg_chat_type_id (chat_id, message_type, id)`.
+- **PostgreSQL:**
+  - A stored generated column, `messages.search_vector`, built as `to_tsvector('simple', content)`. "simple" means no stemming and no stopwords, so it works for any language.
+  - The GIN index `idx_messages_search`, plus `idx_msg_chat_type_id`.
+
+Both migrations rebuild the `messages` table, so on a big database run them when few people are online. Fresh installs get the same objects from `schema.sql` / `schema_postgresql.sql`.
+
+No new env variables and no new npm packages.
+
+**Acceptance check (seed + benchmark):**
+```bash
+cd backend
+node scripts/seed-search-test.js            # seeds once, then times 10 searches and checks for leaks
+node scripts/seed-search-test.js --reset    # recreate the seed data
+node scripts/seed-search-test.js --clean    # remove it
+```
+- **What it seeds:** a group with 10,000 messages (`--count=N` for more), a private chat the test user isn't in, and messages deleted for the user and for everyone.
+- **Seed accounts:** `search_seed_alice`, `search_seed_bob` and `search_seed_eve`, all with the password `SeedPass123`.
+- **What it checks:** each search runs through the real controller. The script exits with code 1 if a search takes 1 s or more, misses results, or returns anything from another chat or a deleted message.
+- **Where it runs:** it uses the database in `.env` and refuses to run when `NODE_ENV=production`.
+
+### New endpoints
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/messages/search` | **Query:** `q`, `chatId` (omit to search all chats), `senderId`, `from`, `to` (ISO 8601; `to` is exclusive), `has` (`image`, `video`, `file` or `link`), `before` (cursor), `limit` (≤ 50).<br>**Returns** newest first: `{ id, chat_id, chat_display_name, sender_name, message_type, file_name, created_at, snippet: { text, highlights: [[start, end]] } }`.<br>**Errors:** `403` if `chatId` isn't your chat. `400` if there's no word and no filter.<br>**Rate limit:** 60/min per user. |
+| GET | `/api/chats/:chatId/media` | **Query:** `type` (`media`, `files` or `links`), `before` or `after` (cursor), `limit` (≤ 60).<br>**Order:** `before` pages are newest first, `after` pages are oldest first.<br>**Returns:** links include `urls` and `snippet`; media and files include `upload_path`, `file_name`, `file_size` and `mime_type`.<br>**Errors:** members only (`403`).<br>**Rate limit:** 60/min per user. |
+| GET | `/api/messages/upload-limits` | **Returns** `{ maxFileSize, allowedTypes }`, the values multer enforces. |
+| GET | `/api/messages/chat/:chatId` (changed) | **New:** `after=<id>` (the next newer page) and `around=<id>` (a page centred on that message). Use at most one of `before`, `after` and `around`; a second one is `400`.<br>`pagination` now also has `hasNewer` / `newerCursor`. The default and `before` responses are unchanged.<br>The query is now validated (express-validator). |
+
+No new Socket.IO events. Search and media are REST-only, and messages that arrive while you're viewing older history wait behind the jump button.
+
+### Manual test checklist
+
+1. [ ] Run the migration, start the server and sign in. Run `node scripts/seed-search-test.js`: every row says `ok`, and it ends with `PASSED`.
+2. [ ] Sign in as `search_seed_alice` and open "Search seed: big chat". Header 🔍 → type `needle`. Results appear as you type (well under a second), with "needle" highlighted in each snippet.
+3. [ ] Click a result from weeks ago. The chat opens at that message, which flashes. Scroll up and down: older and newer pages load. Click the ↓ button: you're back at the newest messages.
+4. [ ] Sidebar 🔍 (all chats) → `secret plans`: "No messages found". Those messages are in a chat Alice isn't in.
+5. [ ] Filters: Sender = Seed bob, Contains = Link, From/To dates. The results narrow down. **Clear filters** resets them. A To date before the From date shows a message.
+6. [ ] Delete a message for yourself, and another for everyone. Neither is found anymore.
+7. [ ] Chat info → **Shared media**: Media, Files and Links tabs, each with **Load more**. Files and Links → **Show in chat** jumps to the message. The same section appears in group info.
+8. [ ] Click a photo in the chat. The lightbox opens. ←/→ move through the chat's photos and videos, and Esc closes it. **Download** saves the file. **Show in chat** closes the lightbox and highlights the message. On a phone, swiping left/right works.
+9. [ ] Drag two images and a PDF onto the chat. The drop overlay shows, then the tray with previews. Remove one with ×. Type a caption and press Enter. The files upload with progress bars, then the text is sent.
+10. [ ] Paste a screenshot into the composer. It lands in the tray as `pasted-<time>.png`.
+11. [ ] Add a large video and press × while it uploads. The upload stops and no message appears.
+12. [ ] Add an `.exe` (or a file over `MAX_FILE_SIZE`). It's refused with a message before anything uploads.
+13. [ ] Type in chat A without sending, then open chat B. Chat A shows "**Draft:** …" in the list. Reopen A: the text is back. Send it: the draft label goes away. Reload the page: drafts are still there.
+14. [ ] Settings → Chat → turn off **Press Enter to send**. Enter adds a line, Shift+Enter sends, and the hint changes. Ctrl+Enter sends in both modes. The @mention list still takes Enter while it's open.
+15. [ ] Dark theme and a 360px-wide phone: the search panel, the filters (2 columns), the shared-media tabs, the tray and the lightbox fit without sideways scrolling.
+
+### Tests
+
+`cd backend && npm test` (525 tests, 48 more than before; all pass).
+- `test/search.test.js` runs on both fake drivers. It covers:
+  - Search terms can't carry FULLTEXT/tsquery syntax.
+  - The SQL for each engine, including MySQL's LIKE fallback for words under 3 characters and stopwords.
+  - Every search joins on your membership, excludes deleted-for-me, deleted-for-everyone and hidden chats, and binds every filter as a parameter.
+  - A foreign `chatId` is `403` before any search query runs.
+  - Snippets, highlight offsets and link extraction.
+  - The media tabs and cursors.
+  - `around`/`after` pages.
+  - Validation, and that the new routes require auth.
+- `test/phase7Frontend.test.js` runs the real `search.js` / `composer.js` in a sandbox. It covers:
+  - Highlights are text nodes plus `<mark>`, so HTML in a message stays text.
+  - Date handling.
+  - The Enter setting.
+  - Drafts per account and per chat.
+  - The upload checks.
+- **Live check on PostgreSQL 18**, in throwaway databases that were dropped afterwards:
+  - The HEAD schema plus the migration, run twice, has the same `messages` columns and indexes as a fresh `schema_postgresql.sql`.
+  - With 10,000 messages, every benchmark search took 2–12 ms. With 100,000 it took 4–180 ms, except a search for the very common word "the", which took about 775 ms.
+  - No leaks while paging through every result.
+  - The endpoints were also checked over HTTP against the running server with a real login.
+
+### Known limitations
+
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise the statements.
+  - InnoDB doesn't index words shorter than `innodb_ft_min_token_size` (3) or its stopwords. FriChat matches those with `LIKE` instead, so they work but don't use the index.
+  - MySQL `FULLTEXT` has no prefix matching inside words: "ploy" doesn't find "deploy" (PostgreSQL doesn't either).
+- Results are ordered newest first, not by relevance.
+- Search sees message text only, not file names.
+- Very common words across a very large history are the slowest case: about 0.8 s at 100,000 messages on PostgreSQL.
+- Drafts live in this browser only. They don't sync between devices, and signing out doesn't erase them. They're keyed per account.
+- Files in the tray belong to the open chat. Switching chats drops queued files. A running upload finishes in the background but leaves the tray.
+- Download in the lightbox fetches the file and saves it. If the uploads server doesn't allow that cross-origin fetch, the file opens in a new tab instead.
+- The old `openImageModal` in `ui.js` is no longer used by messages, but it was left in place.
+- The UI was checked by syntax checks and the sandbox tests, not in a real browser session. Please go through the checklist above.
 
 ---
 

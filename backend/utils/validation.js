@@ -8,6 +8,7 @@ const { MAX_MESSAGE_LENGTH, MAX_FORWARD_MESSAGES, MAX_FORWARD_CHATS } = require(
 const { isValidEmoji } = require('./reactions');
 const { stripControlChars } = require('./messageText');
 const { TOKEN_PATTERN } = require('./invites');
+const { HAS_FILTERS, MEDIA_TABS, MAX_QUERY_LENGTH: MAX_SEARCH_QUERY_LENGTH } = require('./messageSearch');
 const {
     GROUP_NAME_MAX_LENGTH,
     GROUP_DESCRIPTION_MAX_LENGTH,
@@ -220,6 +221,126 @@ const validateStarredQuery = [
         .optional()
         .isInt({ min: 1 })
         .withMessage('Invalid cursor')
+        .toInt()
+];
+
+// Optional message id cursor in the query string
+function cursorRule(field) {
+    return query(field)
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid cursor')
+        .toInt();
+}
+
+/**
+ * Validation rules for a page of a chat's messages: before (older page), after (newer page)
+ * or around (a page centred on a message, used to jump to it). At most one of them.
+ */
+const validateMessagesQuery = [
+    param('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: 100 })
+        .withMessage('limit must be between 1 and 100')
+        .toInt(),
+
+    cursorRule('before'),
+    cursorRule('after'),
+    cursorRule('around'),
+
+    query('around')
+        .custom((value, { req }) => {
+            const cursors = ['before', 'after', 'around'].filter(key => req.query[key] !== undefined);
+            if (cursors.length > 1) throw new Error('Use only one of before, after and around');
+            return true;
+        })
+];
+
+/**
+ * Validation rules for message search (phase 7)
+ */
+const validateSearchQuery = [
+    query('q')
+        .optional()
+        .isString()
+        .withMessage('Invalid search text')
+        .isLength({ max: MAX_SEARCH_QUERY_LENGTH })
+        .withMessage(`Search text must not exceed ${MAX_SEARCH_QUERY_LENGTH} characters`),
+
+    query('chatId')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    query('senderId')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid sender')
+        .toInt(),
+
+    query(['from', 'to'])
+        .optional()
+        .isISO8601({ strict: true })
+        .withMessage('Dates must be ISO 8601 (for example 2026-10-29 or 2026-10-29T00:00:00Z)')
+        .toDate(),
+
+    query('to')
+        .custom((value, { req }) => {
+            if (req.query.from instanceof Date && value instanceof Date && value <= req.query.from) {
+                throw new Error('The end date must be after the start date');
+            }
+            return true;
+        }),
+
+    query('has')
+        .optional()
+        .isIn(Object.keys(HAS_FILTERS))
+        .withMessage('has must be one of image, video, file, link'),
+
+    cursorRule('before'),
+
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: 50 })
+        .withMessage('limit must be between 1 and 50')
+        .toInt()
+];
+
+/**
+ * Validation rules for the shared media panel (phase 7)
+ */
+const validateSharedMediaQuery = [
+    param('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    query('type')
+        .optional()
+        .isIn(Object.keys(MEDIA_TABS))
+        .withMessage('type must be one of media, files, links'),
+
+    cursorRule('before'),
+    cursorRule('after'),
+
+    query('after')
+        .custom((value, { req }) => {
+            if (value !== undefined && req.query.before !== undefined) {
+                throw new Error('Use only one of before and after');
+            }
+            return true;
+        }),
+
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: 60 })
+        .withMessage('limit must be between 1 and 60')
         .toInt()
 ];
 
@@ -622,6 +743,9 @@ module.exports = {
     validateEditMessage,
     validateForward,
     validateStarredQuery,
+    validateMessagesQuery,
+    validateSearchQuery,
+    validateSharedMediaQuery,
     validateCreateChat,
     validateMentionsOnly,
     validateChatIdParam,
