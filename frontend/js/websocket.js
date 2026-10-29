@@ -21,11 +21,14 @@ let socketErrorHandlers = [];
 let groupEventHandlers = [];
 let accountEventHandlers = [];
 let rateLimitHandlers = [];
+let plannerEventHandlers = [];
 
 // Group profile/settings, members, leaving and join requests (handled in groups.js)
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
 // Email verified, block list changed in another tab (handled in security.js)
 const ACCOUNT_EVENTS = ['email_verified', 'block_updated'];
+// Polls, scheduled messages and reminders (polls.js, planner.js)
+const PLANNER_EVENTS = ['poll_updated', 'scheduled_message_updated', 'reminder_due', 'reminder_updated'];
 
 // Handshake refusals the server sends (server.js io.use)
 const EXPIRED_TOKEN_ERRORS = ['Invalid or expired token', 'Access token required'];
@@ -197,6 +200,12 @@ function initializeWebSocket() {
         });
     });
 
+    PLANNER_EVENTS.forEach((event) => {
+        socket.on(event, (data) => {
+            plannerEventHandlers.forEach(handler => handler(event, data || {}));
+        });
+    });
+
     // A request this socket made was refused (e.g. send_message: not a member, bad reply target)
     socket.on('error', (data) => {
         console.error('Socket error:', data);
@@ -241,6 +250,15 @@ function sendMessageViaSocket(chatId, messageType, content, fileId = null, reply
         fileId: fileId,
         replyToMessageId: replyToMessageId
     });
+}
+
+/**
+ * Set this user's whole selection in a poll ([] takes the vote back); the server answers with poll_updated
+ */
+function votePollViaSocket(pollId, optionIds) {
+    if (!socket || !socket.connected) return false;
+    socket.emit('poll_vote', { pollId, optionIds });
+    return true;
 }
 
 /**
@@ -448,6 +466,13 @@ function onAccountEvent(handler) {
 }
 
 /**
+ * Register handler(event, data) for the poll, scheduled-message and reminder events in PLANNER_EVENTS
+ */
+function onPlannerEvent(handler) {
+    plannerEventHandlers.push(handler);
+}
+
+/**
  * Register handler({ event, retryAfterMs, disconnected }) for rate-limited events
  */
 function onRateLimited(handler) {
@@ -476,5 +501,6 @@ function disconnectWebSocket() {
         starHandlers = [];
         messageDeletedHandlers = [];
         socketErrorHandlers = [];
+        plannerEventHandlers = [];
     }
 }

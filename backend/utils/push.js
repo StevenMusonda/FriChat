@@ -114,6 +114,11 @@ function decodeEntities(text) {
  */
 function buildPreview(message) {
     if (MEDIA_PREVIEWS[message.message_type]) return MEDIA_PREVIEWS[message.message_type];
+    if (message.message_type === 'poll') {
+        const question = String(message.content || '').replace(/\s+/g, ' ').trim();
+        const text = `📊 Poll: ${question}`;
+        return text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH - 1)}…` : text;
+    }
 
     // Raw text (utils/messageText.js); the notification API shows it as plain text
     const text = String(message.content || '').replace(/\s+/g, ' ').trim();
@@ -215,7 +220,8 @@ async function sendToSubscription(subscription, payload) {
             { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
             JSON.stringify(payload),
             // topic lets the push service replace an undelivered notification for the same chat
-            { TTL: PUSH_TTL, urgency: 'high', topic: `chat-${payload.chatId}` }
+            // (or the same reminder: payload.tag)
+            { TTL: PUSH_TTL, urgency: 'high', topic: payload.tag || `chat-${payload.chatId}` }
         );
         return 'sent';
     } catch (error) {
@@ -332,8 +338,53 @@ async function notifyJoinDecision(userId, decision) {
     return result;
 }
 
+/**
+ * Does the user have any visible tab right now? (they'll see the in-app notice instead of a push)
+ */
+async function hasVisibleTab(io, userId) {
+    if (!io || typeof io.in !== 'function') return false;
+    const sockets = await io.in(`user_${userId}`).fetchSockets();
+    return sockets.some(s => s.data.visible !== false);
+}
+
+/**
+ * A personal notification for one user (a reminder, a scheduled message that couldn't be sent),
+ * on every device they enabled push on. Respects do-not-disturb and skips users who have a visible
+ * tab, since those get the in-app notice. Never throws.
+ * @param {{ type, title, body, url, chatId?, messageId?, tag? }} payload - tag groups/replaces notifications
+ */
+async function notifyUser(io, userId, payload) {
+    const result = { sent: 0, removed: 0, failed: 0 };
+    try {
+        if (!isPushConfigured()) return result;
+
+        const settings = await executeQuery(
+            'SELECT dnd_enabled, quiet_hours_enabled, quiet_start, quiet_end, timezone FROM notification_settings WHERE user_id = ?',
+            [userId]
+        );
+        if (settings[0] && isDndActive(fromRow(settings[0]), new Date())) return result;
+        if (await hasVisibleTab(io, userId)) return result;
+
+        const subscriptions = await executeQuery(
+            'SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?',
+            [userId]
+        );
+        const outcomes = await Promise.all(subscriptions.map(subscription => sendToSubscription(subscription, payload)));
+        for (const outcome of outcomes) {
+            if (outcome === 'sent') result.sent++;
+            else if (outcome === 'gone') result.removed++;
+            else result.failed++;
+        }
+    } catch (error) {
+        console.error('Push notify user error:', error);
+    }
+    return result;
+}
+
 module.exports = {
     notifyJoinDecision,
+    notifyUser,
+    decodeEntities,
     isPushConfigured,
     getVapidPublicKey,
     hashEndpoint,

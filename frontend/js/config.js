@@ -80,6 +80,16 @@ const CONFIG = {
         PUSH_CONFIG: '/notifications/push-config',
         PUSH_SUBSCRIPTIONS: '/notifications/subscriptions',
         NOTIFICATION_SETTINGS: '/notifications/settings',
+
+        // Polls, scheduled messages and reminders (phase 8)
+        POLLS: '/polls',
+        POLL: (pollId) => `/polls/${pollId}`,
+        POLL_VOTES: (pollId) => `/polls/${pollId}/votes`,
+        POLL_CLOSE: (pollId) => `/polls/${pollId}/close`,
+        SCHEDULED_MESSAGES: '/scheduled-messages',
+        SCHEDULED_MESSAGE: (id) => `/scheduled-messages/${id}`,
+        REMINDERS: '/reminders',
+        REMINDER: (id) => `/reminders/${id}`,
     },
     
     // Messages fetched per page when opening a chat or scrolling up
@@ -96,6 +106,12 @@ const CONFIG = {
     // Search results and shared media items per request
     SEARCH_PAGE_SIZE: 20,
     MEDIA_PAGE_SIZE: 30,
+
+    // Mirrors backend/config/scheduling.js (the server enforces them)
+    POLL_MIN_OPTIONS: 2,
+    POLL_MAX_OPTIONS: 12,
+    POLL_QUESTION_MAX_LENGTH: 300,
+    POLL_OPTION_MAX_LENGTH: 100,
 
     // Storage Keys
     STORAGE_KEYS: {

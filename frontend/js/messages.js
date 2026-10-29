@@ -644,6 +644,8 @@ function getMessagePreviewText(messageType, text, fileName) {
             return '🎥 Video';
         case 'file':
             return `📎 ${fileName || 'File'}`;
+        case 'poll':
+            return `📊 ${text || 'Poll'}`;
         default:
             return text || '';
     }
@@ -769,6 +771,12 @@ function renderMessageContent(message) {
                 </div>
             `;
         
+        case 'poll':
+            // Card with options, counts and voters (polls.js); every text in it is escaped
+            return typeof renderPollHtml === 'function'
+                ? renderPollHtml(message)
+                : `<div class="message-text">📊 ${escapeHtml(message.content || 'Poll')}</div>`;
+
         default:
             return `<div class="message-text">Unsupported message type</div>`;
     }

@@ -64,7 +64,8 @@ function shapeMessage(row) {
     if (row.reply_to_message_id) {
         const deleted = toBool(row.reply_deleted) || !row.reply_message_type;
         let snippet = null;
-        if (!deleted && row.reply_message_type === 'text' && row.reply_content) {
+        // A poll's content is its question
+        if (!deleted && (row.reply_message_type === 'text' || row.reply_message_type === 'poll') && row.reply_content) {
             const text = String(row.reply_content).replace(/\s+/g, ' ').trim();
             snippet = text.length > REPLY_SNIPPET_LENGTH ? `${text.slice(0, REPLY_SNIPPET_LENGTH - 1)}…` : text;
         }

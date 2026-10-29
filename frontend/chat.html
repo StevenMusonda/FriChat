@@ -77,6 +77,11 @@
                 <button type="button" class="icon-btn starred-btn" id="starredBtn" title="Starred messages" aria-label="Starred messages">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
                 </button>
+                <!-- Scheduled messages and reminders (planner.js); the badge counts due reminders and failed sends -->
+                <button type="button" class="icon-btn starred-btn planner-btn" id="plannerBtn" title="Scheduled messages and reminders" aria-label="Scheduled messages and reminders">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span class="chat-info-badge" id="plannerBadge" aria-hidden="true" hidden></span>
+                </button>
             </div>
 
             <!-- Unverified email (security.js) -->
@@ -157,6 +162,13 @@
                     </div>
                 </div>
 
+                <!-- This chat has scheduled messages (planner.js) -->
+                <div class="scheduled-bar" id="scheduledBar" role="status" hidden>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span id="scheduledBarText"></span>
+                    <button type="button" class="poll-link" id="scheduledBarBtn">View</button>
+                </div>
+
                 <div class="messages-wrapper" id="messagesWrapper">
                     <div class="messages-container" id="messagesContainer">
                         <!-- Messages will be loaded here -->
@@ -228,6 +240,9 @@
                         </svg>
                     </button>
                     <input type="file" id="fileInput" style="display: none;" multiple>
+                    <button class="icon-btn" id="pollBtn" title="Create a poll" aria-label="Create a poll">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                    </button>
                     <textarea
                         id="messageInput"
                         rows="1"
@@ -252,6 +267,9 @@
                         <span>@ to mention</span>
                         <span class="composer-hint-keys">Ctrl+B / Ctrl+I · Shift+Enter new line</span>
                     </div>
+                    <button class="icon-btn" id="scheduleBtn" title="Schedule message" aria-label="Schedule message">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    </button>
                     <button class="btn btn-primary" id="sendBtn">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -652,6 +670,127 @@
         </div>
     </div>
 
+    <!-- Create a poll (polls.js) -->
+    <div class="modal" id="pollModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="pollModalTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="pollModalTitle">Create a poll</h3>
+                <button class="modal-close" id="closePollModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="pollQuestion">Question</label>
+                    <input type="text" id="pollQuestion" placeholder="Ask something..." autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>Options</label>
+                    <div class="poll-option-list" id="pollOptionList"></div>
+                    <button type="button" class="poll-link" id="pollAddOption">+ Add option</button>
+                </div>
+                <label class="planner-check"><input type="checkbox" id="pollMultiple"> Allow multiple answers</label>
+                <label class="planner-check"><input type="checkbox" id="pollAnonymous"> Anonymous voting (nobody sees who voted for what)</label>
+                <div class="form-group planner-closing">
+                    <label for="pollCloses">Closes</label>
+                    <select id="pollCloses">
+                        <option value="">Never (close it yourself)</option>
+                        <option value="1">In 1 hour</option>
+                        <option value="24">In 24 hours</option>
+                        <option value="72">In 3 days</option>
+                        <option value="168">In 1 week</option>
+                        <option value="custom">Pick a time...</option>
+                    </select>
+                    <input type="datetime-local" id="pollClosesAt" aria-label="Closing time" hidden>
+                </div>
+                <p class="settings-status" id="pollStatus" role="status"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelPoll">Cancel</button>
+                <button class="btn btn-primary" id="pollSubmitBtn">Create poll</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Who voted for what in a poll (polls.js); closes with the button, Esc or a click outside -->
+    <div class="modal" id="pollVotesModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="pollVotesTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="pollVotesTitle">Poll votes</h3>
+                <button class="modal-close" id="closePollVotes" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="pollVotesBody" aria-live="polite"></div>
+        </div>
+    </div>
+
+    <!-- Schedule the composer's message (planner.js) -->
+    <div class="modal" id="scheduleModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="scheduleModalTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="scheduleModalTitle">Schedule message</h3>
+                <button class="modal-close" id="closeScheduleModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="planner-preview" id="schedulePreview"></div>
+                <div class="planner-chips" id="schedulePresets"></div>
+                <div class="form-group">
+                    <label for="scheduleAt">Send at</label>
+                    <input type="datetime-local" id="scheduleAt">
+                    <span class="settings-row-hint">Your timezone: <span id="scheduleZone"></span></span>
+                </div>
+                <p class="settings-status" id="scheduleStatus" role="status"></p>
+                <button type="button" class="poll-link" id="scheduleViewAll">View scheduled messages</button>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelSchedule">Cancel</button>
+                <button class="btn btn-primary" id="scheduleSubmitBtn">Schedule</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Remind me about a message (planner.js) -->
+    <div class="modal" id="reminderModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="reminderModalTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="reminderModalTitle">Remind me</h3>
+                <button class="modal-close" id="closeReminderModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="planner-preview" id="reminderPreview"></div>
+                <div class="planner-chips" id="reminderPresets"></div>
+                <div class="form-group">
+                    <label for="reminderAt">Remind me at</label>
+                    <input type="datetime-local" id="reminderAt">
+                    <span class="settings-row-hint">Your timezone: <span id="reminderZone"></span>. Only you get the reminder.</span>
+                </div>
+                <p class="settings-status" id="reminderStatus" role="status"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelReminder">Cancel</button>
+                <button class="btn btn-primary" id="reminderSubmitBtn">Set reminder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scheduled messages and reminders (planner.js) -->
+    <div class="modal" id="plannerModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="plannerModalTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="plannerModalTitle">Scheduled &amp; reminders</h3>
+                <button class="modal-close" id="closePlannerModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="planner-tabs" role="tablist">
+                <button type="button" class="planner-tab" role="tab" data-planner-tab="scheduled">Scheduled messages</button>
+                <button type="button" class="planner-tab" role="tab" data-planner-tab="reminders">Reminders</button>
+            </div>
+            <div class="modal-body">
+                <p class="settings-row-hint">Times are shown in your timezone (<span id="plannerZone"></span>).</p>
+                <div class="planner-list" id="plannerList" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Due reminders (planner.js) -->
+    <div class="reminder-notices" id="reminderNotices" aria-live="assertive"></div>
+
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/auth.js"></script>
@@ -669,6 +808,8 @@
     <script src="js/composer.js"></script>
     <script src="js/media.js"></script>
     <script src="js/search.js"></script>
+    <script src="js/polls.js"></script>
+    <script src="js/planner.js"></script>
     
     <script>
         // Initialize chat application
@@ -798,6 +939,10 @@
             // Group info panel, announcement-only composer and live group events
             initializeGroups();
 
+            // Polls, scheduled messages and reminders
+            initializePolls();
+            initializePlanner();
+
             // Older pages on scroll up, read state and jump button near the bottom
             initializeMessageScroll();
 
@@ -805,9 +950,13 @@
             await loadChats();
 
             // A clicked notification (chat.html?chat=ID) wins over the last opened chat
+            // chat.html?chat=ID&message=ID (a reminder) opens the chat at that message
+            const requestedMessageId = takeRequestedMessageId();
             const requestedChatId = takeRequestedChatId();
             const lastChatId = localStorage.getItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT);
-            if (requestedChatId && allChats.some(chat => chat.id === requestedChatId)) {
+            if (requestedChatId && requestedMessageId && allChats.some(chat => chat.id === requestedChatId)) {
+                jumpToMessage(requestedChatId, requestedMessageId);
+            } else if (requestedChatId && allChats.some(chat => chat.id === requestedChatId)) {
                 openChat(requestedChatId);
             } else if (lastChatId) {
                 openChat(parseInt(lastChatId));

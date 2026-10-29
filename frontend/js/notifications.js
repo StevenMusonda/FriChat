@@ -445,16 +445,34 @@ function updateUnreadIndicators(chats) {
 /* ===== Notification clicks ===== */
 
 /**
- * Open a chat by id, only if it's one of the user's chats
+ * Open a chat by id, only if it's one of the user's chats (at messageId for a reminder)
  */
-async function openChatFromNotification(chatId) {
+async function openChatFromNotification(chatId, messageId = null) {
     if (!chatId) return;
     if (!allChats.some(chat => chat.id === chatId)) {
         await loadChats();
     }
     if (allChats.some(chat => chat.id === chatId)) {
-        openChat(chatId);
+        if (messageId) {
+            jumpToMessage(chatId, messageId);
+        } else {
+            openChat(chatId);
+        }
     }
+}
+
+/**
+ * chat.html?chat=12&message=345 (a reminder notification): take the message id and tidy the URL
+ */
+function takeRequestedMessageId() {
+    const params = new URLSearchParams(window.location.search);
+    const messageId = parseInt(params.get('message'));
+    if (params.has('message')) {
+        params.delete('message');
+        const query = params.toString();
+        history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash);
+    }
+    return messageId > 0 ? messageId : null;
 }
 
 /**
@@ -487,7 +505,7 @@ function initializeNotifications() {
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'open-chat') {
-                openChatFromNotification(parseInt(event.data.chatId));
+                openChatFromNotification(parseInt(event.data.chatId), parseInt(event.data.messageId) || null);
             }
         });
     }

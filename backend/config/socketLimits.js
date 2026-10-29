@@ -26,6 +26,11 @@ module.exports = {
             perSocket: { capacity: 10, refillPerSecond: 2 },
             perUser: { capacity: 20, refillPerSecond: 3 }
         },
+        poll: {
+            events: ['poll_vote'],
+            perSocket: { capacity: 10, refillPerSecond: 2 },
+            perUser: { capacity: 20, refillPerSecond: 3 }
+        },
         join: {
             events: ['join_chat', 'authenticate'],
             perSocket: { capacity: 20, refillPerSecond: 2 },

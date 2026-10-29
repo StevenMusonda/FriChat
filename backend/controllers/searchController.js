@@ -146,7 +146,8 @@ async function searchMessages(req, res) {
             message_type: row.message_type,
             file_name: row.file_name || null,
             created_at: row.created_at,
-            snippet: row.message_type === 'text' ? buildSnippet(row.content, terms) : null
+            // Poll questions are searchable message text too
+            snippet: row.message_type === 'text' || row.message_type === 'poll' ? buildSnippet(row.content, terms) : null
         }));
 
         res.json({

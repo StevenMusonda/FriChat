@@ -18,6 +18,8 @@ const messageRoutes = require('./routes/messages');
 const notificationRoutes = require('./routes/notifications');
 const inviteRoutes = require('./routes/invites');
 const blockRoutes = require('./routes/blocks');
+const pollRoutes = require('./routes/polls');
+const { scheduledRouter, remindersRouter } = require('./routes/schedule');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -34,6 +36,7 @@ const { checkCanPost } = require('./utils/groups');
 const { verifyAccessToken, findSessionUser, touchSession, normalizeIp } = require('./utils/sessions');
 const { getBlockRelations } = require('./utils/blocks');
 const { createSocketRateLimiter, limitSocketEvents } = require('./utils/socketRateLimit');
+const pollRules = require('./utils/polls');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
@@ -88,6 +91,9 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/blocks', blockRoutes);
+app.use('/api/polls', pollRoutes);
+app.use('/api/scheduled-messages', scheduledRouter);
+app.use('/api/reminders', remindersRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -458,6 +464,23 @@ io.on('connection', (socket) => {
     });
 
     /**
+     * Vote in a poll: optionIds is the user's whole selection ([] takes the vote back), so a repeated
+     * event changes nothing. setVotes checks membership, closed polls and the single-choice rule,
+     * and the database's unique keys hold the rule even if events race.
+     */
+    onLimited('poll_vote', async (data) => {
+        try {
+            const result = await pollRules.setVotes(io, socket.userId, data && data.pollId, data && data.optionIds);
+            if (result.error) {
+                socket.emit('error', { event: 'poll_vote', message: result.error.message, pollId: data && data.pollId });
+            }
+        } catch (error) {
+            console.error('Poll vote error:', error);
+            socket.emit('error', { event: 'poll_vote', message: 'Failed to save your vote' });
+        }
+    });
+
+    /**
      * Typing indicator
      */
     onLimited('typing', async (data) => {
@@ -533,8 +556,8 @@ server.listen(PORT, () => {
 ╚═══════════════════════════════════════╝
     `);
     
-    // Start the message pin scheduler
-    startScheduler();
+    // Pins, auth cleanup, scheduled messages, reminders and timed poll closing
+    startScheduler(io);
 });
 
 module.exports = { app, io };

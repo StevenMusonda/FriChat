@@ -113,10 +113,28 @@ async function insertAndGetId(query, params = []) {
     return result.insertId || null;
 }
 
+/**
+ * Run an UPDATE/DELETE and return how many rows it changed on either database
+ * (PostgreSQL reports them through RETURNING id; MySQL through affectedRows).
+ * Used where a conditional UPDATE is a claim, e.g. "pending -> sending" for exactly one worker.
+ * @param {string} query - UPDATE or DELETE statement without a RETURNING clause
+ * @param {Array} params - Query parameters
+ * @returns {Promise<number>} Changed rows
+ */
+async function updateAndCount(query, params = []) {
+    if (dbType === 'postgresql') {
+        const rows = await executeQuery(`${query} RETURNING id`, params);
+        return rows.length;
+    }
+    const result = await executeQuery(query, params);
+    return (result && result.affectedRows) || 0;
+}
+
 module.exports = {
     db,
     executeQuery,
     queryOne,
     insertAndGetId,
+    updateAndCount,
     dbType
 };

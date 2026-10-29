@@ -133,7 +133,7 @@ function updateComposerAccess() {
             ? currentChatDetails.post_blocked_message
             : 'Only admins can send messages in this group. You can still read and react.';
     }
-    ['messageInput', 'sendBtn', 'attachBtn', 'emojiBtn'].forEach((id) => {
+    ['messageInput', 'sendBtn', 'attachBtn', 'emojiBtn', 'pollBtn', 'scheduleBtn'].forEach((id) => {
         const control = document.getElementById(id);
         if (control) control.disabled = locked;
     });

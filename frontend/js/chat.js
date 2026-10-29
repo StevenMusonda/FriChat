@@ -155,6 +155,8 @@ function renderChatList(chats) {
                 lastMessageText = '🎥 Video';
             } else if (messageType === 'file') {
                 lastMessageText = `📎 ${fileName || 'File'}`;
+            } else if (messageType === 'poll') {
+                lastMessageText = `📊 ${content || 'Poll'}`;
             } else {
                 lastMessageText = '📎 Attachment';
             }
@@ -549,6 +551,8 @@ async function openChat(chatId, options = {}) {
     currentChatMembers = [];
     // Composer lock, header avatar and join-request badge belong to the chat being left (groups.js)
     resetGroupState();
+    // "N scheduled messages in this chat" bar (planner.js)
+    if (typeof resetPlannerChatState === 'function') resetPlannerChatState();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();

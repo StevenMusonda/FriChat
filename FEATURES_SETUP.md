@@ -721,6 +721,7 @@ Don't re-run the schema file. Run the migrations you haven't run yet, in this or
 | 11 | `add_group_invites_and_settings.sql` (run once) | `add_group_invites_and_settings_postgresql.sql` |
 | 12 | `add_security_layer.sql` (run once) | `add_security_layer_postgresql.sql` |
 | 13 | `add_message_search.sql` (run once) | `add_message_search_postgresql.sql` (PostgreSQL 12+) |
+| 14 | `add_polls_and_scheduling.sql` (run once) | `add_polls_and_scheduling_postgresql.sql` |
 
 ```bash
 # MySQL, one file at a time
@@ -1198,6 +1199,171 @@ No new Socket.IO events. Search and media are REST-only, and messages that arriv
 - Download in the lightbox fetches the file and saves it. If the uploads server doesn't allow that cross-origin fetch, the file opens in a new tab instead.
 - The old `openImageModal` in `ui.js` is no longer used by messages, but it was left in place.
 - The UI was checked by syntax checks and the sandbox tests, not in a real browser session. Please go through the checklist above.
+
+---
+
+## Phase 8: Polls, scheduled messages and reminders
+
+Decide things together in a chat, send messages later, and get reminded about messages.
+
+### What it does
+
+- **Polls.** The 📊 button in the composer opens **Create a poll**. You can add:
+  - A question and 2–12 options.
+  - **Allow multiple answers**. If it's off, each person picks one option.
+  - **Anonymous voting**. Everyone sees the counts, but nobody sees who voted for what.
+  - An optional closing time: 1 hour, 24 hours, 3 days, 1 week, or a time you pick.
+
+  The poll shows up in the chat as a message. Tap an option to vote. Tap it again to take your vote back. In a single-choice poll, tapping a different option moves your vote. Counts, percentages and the bars update live for everyone (`poll_updated`).
+  - In polls that aren't anonymous, voter names show under each option. **View votes** shows the full list.
+  - The person who created the poll can **Close poll** early. A poll with a closing time closes on its own.
+  - The server enforces the rules: members only, no votes in closed or deleted polls, and one choice in single-choice polls. The database enforces them too, with `UNIQUE (option_id, user_id)` and `UNIQUE (poll_id, user_id, choice_slot)`. `choice_slot` is always 0 in single-choice polls. A vote sets your whole selection, so sending the same socket event again changes nothing.
+  - Percentages are out of the people who voted. In multiple-choice polls they can add up to more than 100%.
+  - Polls can't be forwarded or edited. You can reply to them, star them, delete them, set a reminder on them, and search for their question.
+- **Scheduled send.** Type a message and press the 🕒 button next to Send. Pick a time with **In 1 hour**, **Tonight (20:00)** or **Tomorrow (09:00)**, or choose a date and time. Times are in your browser's timezone, and the dialog shows which one.
+  - The composer, its draft and the reply bar clear, the same as when you send. If you were replying, the reply is kept.
+  - A bar under the chat header shows "N scheduled messages in this chat · View".
+  - The 🕒 button in the sidebar (next to ⭐) opens **Scheduled & reminders**. On the **Scheduled messages** tab you can **Edit** (text and time) or **Cancel**.
+  - At its time, the server sends the message through the normal message path (`utils/messageDelivery.js`). That means @mentions, the chat moving to the top, un-archiving, read state, `new_message`, Web Push to members who aren't watching, and the link preview.
+  - If you left the chat (or were removed), lost posting rights (announcement-only), or a block now applies, the message isn't sent. It's marked **Not sent** with the reason, you get an in-app notice (and a push if you have no visible tab), and it stays in the list until you **Dismiss** or **Reschedule** it.
+- **Remind me.** Each message's ⋯ menu has **Remind me**. Pick **In 1 hour**, **Tonight**, **Tomorrow** or a time you choose. At that time you get:
+  - An in-app notice (top right) with **View message**, which jumps to the message even if it's far back in the chat.
+  - A Web Push if push is on and no FriChat tab is visible. The push respects do-not-disturb, and tapping it opens the chat at that message.
+
+  Reminders are private. Setting a new time on the same message replaces the old reminder. Due reminders stay in **Scheduled & reminders → Reminders**, and the sidebar 🕒 shows a badge, until you dismiss them. If you're no longer in the chat, or the message was deleted for everyone, the reminder is dropped silently.
+
+**Timezones.** The browser sends an ISO instant (UTC). The server refuses times without an offset. It turns the instant into "seconds from now" and stores `CURRENT_TIMESTAMP + n seconds`, so it never interprets a wall-clock time. On the way back it sends a UTC ISO time computed from "seconds until", and each browser shows it in its own timezone. A message scheduled for 09:00 in Berlin shows as 08:00 to a viewer in London.
+
+**Restarts.** Everything lives in the database (`scheduled_messages`, `message_reminders`, `polls.closes_at`). The scheduler (`utils/scheduler.js`, every `SCHEDULER_TICK_SECONDS`) reads the database on each tick. After a restart, the first tick sends anything that came due while the server was down. Each row is claimed with a conditional `UPDATE ... WHERE status = 'pending'`, so overlapping ticks send it once. A row left in `sending` for more than 2 minutes (the server died mid-send) goes back to `pending`.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_polls_and_scheduling.sql
+# PostgreSQL (safe to run more than once; run it with psql -f, not inside a transaction)
+psql -U postgres -d frichat -f database/add_polls_and_scheduling_postgresql.sql
+```
+
+The migration adds:
+- The `poll` value to `messages.message_type`.
+- The tables `polls`, `poll_options`, `poll_votes`, `scheduled_messages` and `message_reminders`, with their indexes.
+
+Fresh installs get the same objects from `schema.sql` / `schema_postgresql.sql`.
+
+**New env variable** (optional, already in `.env.example`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SCHEDULER_TICK_SECONDS` | `15` | How often (5–300 s) scheduled messages, reminders and timed poll closing are checked. Things go out at most this long after their time. |
+
+No new npm packages.
+
+### New endpoints
+
+All of them need a signed-in user and are rate limited per user.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/polls` | **Body:** `chatId`, `question` (≤ 300 characters), `options` (2–12, each ≤ 100 characters, distinct), `multipleChoice?`, `anonymous?`, `closesAt?` (ISO with an offset, in the future, ≤ 365 days away).<br>**Returns** the poll message (`message_type: 'poll'`, `poll: {...}`).<br>**Errors:** `403` if you're not a member or can't post. `400` for invalid input.<br>**Rate limit:** 10/min. |
+| GET | `/api/polls/:pollId` | **Returns** `{ id, messageId, chatId, createdBy, question, multipleChoice, anonymous, closed, closesAt, closedAt, voterCount, options: [{ id, text, votes, percent, voters: [{ userId, name }] }], myVotes }`. `voters` is empty for anonymous polls.<br>**Errors:** `404` for non-members. |
+| PUT | `/api/polls/:pollId/votes` | **Body:** `optionIds`, your whole selection (`[]` takes your vote back).<br>**Errors:** `400` for more than one option in a single-choice poll or an option from another poll. `404` for non-members. `409` if the poll is closed. `410` if it was deleted. |
+| POST | `/api/polls/:pollId/close` | The creator only (`403` for anyone else). Closing an already closed poll just returns it. |
+| GET | `/api/scheduled-messages?chatId=` | Your pending, sending and failed scheduled messages, soonest first: `{ id, chatId, content, replyToMessageId, status, failureReason, sentMessageId, sendAt }`. |
+| POST | `/api/scheduled-messages` | **Body:** `chatId`, `content`, `sendAt` (ISO with an offset), `replyToMessageId?`.<br>The same posting rules as sending are checked now, and again when it's sent.<br>Up to 100 open per user (`409` above that). |
+| PATCH | `/api/scheduled-messages/:scheduledId` | **Body:** `content?`, `sendAt?` (at least one). Pending or failed messages only (`409` once it's sending or sent). Rescheduling a failed message makes it pending again. |
+| DELETE | `/api/scheduled-messages/:scheduledId` | Cancels a pending message, or dismisses a failed one. |
+| GET | `/api/reminders?status=pending\|fired` | **Returns** `{ id, chatId, messageId, status, remindAt, firedAt, available, message: { senderName, messageType, content, fileName } }`. `message` is `null` once you can't see it any more. |
+| POST | `/api/reminders` | **Body:** `messageId`, `remindAt`. The message must be in one of your chats and not deleted. Up to 200 pending per user. |
+| DELETE | `/api/reminders/:reminderId` | Cancels a pending reminder, or dismisses a fired one. |
+
+### New Socket.IO events
+
+| Direction | Event | Payload / notes |
+|---|---|---|
+| client → server | `poll_vote` | `{ pollId, optionIds }`. Same rules as the REST vote (membership, closed, single choice). Rate limited (new `poll` group in `config/socketLimits.js`). Refusals come back as `error` with `event: 'poll_vote'`. |
+| server → chat room | `poll_updated` | The poll state, without `myVotes`. |
+| server → `user_<id>` | `poll_updated` | The same state, plus the voter's own `myVotes` (sent to the voter's tabs). |
+| server → chat room | `new_message` | Also used for new polls (`message.poll`) and scheduled messages when they go out. |
+| server → `user_<id>` | `scheduled_message_updated` | The scheduled message after a create, edit, cancel, send or failure (`status`, `failureReason`). |
+| server → `user_<id>` | `reminder_updated` | A reminder was created, or removed (`status: 'deleted'`). |
+| server → `user_<id>` | `reminder_due` | A reminder came due (the in-app notice). |
+
+The push payloads have `type: 'reminder'` (with `chatId`, `messageId` and a `chat.html?chat=…&message=…` URL) or `type: 'scheduled_failed'`. The service worker passes `messageId` through to the open window. `CACHE_VERSION` is now `frichat-shell-v8`.
+
+### Manual test checklist
+
+Use two accounts (A and B) in a group, plus a direct chat.
+
+1. [ ] Run the migration and restart the server. The log shows "Scheduled messages, reminders and polls checked every 15 s".
+2. [ ] A: 📊 → question "Lunch?", options Pizza / Sushi / Salad, single choice → **Create poll**. The poll appears for A and B at the same time.
+3. [ ] B taps Pizza. Both screens show 100% · 1 and B's name under Pizza. B taps Sushi: the vote moves (Pizza 0, Sushi 1). B taps Sushi again: the vote is taken back.
+4. [ ] Double-click options quickly, and click from two of B's tabs at once. B never ends up with two votes.
+5. [ ] A creates a multiple-choice, anonymous poll that closes in 1 hour. B picks two options. Both see the counts, nobody sees names, and the footer says "Closes today …".
+6. [ ] A presses **Close poll**. Both see "Closed", and the options are disabled. B doesn't see a **Close poll** button on A's polls.
+7. [ ] Create a poll with "Pick a time…" 2 minutes from now. Within 2 minutes plus the tick, it switches to "Closed" by itself.
+8. [ ] Poll text with `<b>hi</b>` or `<img src=x onerror=alert(1)>` shows as plain text.
+9. [ ] A types "scheduled hello" → 🕒 → **In 1 hour** (or a custom time 2 minutes away) → **Schedule**. The composer clears, a toast shows the time, and the bar under the header says "1 scheduled message in this chat".
+10. [ ] Sidebar 🕒 → **Scheduled messages**: edit the text and set the time 1 minute from now → **Save**. At that time the message appears for A and B as a normal message. B gets a push if B's tab is hidden and push is on.
+11. [ ] Schedule another one 2 minutes out, then **stop the server**. Start it again after the time has passed. The message is sent within one tick of startup.
+12. [ ] Schedule a message as B for 2 minutes out, then have A remove B from the group (or B leaves). At that time the message is not sent. B gets an error toast and a push. The panel shows it as **Not sent** with the reason. **Dismiss** removes it.
+13. [ ] Cancel a scheduled message. It is never sent.
+14. [ ] On a message → ⋯ → **Remind me** → a custom time 1 minute away. At that time, a "⏰ Reminder" notice appears for that user only. **View message** jumps to the message, even if the chat has scrolled far past it. With the tab hidden and push on, a push arrives, and tapping it opens the chat at the message.
+15. [ ] Reload after a reminder fired while you were away. The sidebar 🕒 shows a badge, and the reminder is listed on the **Reminders** tab until you dismiss it.
+16. [ ] **Timezones:** set your OS (or the browser's DevTools → Sensors → Location → timezone) to another timezone, reload, and open the panel. Times shift by the zone difference, and the dialog names the new timezone. A message scheduled for 09:00 Berlin shows as 08:00 London.
+17. [ ] Announcement-only group as a non-admin: the 📊 and 🕒 buttons are hidden along with the rest of the composer.
+18. [ ] Dark theme and a 360 px wide phone: the composer fits (📎 📊 text 😀 🕒 ➤), the poll card, the dialogs, the panel and the reminder notice fit without sideways scrolling, and they are readable in sent and received bubbles.
+
+### Tests
+
+`cd backend && npm test`: 581 tests, 56 more than before, all passing.
+- `test/phase8.test.js` (49 tests) runs on both fake drivers against in-memory tables that enforce the real unique keys. It covers:
+  - **Time handling:** the same instant written in different offsets gives the same delay; no-offset, past and over-a-year times are refused; times go out as UTC ISO.
+  - **Poll input:** cleaning and the 2–12 option rule.
+  - **Single choice:** a vote moves, and a burst of 10 conflicting votes leaves one vote.
+  - **Multiple choice:** the selection is set exactly.
+  - **Refusals:** non-members, closed polls (including a closing time that passed before the scheduler ran), deleted polls and foreign options.
+  - **Live updates:** the anonymous broadcast has no names, and the voter gets their own `myVotes`.
+  - **Closing:** creator-only close and scheduled close.
+  - **Poll creation** through the message path.
+  - **`poll_vote` socket events through the real `server.js`:** repeats, a non-member and bad payloads.
+  - **Scheduled messages:**
+    - Sent at their time through the normal path.
+    - Sent once when ticks overlap.
+    - Still sent after a "restart" (fresh modules on the same data).
+    - Stuck `sending` rows are recovered.
+    - Discarded and notified after leaving the chat.
+    - Owner-only edit and cancel, never after sending.
+  - **Reminders:** they fire only to their owner and are cancelled after leaving the chat.
+  - **Validation and routing:** the validation rules, and auth plus a rate limiter on every new router.
+- `test/phase8Frontend.test.js` (7 tests) runs the real `polls.js` / `planner.js` in a sandbox. It covers:
+  - Every text in the poll card is escaped, and bar widths are clamped numbers.
+  - Anonymous and closed cards.
+  - The selection logic.
+  - `datetime-local` parsing in local time.
+  - The presets (tonight until 19:30, tomorrow 09:00, month rollover).
+  - Relative labels.
+- **Live check on PostgreSQL 18**, in throwaway databases that were dropped afterwards:
+  - The HEAD schema plus this migration, run twice, matches a fresh `schema_postgresql.sql` exactly: 533 columns, indexes, constraints and enums.
+  - With Node in UTC+2 and the database session in `America/New_York`:
+    - 30 concurrent single-choice votes left 1 row, and a direct second-vote `INSERT` was refused by the database.
+    - Scheduled times came back as the same instant.
+    - Two overlapping ticks sent a message once.
+    - Leaving the chat discarded the message and notified the author.
+    - A reminder fired, and a timed poll closed.
+    - A message scheduled by one process was sent by a new process (a restart).
+  - The real server ran against that database with real logins: 26 HTTP checks of every endpoint, including the authorization refusals. The server's own scheduler sent an edited scheduled message, skipped a cancelled one and fired a reminder.
+
+### Known limitations
+
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise the statements.
+- **Attachments can't be scheduled** (text only, with an optional reply). The dialog says so when files are in the tray.
+- **Timing:** messages and reminders go out up to `SCHEDULER_TICK_SECONDS` late (15 s by default). While the server is down they wait and go out right after startup, so they can be late by the length of the downtime.
+- **Rare duplicate after a crash:** if the server dies after a scheduled message was stored but before it was marked sent, it is sent again about 2 minutes later.
+- **Single server instance assumed**, like the rate limiters. Several instances would still each claim a row only once, but an instance stopped mid-send can be "recovered" by another.
+- **Reminder pushes** respect do-not-disturb and quiet hours. The in-app notice and the badge still show.
+- **Polls:** they can't be edited after creation. Votes from people who later leave the group still count.
+- **The UI wasn't driven in a real browser session.** It was covered by syntax checks, the sandbox tests and the HTTP checks. Please go through the checklist above, especially 16 to 18.
 
 ---
 

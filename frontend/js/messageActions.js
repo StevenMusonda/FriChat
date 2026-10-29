@@ -19,6 +19,7 @@ const FORWARD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 const REPLY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>';
 const EDIT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
 const STAR_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>';
+const REMIND_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"></circle><polyline points="12 9 12 13 14 15"></polyline><line x1="5" y1="3" x2="2" y2="6"></line><line x1="19" y1="3" x2="22" y2="6"></line></svg>';
 const SELECT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>';
 
 /**
@@ -71,9 +72,15 @@ function showMessageActions(messageId, event) {
                 Edit
             </div>
         ` : ''}
-        <div class="message-action-item" onclick="openForwardModal([${messageId}])">
-            ${FORWARD_ICON_SVG}
-            Forward
+        ${message.message_type !== 'poll' ? `
+            <div class="message-action-item" onclick="openForwardModal([${messageId}])">
+                ${FORWARD_ICON_SVG}
+                Forward
+            </div>
+        ` : ''}
+        <div class="message-action-item" onclick="openReminderModal(${messageId})">
+            ${REMIND_ICON_SVG}
+            Remind me
         </div>
         <div class="message-action-item" onclick="enterSelectionMode(${messageId})">
             ${SELECT_ICON_SVG}

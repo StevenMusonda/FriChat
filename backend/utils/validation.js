@@ -16,6 +16,13 @@ const {
     INVITE_EXPIRY_OPTIONS,
     INVITE_MAX_USES_LIMIT
 } = require('../config/groups');
+const { secondsFromNow } = require('./timeSql');
+const {
+    POLL_QUESTION_MAX_LENGTH,
+    POLL_OPTION_MAX_LENGTH,
+    POLL_MIN_OPTIONS,
+    POLL_MAX_OPTIONS
+} = require('../config/scheduling');
 
 /**
  * Validation rules for user registration
@@ -692,6 +699,157 @@ const validateNotificationSettings = [
 ];
 
 /**
+ * A future time picked by the user: ISO 8601 with an offset, between now and MAX_SCHEDULE_DAYS
+ * (the controller converts it to seconds-from-now; see utils/timeSql.js)
+ */
+function futureTimeRule(field) {
+    return body(field)
+        .custom((value) => {
+            const parsed = secondsFromNow(value);
+            if (!parsed.ok) throw new Error(parsed.error);
+            return true;
+        });
+}
+
+/**
+ * Phase 8: polls
+ */
+const validateCreatePoll = [
+    body('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Valid chat ID is required')
+        .toInt(),
+
+    // Cleaned (control characters, trimming, duplicates) in utils/polls.js
+    body('question')
+        .isString()
+        .withMessage('The question must be text')
+        .isLength({ min: 1, max: POLL_QUESTION_MAX_LENGTH + 50 })
+        .withMessage(`The question must be at most ${POLL_QUESTION_MAX_LENGTH} characters`),
+
+    body('options')
+        .isArray({ min: POLL_MIN_OPTIONS, max: POLL_MAX_OPTIONS })
+        .withMessage(`A poll needs ${POLL_MIN_OPTIONS} to ${POLL_MAX_OPTIONS} options`),
+
+    body('options.*')
+        .isString()
+        .withMessage('Each option must be text')
+        .isLength({ max: POLL_OPTION_MAX_LENGTH + 50 })
+        .withMessage(`Options must be at most ${POLL_OPTION_MAX_LENGTH} characters`),
+
+    body(['multipleChoice', 'anonymous'])
+        .optional()
+        .isBoolean({ strict: true })
+        .withMessage('Must be true or false'),
+
+    futureTimeRule('closesAt').optional({ values: 'null' })
+];
+
+const validatePollIdParam = [
+    param('pollId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid poll ID')
+        .toInt()
+];
+
+const validatePollVote = [
+    ...validatePollIdParam,
+
+    // The whole selection; [] takes the vote back
+    body('optionIds')
+        .isArray({ max: POLL_MAX_OPTIONS })
+        .withMessage('optionIds must be a list'),
+
+    body('optionIds.*')
+        .isInt({ min: 1 })
+        .withMessage('Invalid option')
+        .toInt()
+];
+
+/**
+ * Phase 8: scheduled messages
+ */
+const validateScheduledIdParam = [
+    param('scheduledId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid scheduled message ID')
+        .toInt()
+];
+
+const validateScheduledQuery = [
+    query('chatId')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt()
+];
+
+const validateScheduleMessage = [
+    body('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Valid chat ID is required')
+        .toInt(),
+
+    // Cleaned with the one message text rule (utils/messageText.js)
+    body('content')
+        .isString()
+        .withMessage('Message content must be text')
+        .isLength({ max: MAX_MESSAGE_LENGTH + 100 })
+        .withMessage('Message content too long'),
+
+    futureTimeRule('sendAt'),
+
+    body('replyToMessageId')
+        .optional({ values: 'null' })
+        .isInt({ min: 1 })
+        .withMessage('Invalid reply target')
+        .toInt()
+];
+
+const validateUpdateScheduled = [
+    ...validateScheduledIdParam,
+
+    body('content')
+        .optional()
+        .isString()
+        .withMessage('Message content must be text')
+        .isLength({ max: MAX_MESSAGE_LENGTH + 100 })
+        .withMessage('Message content too long'),
+
+    futureTimeRule('sendAt').optional(),
+
+    body()
+        .custom((value) => value && (value.content !== undefined || value.sendAt !== undefined))
+        .withMessage('Send new content, a new sendAt, or both')
+];
+
+/**
+ * Phase 8: reminders
+ */
+const validateCreateReminder = [
+    body('messageId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid message ID')
+        .toInt(),
+
+    futureTimeRule('remindAt')
+];
+
+const validateReminderIdParam = [
+    param('reminderId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid reminder ID')
+        .toInt()
+];
+
+const validateRemindersQuery = [
+    query('status')
+        .optional()
+        .isIn(['pending', 'fired'])
+        .withMessage('status must be pending or fired')
+];
+
+/**
  * Middleware to check validation results
  */
 const checkValidation = (req, res, next) => {
@@ -768,6 +926,16 @@ module.exports = {
     validatePushSubscription,
     validatePushUnsubscribe,
     validateNotificationSettings,
+    validateCreatePoll,
+    validatePollIdParam,
+    validatePollVote,
+    validateScheduledIdParam,
+    validateScheduledQuery,
+    validateScheduleMessage,
+    validateUpdateScheduled,
+    validateCreateReminder,
+    validateReminderIdParam,
+    validateRemindersQuery,
     checkValidation,
     sanitizeHtml,
     validateFileType

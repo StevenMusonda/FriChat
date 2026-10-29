@@ -5,7 +5,7 @@
  * API responses are never cached.
  */
 
-const CACHE_VERSION = 'frichat-shell-v7';
+const CACHE_VERSION = 'frichat-shell-v9';
 
 const APP_SHELL = [
     'chat.html',
@@ -33,6 +33,8 @@ const APP_SHELL = [
     'js/composer.js',
     'js/media.js',
     'js/search.js',
+    'js/polls.js',
+    'js/planner.js',
     'js/security.js',
     'js/join.js',
     'vendor/qrcode-generator/qrcode.js',
@@ -146,11 +148,11 @@ self.addEventListener('push', (event) => {
         body: data.body || 'New message',
         icon: scoped('icons/icon-192.png'),
         badge: scoped('icons/badge-96.png'),
-        // One notification per chat; a newer message replaces it and alerts again
-        tag: chatId ? `chat-${chatId}` : 'frichat',
+        // One notification per chat (a newer message replaces it and alerts again); reminders have their own tag
+        tag: data.tag || (chatId ? `chat-${chatId}` : 'frichat'),
         renotify: true,
         timestamp: Date.now(),
-        data: { chatId: chatId, url: data.url || 'chat.html' }
+        data: { chatId: chatId, messageId: data.messageId || null, url: data.url || 'chat.html' }
     });
 
     event.waitUntil(Promise.all([notification, setBadge(data.badge)]));
@@ -174,14 +176,14 @@ async function setBadge(count) {
  */
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const { chatId, url } = event.notification.data || {};
+    const { chatId, messageId, url } = event.notification.data || {};
 
     event.waitUntil((async () => {
         const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
         const chatWindow = windows.find(client => new URL(client.url).pathname.endsWith('/chat.html'));
 
         if (chatWindow) {
-            chatWindow.postMessage({ type: 'open-chat', chatId: chatId });
+            chatWindow.postMessage({ type: 'open-chat', chatId: chatId, messageId: messageId || null });
             return chatWindow.focus();
         }
         return self.clients.openWindow(scoped(url || 'chat.html'));

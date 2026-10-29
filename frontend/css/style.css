@@ -5020,3 +5020,574 @@ body.lightbox-open {
         right: 6px;
     }
 }
+
+/* ===== Phase 8: polls, scheduled messages, reminders ===== */
+
+/* Poll card inside a message bubble (inherits the bubble text colour, so sent/received and both themes work) */
+.poll {
+    min-width: 220px;
+    max-width: 360px;
+    width: 100%;
+}
+
+.poll.pending {
+    opacity: 0.7;
+}
+
+.poll-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    opacity: 0.8;
+    margin-bottom: 2px;
+}
+
+.poll-question {
+    font-weight: 600;
+    margin-bottom: 8px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.poll-options {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.poll-option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid rgba(102, 126, 234, 0.35);
+    border-radius: 8px;
+    background: rgba(102, 126, 234, 0.06);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.poll-option:disabled {
+    cursor: default;
+}
+
+.poll-option:not(:disabled):hover,
+.poll-option:focus-visible {
+    border-color: var(--primary-color);
+}
+
+.poll-option-bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(102, 126, 234, 0.2);
+    transition: width 0.3s ease;
+    pointer-events: none;
+}
+
+.poll-option > :not(.poll-option-bar) {
+    position: relative;
+}
+
+.poll-option-check {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    opacity: 0.7;
+}
+
+.poll-option-check.multi {
+    border-radius: 4px;
+}
+
+.poll-option.chosen .poll-option-check {
+    background: currentColor;
+    box-shadow: inset 0 0 0 2px var(--message-received-bg, #fff);
+    opacity: 1;
+}
+
+.poll-option-text {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.poll-option-count {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    opacity: 0.85;
+}
+
+.poll-option-voters {
+    margin: 2px 0 0 34px;
+    font-size: 0.75rem;
+    opacity: 0.8;
+    overflow-wrap: anywhere;
+}
+
+.message.sent .poll-option {
+    border-color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.message.sent .poll-option-bar {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.message.sent .poll-option.chosen .poll-option-check {
+    box-shadow: inset 0 0 0 2px var(--message-sent-bg, #667eea);
+}
+
+.poll-meta {
+    margin-top: 8px;
+    font-size: 0.78rem;
+    opacity: 0.8;
+}
+
+.poll-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.poll-actions:empty {
+    display: none;
+}
+
+.poll-link {
+    background: none;
+    border: none;
+    padding: 4px 0;
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.modal .poll-link,
+.scheduled-bar .poll-link {
+    color: var(--primary-color);
+}
+
+.poll-link[hidden] {
+    display: none;
+}
+
+/* Dialogs */
+.planner-modal .form-group input[type="datetime-local"],
+.planner-modal select,
+.planner-edit-time,
+.planner-edit-text {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font: inherit;
+    color-scheme: light;
+}
+
+body.dark-theme .planner-modal input[type="datetime-local"],
+body.dark-theme .planner-modal select,
+body.dark-theme .planner-edit-time {
+    color-scheme: dark;
+}
+
+.planner-modal .form-group input[type="datetime-local"][hidden] {
+    display: none;
+}
+
+.planner-closing select + input {
+    margin-top: 8px;
+}
+
+.poll-option-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.poll-option-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.poll-option-input input {
+    flex: 1;
+    min-width: 0;
+}
+
+.poll-option-input button[hidden] {
+    display: none;
+}
+
+.planner-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.planner-check input {
+    margin-top: 3px;
+}
+
+.planner-preview {
+    max-height: 120px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--primary-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.9rem;
+}
+
+.planner-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.planner-chip {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.planner-chip:hover,
+.planner-chip.active {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.planner-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.planner-tab {
+    flex: 1;
+    padding: 12px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.planner-tab.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.planner-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.planner-empty {
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 20px 0;
+}
+
+.planner-item {
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.planner-item.failed {
+    border-left: 4px solid var(--danger-color);
+}
+
+.planner-item.due {
+    border-left: 4px solid var(--warning-color);
+}
+
+.planner-item-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+
+.planner-item-chat {
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.planner-item-time {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+}
+
+.planner-item-text {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 6.5em;
+    overflow: hidden;
+    font-size: 0.9rem;
+}
+
+.planner-item-reason {
+    color: var(--danger-color);
+    font-size: 0.85rem;
+}
+
+.planner-item-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.planner-edit-text {
+    resize: vertical;
+}
+
+.planner-btn {
+    position: relative;
+}
+
+/* "N scheduled messages in this chat" under the chat header */
+.scheduled-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.scheduled-bar[hidden] {
+    display: none;
+}
+
+.scheduled-bar span {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Due reminders, top right (full width on phones) */
+.reminder-notices {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10001;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(360px, calc(100vw - 32px));
+    pointer-events: none;
+}
+
+.reminder-notice {
+    pointer-events: auto;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border-left: 4px solid var(--warning-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    animation: slideInRight 0.3s ease;
+}
+
+.reminder-notice-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+.reminder-notice-text {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+.message-input-container.composer-locked #pollBtn,
+.message-input-container.composer-locked #scheduleBtn {
+    display: none;
+}
+
+@media (max-width: 480px) {
+    /* Room for the textarea next to the poll and schedule buttons */
+    .message-input-container #pollBtn,
+    .message-input-container #scheduleBtn,
+    .message-input-container #attachBtn,
+    .message-input-container #emojiBtn {
+        padding: 4px;
+        min-width: 32px;
+    }
+
+    .message-input-container #pollBtn svg,
+    .message-input-container #scheduleBtn svg,
+    .message-input-container #attachBtn svg,
+    .message-input-container #emojiBtn svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .poll {
+        min-width: 0;
+    }
+
+    .planner-modal .modal-body {
+        padding: 16px;
+    }
+
+    .planner-item-actions .btn {
+        flex: 1;
+    }
+}
+
+/* Poll "View votes" dialog (polls.js) */
+.poll-votes-question {
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.poll-votes-summary,
+.poll-votes-status {
+    margin-top: 4px;
+    font-size: 0.85rem;
+    color: var(--text-tertiary);
+}
+
+.poll-votes-note {
+    margin-top: 10px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.poll-votes-option {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.poll-votes-option-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.poll-votes-option-text {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.poll-votes-option-count {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.poll-votes-bar {
+    height: 6px;
+    margin: 6px 0 8px;
+    border-radius: 3px;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+}
+
+.poll-votes-bar-fill {
+    display: block;
+    height: 100%;
+    background: var(--primary-color);
+}
+
+.poll-votes-voters {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.poll-votes-voter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.poll-votes-avatar {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.poll-votes-name {
+    min-width: 0;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.poll-votes-empty {
+    font-size: 0.85rem;
+    color: var(--text-tertiary);
+}

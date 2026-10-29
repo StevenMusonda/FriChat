@@ -15,6 +15,7 @@ const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploade
 const { checkCanPost, postingError } = require('../utils/groups');
 const { checkDirectChatBlock } = require('../utils/blocks');
 const { getUploadLimits: getUploadLimitSettings } = require('../middleware/upload');
+const { attachPolls } = require('../utils/polls');
 const {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
@@ -129,6 +130,9 @@ async function getMessages(req, res) {
 
         // Who each message mentions (one query, only for pages with '@' in them)
         await attachMentions(messages);
+
+        // Options, counts and this user's votes for poll messages
+        await attachPolls(messages, userId);
 
         // Reactions for the whole page in one query
         if (messages.length > 0) {
@@ -1024,6 +1028,14 @@ async function forwardMessages(req, res) {
             return res.status(400).json({
                 success: false,
                 message: 'Deleted messages cannot be forwarded'
+            });
+        }
+
+        // A poll belongs to its chat (votes, closing); a copy would be a poll nobody can vote in
+        if (sources.some(m => m.message_type === 'poll')) {
+            return res.status(400).json({
+                success: false,
+                message: 'Polls cannot be forwarded'
             });
         }
 
