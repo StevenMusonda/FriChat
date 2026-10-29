@@ -10,6 +10,7 @@ const { sanitizeHtml } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/mailer');
 const sessions = require('../utils/sessions');
 const verification = require('../utils/emailVerification');
+const { safeAvatarUrl } = require('../utils/privacy');
 
 const RESET_TOKEN_TTL_MINUTES = 60;
 
@@ -30,7 +31,7 @@ function shapeUser(user) {
         username: user.username,
         email: user.email,
         fullName: user.full_name || null,
-        avatarUrl: user.avatar_url || null,
+        avatarUrl: safeAvatarUrl(user.avatar_url),
         emailVerified: verification.isEmailVerified(user)
     };
 }
@@ -272,7 +273,7 @@ async function getProfile(req, res) {
                 username: user.username,
                 email: user.email,
                 fullName: user.full_name,
-                avatarUrl: user.avatar_url,
+                avatarUrl: safeAvatarUrl(user.avatar_url),
                 status: user.status,
                 emailVerified: verification.isEmailVerified(user)
             }
@@ -288,17 +289,20 @@ async function getProfile(req, res) {
 }
 
 /**
- * Update user profile
+ * Update the display name (older clients; PUT /api/users/me/profile also takes a bio).
+ * Photos can only be uploaded (POST /api/users/me/avatar), never set to a URL.
  */
 async function updateProfile(req, res) {
     try {
         const userId = req.user.id;
-        const { fullName, avatarUrl } = req.body;
+        const { fullName } = req.body;
 
-        await executeQuery(
-            'UPDATE users SET full_name = ?, avatar_url = ? WHERE id = ?',
-            [sanitizeHtml(fullName) || null, avatarUrl || null, userId]
-        );
+        if (fullName !== undefined) {
+            await executeQuery(
+                'UPDATE users SET full_name = ? WHERE id = ?',
+                [sanitizeHtml(fullName) || null, userId]
+            );
+        }
 
         res.json({
             success: true,

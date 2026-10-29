@@ -57,7 +57,7 @@ function groupAvatarSrc(avatarUrl) {
 
 function avatarNode(name, avatarUrl, className) {
     const wrap = h('div', { className });
-    const src = groupAvatarSrc(avatarUrl);
+    const src = groupAvatarSrc(avatarUrl) || (typeof userAvatarSrc === 'function' ? userAvatarSrc(avatarUrl) : null);
     if (src) {
         wrap.appendChild(h('img', { attrs: { src, alt: '' } }));
     } else {
@@ -102,7 +102,12 @@ function updateChatHeaderAvatar() {
     const existing = avatar.querySelector('img');
     if (existing) existing.remove();
 
-    const src = isCurrentGroup() ? groupAvatarSrc(currentChatDetails.avatar_url) : null;
+    let src = isCurrentGroup() ? groupAvatarSrc(currentChatDetails.avatar_url) : null;
+    // Direct chats: the other person's photo, if they share it (profile.js)
+    if (!src && typeof currentDirectPartner === 'function' && typeof userAvatarSrc === 'function') {
+        const partner = currentDirectPartner();
+        src = partner ? userAvatarSrc(partner.avatar_url) : null;
+    }
     initial.hidden = !!src;
     if (src) avatar.appendChild(h('img', { attrs: { src, alt: '' } }));
 }
@@ -587,7 +592,7 @@ async function copyText(text, input) {
 function renderRequestsSection(chat, requests) {
     const list = requests.length
         ? h('ul', { className: 'join-request-list' }, ...requests.map(request => h('li', { className: 'join-request-item' },
-            avatarNode(displayNameOf(request), null, 'member-avatar'),
+            avatarNode(displayNameOf(request), request.avatarUrl, 'member-avatar'),
             h('div', { className: 'member-info' },
                 h('div', { className: 'member-name', text: displayNameOf(request) }),
                 h('div', { className: 'member-username', text: `@${request.username} · ${formatTime(request.createdAt)}` })
@@ -630,13 +635,18 @@ function renderMembersSection(chat, isAdmin) {
             tagChip ? ' ' : null,
             tagChip
         );
-        const info = h('div', { className: 'member-info' },
+        // Custom status and presence, only when the member shares them (privacy settings)
+        const statusText = typeof directChatStatusText === 'function' ? directChatStatusText(member) : '';
+        const info = h('div', { className: 'member-info profile-link', attrs: { 'data-profile-user-id': member.id, role: 'button', tabindex: 0, title: `View ${displayNameOf(member)}'s profile` } },
             nameRow,
-            h('div', { className: 'member-username', text: `@${member.username}` })
+            h('div', { className: 'member-username', text: `@${member.username}` }),
+            statusText ? h('div', { className: 'member-custom-status', text: statusText }) : null
         );
 
+        const memberAvatar = avatarNode(displayNameOf(member), member.avatar_url, 'member-avatar');
+        memberAvatar.setAttribute('data-profile-user-id', member.id);
         const item = h('li', { className: 'member-item' },
-            avatarNode(displayNameOf(member), null, 'member-avatar'),
+            memberAvatar,
             info,
             member.role === 'admin' ? h('span', { className: 'member-role', text: 'Admin' }) : null,
             isAdmin
@@ -728,7 +738,7 @@ async function removeGroupMember(chatId, member, ban, button) {
 
 function renderBansSection(chat, bans) {
     const list = h('ul', { className: 'members-list banned-list' }, ...bans.map(ban => h('li', { className: 'member-item' },
-        avatarNode(displayNameOf(ban), null, 'member-avatar'),
+        avatarNode(displayNameOf(ban), ban.avatarUrl, 'member-avatar'),
         h('div', { className: 'member-info' },
             h('div', { className: 'member-name', text: displayNameOf(ban) }),
             h('div', { className: 'member-username', text: `@${ban.username}${ban.bannedBy ? ` · banned by @${ban.bannedBy}` : ''}` })

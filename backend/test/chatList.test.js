@@ -1,6 +1,7 @@
 /**
  * GET /api/chats: participants and last messages are fetched with one query each,
  * no matter how many chats the user has, and the response keeps its shape.
+ * Phase 9 adds a fixed number of privacy lookups (profiles, read-receipt setting, message requests).
  */
 
 const { test } = require('node:test');
@@ -33,6 +34,8 @@ function chatListHandler(chatRows) {
         if (/FROM group_members gm JOIN users u/.test(sql)) return PARTICIPANT_ROWS.map(r => ({ ...r }));
         if (/FROM chats c JOIN messages m ON m.id = \(/.test(sql)) return LAST_MESSAGE_ROWS.map(r => ({ ...r }));
         // Phase 6 block checks: nobody is blocked in these tests
+        // Phase 9 tables: no rows = default privacy settings, no message requests
+        if (/privacy_settings|message_requests/.test(sql)) return [];
         if (/user_blocks/.test(sql)) return [];
         throw new Error(`Unexpected query: ${sql}`);
     };
@@ -53,18 +56,27 @@ async function getChats(dbType, chatRows = CHAT_ROWS) {
 }
 
 for (const dbType of ['mysql', 'postgresql']) {
-    test(`chat list uses four queries in total (${dbType})`, async () => {
+    test(`chat list uses seven queries in total (${dbType})`, async () => {
         const { res, calls } = await getChats(dbType);
 
         assert.equal(res.statusCode, 200);
-        assert.equal(calls.length, 4);
+        assert.equal(calls.length, 7);
 
         // Both batched queries bind every chat id once, in list order
         assert.deepEqual(calls[1].params, [3, 2, 9]);
-        assert.deepEqual(calls[3].params, [3, 2, 9]);
+        assert.deepEqual(calls[4].params, [3, 2, 9]);
 
-        // One lookup of who blocked this user (their status is shown as offline)
-        assert.match(calls[2].sql, /^SELECT blocker_id FROM user_blocks WHERE blocked_id = (\?|\$1)$/);
+        // Privacy of every participant in one query (ids deduplicated)
+        assert.match(calls[2].sql, /FROM users u LEFT JOIN privacy_settings ps ON ps.user_id = u.id WHERE u.id IN/);
+        assert.deepEqual(calls[2].params, [1, 4]);
+
+        // One lookup of who blocked this user (they see nothing of the blocker)
+        assert.match(calls[3].sql, /^SELECT blocker_id FROM user_blocks WHERE blocked_id = (\?|\$1)$/);
+
+        // This user's read-receipt switch, then pending message requests for all chats at once
+        assert.match(calls[5].sql, /FROM privacy_settings WHERE user_id = /);
+        assert.match(calls[6].sql, /FROM message_requests WHERE status = /);
+        assert.deepEqual(calls[6].params, ['pending', 3, 2, 9]);
     });
 
     test(`chat list keeps its response shape (${dbType})`, async () => {
@@ -80,9 +92,10 @@ for (const dbType of ['mysql', 'postgresql']) {
 
         // Participants: JSON string, grouping key stripped, original column order
         assert.equal(team.participants, JSON.stringify([
-            { userId: 4, username: 'bob', fullName: 'Bob', avatarUrl: null, status: 'offline', role: 'admin' },
-            { userId: 1, username: 'me', fullName: 'Me', avatarUrl: null, status: 'online', role: 'member' }
+            { userId: 4, username: 'bob', fullName: 'Bob', avatarUrl: null, status: 'offline', role: 'admin', customStatus: null },
+            { userId: 1, username: 'me', fullName: 'Me', avatarUrl: null, status: 'online', role: 'member', customStatus: null }
         ]));
+        assert.equal(team.message_request, null);
         assert.equal(empty.participants, '[]');
 
         // Last message: JSON string without chat_id, or null when the chat has none

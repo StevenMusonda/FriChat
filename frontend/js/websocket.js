@@ -25,8 +25,9 @@ let plannerEventHandlers = [];
 
 // Group profile/settings, members, leaving and join requests (handled in groups.js)
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
-// Email verified, block list changed in another tab (handled in security.js)
-const ACCOUNT_EVENTS = ['email_verified', 'block_updated'];
+// Email verified, block list changed in another tab (security.js); profiles, privacy and
+// message requests (profile.js)
+const ACCOUNT_EVENTS = ['email_verified', 'block_updated', 'user_profile_updated', 'privacy_settings_updated', 'message_request_updated'];
 // Polls, scheduled messages and reminders (polls.js, planner.js)
 const PLANNER_EVENTS = ['poll_updated', 'scheduled_message_updated', 'reminder_due', 'reminder_updated'];
 

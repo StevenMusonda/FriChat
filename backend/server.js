@@ -19,12 +19,13 @@ const notificationRoutes = require('./routes/notifications');
 const inviteRoutes = require('./routes/invites');
 const blockRoutes = require('./routes/blocks');
 const pollRoutes = require('./routes/polls');
+const userRoutes = require('./routes/users');
 const { scheduledRouter, remindersRouter } = require('./routes/schedule');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
 const { startScheduler } = require('./utils/scheduler');
-const { markChatRead, recordNewMessage } = require('./utils/chatState');
+const { markChatRead, recordNewMessage, updateMessageStatus } = require('./utils/chatState');
 const { notifyNewMessage } = require('./utils/push');
 const { getMessageById, checkReplyTarget } = require('./utils/messageQueries');
 const { cleanMessageText } = require('./utils/messageText');
@@ -37,6 +38,8 @@ const { verifyAccessToken, findSessionUser, touchSession, normalizeIp } = requir
 const { getBlockRelations } = require('./utils/blocks');
 const { createSocketRateLimiter, limitSocketEvents } = require('./utils/socketRateLimit');
 const pollRules = require('./utils/polls');
+const { emitPresence, typingIndicatorsEnabled } = require('./utils/privacy');
+const { isAwaitingAcceptance } = require('./utils/messageRequests');
 
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
 
@@ -92,6 +95,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/blocks', blockRoutes);
 app.use('/api/polls', pollRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/scheduled-messages', scheduledRouter);
 app.use('/api/reminders', remindersRouter);
 
@@ -165,12 +169,11 @@ async function hiddenFromRooms(userId, { includeBlockers = false } = {}) {
 }
 
 /**
- * Broadcast this socket's user status to everyone except people they blocked
+ * Send this socket's user status to the people their "Last seen and online" setting allows
+ * (everyone / contacts / nobody), never to people they blocked
  */
 async function broadcastStatus(socket, status) {
-    const hidden = await hiddenFromRooms(socket.userId);
-    const target = hidden.length > 0 ? socket.broadcast.except(hidden) : socket.broadcast;
-    target.emit('user_status', { userId: socket.userId, status });
+    await emitPresence(io, socket.userId, status, socket);
 }
 
 /**
@@ -397,33 +400,14 @@ io.on('connection', (socket) => {
     });
 
     /**
-     * Update message status (delivered/read)
+     * Update message status (delivered/read). Members only, other people's messages only, forwards
+     * only; 'read' is stored and sent only when this user shares read receipts in the chat.
      */
-    socket.on('message_status', async (data) => {
+    onLimited('message_status', async (data) => {
         try {
-            const { messageId, status } = data;
-            const userId = socket.userId;
-
-            // Get chat ID and verify the user can see this message
-            const message = await queryOne(
-                'SELECT chat_id, sender_id FROM messages WHERE id = ?',
-                [messageId]
-            );
-
-            if (!message || !(await isChatMember(message.chat_id, userId))) {
-                return;
-            }
-
-            await executeQuery(
-                'UPDATE messages SET status = ? WHERE id = ?',
-                [status, messageId]
-            );
-
-            io.to(`chat_${message.chat_id}`).emit('message_status_update', {
-                messageId: messageId,
-                status: status,
-                userId: userId
-            });
+            const messageId = parseInt(data && data.messageId);
+            if (!messageId) return;
+            await updateMessageStatus(io, messageId, socket.userId, data.status);
         } catch (error) {
             console.error('Message status error:', error);
         }
@@ -489,6 +473,11 @@ io.on('connection', (socket) => {
 
             // Only members (who were joined to the room) can broadcast typing
             if (!socket.rooms.has(`chat_${chatId}`)) {
+                return;
+            }
+
+            // Typing indicators switched off, or a message request not accepted yet: nothing goes out
+            if (!(await typingIndicatorsEnabled(socket.userId)) || (await isAwaitingAcceptance(chatId, socket.userId))) {
                 return;
             }
 

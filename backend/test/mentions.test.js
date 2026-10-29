@@ -122,6 +122,8 @@ function createWorld(dbType) {
 
         // Phase 6 block checks: nobody is blocked in these tests
 
+        // Phase 9 tables: no rows = default privacy settings, no message requests
+        if (/privacy_settings|message_requests/.test(sql)) return [];
         if (/user_blocks/.test(sql)) return [];
 
         throw new Error(`Unexpected query: ${sql}`);
@@ -317,6 +319,8 @@ for (const dbType of ['mysql', 'postgresql']) {
             const { load } = setupFakeDb(dbType, (sql) => {
                 if (/FROM group_members gm LEFT JOIN notification_settings ns/.test(sql)) return ROWS.map(r => ({ ...r }));
                 // Phase 6 block checks: nobody is blocked in these tests
+                // Phase 9 tables: no rows = default privacy settings, no message requests
+                if (/privacy_settings|message_requests/.test(sql)) return [];
                 if (/user_blocks/.test(sql)) return [];
                 throw new Error(`Unexpected query: ${sql}`);
             });
@@ -333,6 +337,8 @@ for (const dbType of ['mysql', 'postgresql']) {
                 if (/^SELECT gm.user_id, COUNT\(m.id\) AS unread/.test(sql)) return [];
                 if (/^SELECT chat_type, chat_name FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team' }];
                 // Phase 6 block checks: nobody is blocked in these tests
+                // Phase 9 tables: no rows = default privacy settings, no message requests
+                if (/privacy_settings|message_requests/.test(sql)) return [];
                 if (/user_blocks/.test(sql)) return [];
                 throw new Error(`Unexpected query: ${sql}`);
             });

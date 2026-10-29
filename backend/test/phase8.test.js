@@ -109,6 +109,8 @@ function createWorld(dbType) {
             const [chatId, userId] = params;
             return isMember(chatId, userId) ? [{ id: 1, role: 'member', chat_type: 'group', announcement_only: pg ? false : 0 }] : [];
         }
+        // Phase 9 tables: no rows = default privacy settings, no message requests
+        if (/privacy_settings|message_requests/.test(base)) return [];
         if (/user_blocks/.test(base)) return [];
 
         // --- polls

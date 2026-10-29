@@ -234,6 +234,8 @@ for (const dbType of ['mysql', 'postgresql']) {
                     return Number(params[0]) === MY_CHAT ? [{ id: 1, last_read_message_id: 100 }] : [];
                 }
                 if (/FROM message_reactions/.test(sql)) return [];
+                // Phase 9: default privacy settings (read receipts on)
+                if (/privacy_settings/.test(sql)) return [];
                 const match = sql.match(/WHERE m\.chat_id = \? (?:AND m\.id (<=|<|>) \? )?AND .* ORDER BY m\.id (ASC|DESC) LIMIT (\d+)$/);
                 if (!match) throw new Error(`unexpected query: ${sql}`);
                 const [, op, order, limit] = match;

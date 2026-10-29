@@ -65,6 +65,9 @@ function createWorld(dbType) {
     world.handler = (rawSql, params) => {
         const sql = rawSql.replace(/\$\d+/g, '?');
 
+        // Phase 9 tables: no rows = default privacy settings, no message requests
+        if (/privacy_settings|message_requests/.test(sql)) return [];
+
         // --- memberships ---
         if (/^SELECT gm.id, gm.role, c.chat_type, c.announcement_only FROM group_members gm JOIN chats c ON c.id = gm.chat_id WHERE gm.chat_id = \? AND gm.user_id = \?$/.test(sql)) {
             const m = member(params[0], params[1]);
@@ -1221,14 +1224,14 @@ for (const dbType of ['mysql', 'postgresql']) {
             assert.equal(reverse.res.statusCode, 200);
         });
 
-        test('the blocker shows as offline and the direct chat composer is locked for the blocked user', async () => {
+        test('the blocker\'s status is hidden and the direct chat composer is locked for the blocked user', async () => {
             const fake = blockedWorld();
             const { getChatById } = fake.load('controllers/chatController.js');
 
             const direct = await call(getChatById, { params: { chatId: DIRECT } });
             assert.equal(direct.res.body.data.can_post, false);
             assert.equal(direct.res.body.data.post_blocked_message, 'You can\'t send messages to this user.');
-            assert.equal(direct.res.body.data.participants.find(p => p.id === BOB).status, 'offline');
+            assert.equal(direct.res.body.data.participants.find(p => p.id === BOB).status, null);
 
             // Bob's view of Alice isn't masked
             const asBob = await call(getChatById, { params: { chatId: GROUP }, user: { id: BOB } });
@@ -1296,7 +1299,7 @@ for (const dbType of ['mysql', 'postgresql']) {
             assert.equal(blocked.res.statusCode, 201);
             assert.deepEqual(fake.world.blocks, [{ blocker_id: ADMIN, blocked_id: BOB }]);
             // Bob's open tabs stop showing Alice as online right away
-            assert.ok(blocked.io.emitted.some(e => e.room === `user_${BOB}` && e.event === 'user_status' && e.data.status === 'offline' && e.data.userId === ADMIN));
+            assert.ok(blocked.io.emitted.some(e => e.room === `user_${BOB}` && e.event === 'user_status' && e.data.status === null && e.data.userId === ADMIN));
             assert.equal((await call(blocks.blockUser, { body: { userId: BOB } })).res.statusCode, 200, 'blocking twice is harmless');
 
             const unblocked = await call(blocks.unblockUser, { params: { userId: BOB } });

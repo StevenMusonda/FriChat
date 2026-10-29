@@ -101,6 +101,9 @@ function renderChatList(chats) {
         // For direct chats, show the other user's name
         let displayName = chat.chat_name;
         let displayInitial = chat.chat_name ? chat.chat_name.charAt(0).toUpperCase() : 'C';
+        // Photo and custom status as the server lets this user see them (privacy settings)
+        let avatarSrc = chat.chat_type === 'group' && typeof groupAvatarSrc === 'function' ? groupAvatarSrc(chat.avatar_url) : null;
+        let statusLabel = '';
         
         if (chat.chat_type === 'direct') {
             // Convert both to numbers for comparison to avoid type mismatch
@@ -117,6 +120,8 @@ function renderChatList(chats) {
             if (otherUser) {
                 displayName = otherUser.fullName || otherUser.fullName || otherUser.username;
                 displayInitial = displayName.charAt(0).toUpperCase();
+                if (typeof userAvatarSrc === 'function') avatarSrc = userAvatarSrc(otherUser.avatarUrl);
+                if (typeof customStatusLabel === 'function') statusLabel = customStatusLabel(otherUser.customStatus);
             }
         }
         
@@ -174,12 +179,13 @@ function renderChatList(chats) {
         return `
             <div class="chat-item ${chat.id === currentChatId ? 'active' : ''} ${chat.is_muted ? 'muted' : ''}" data-chat-id="${chat.id}">
                 <div class="chat-item-avatar">
-                    ${escapeHtml(displayInitial)}
+                    ${typeof avatarInnerHtml === 'function' ? avatarInnerHtml(displayInitial, avatarSrc) : escapeHtml(displayInitial)}
                 </div>
                 <div class="chat-item-content">
                     <div class="chat-item-header">
                         <span class="chat-item-title">
                             <span class="chat-item-name">${escapeHtml(displayName)}</span>
+                            ${statusLabel ? `<span class="chat-item-custom-status" title="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>` : ''}
                             ${chat.is_muted ? `<span class="chat-item-muted" title="Muted" aria-label="Muted">${MUTED_ICON_SVG}</span>` : ''}
                         </span>
                         <span class="chat-item-time">${lastMessageTime}</span>
@@ -200,11 +206,21 @@ function renderChatList(chats) {
         `;
     };
 
-    // Archived chats live in their own collapsible section under the main list
-    const activeChats = chats.filter(chat => !chat.archived_at);
-    const archivedChats = chats.filter(chat => chat.archived_at);
+    // Incoming message requests sit in their own section above the list (profile.js);
+    // archived chats live in their own collapsible section under the main list
+    const isRequest = (chat) => typeof isIncomingRequest === 'function' && isIncomingRequest(chat);
+    const requestChats = chats.filter(isRequest);
+    const activeChats = chats.filter(chat => !chat.archived_at && !isRequest(chat));
+    const archivedChats = chats.filter(chat => chat.archived_at && !isRequest(chat));
 
-    let html = activeChats.length > 0
+    let html = '';
+    if (requestChats.length > 0) {
+        const expanded = isRequestsExpanded();
+        html += renderRequestsToggleHtml(requestChats.length)
+            + `<div class="archived-chat-list request-chat-list" id="requestChatList" ${expanded ? '' : 'hidden'}>${requestChats.map(renderChatItem).join('')}</div>`;
+    }
+
+    html += activeChats.length > 0
         ? activeChats.map(renderChatItem).join('')
         : '<div class="empty-state"><p>No active chats</p></div>';
 
@@ -232,6 +248,8 @@ function renderChatList(chats) {
             openChat(chatId);
         });
     });
+
+    if (typeof bindRequestsToggle === 'function') bindRequestsToggle();
 
     const archivedToggle = document.getElementById('archivedToggle');
     if (archivedToggle) {
@@ -551,6 +569,8 @@ async function openChat(chatId, options = {}) {
     currentChatMembers = [];
     // Composer lock, header avatar and join-request badge belong to the chat being left (groups.js)
     resetGroupState();
+    // Message request bar (profile.js)
+    if (typeof resetMessageRequestState === 'function') resetMessageRequestState();
     // "N scheduled messages in this chat" bar (planner.js)
     if (typeof resetPlannerChatState === 'function') resetPlannerChatState();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
@@ -625,7 +645,8 @@ async function loadChatDetails(chatId) {
                 if (otherUser) {
                     displayName = otherUser.full_name || otherUser.username;
                     displayInitial = displayName.charAt(0).toUpperCase();
-                    displayStatus = otherUser.status || 'offline';
+                    // Only what the other person shares (privacy settings); empty when hidden
+                    displayStatus = typeof directChatStatusText === 'function' ? directChatStatusText(otherUser) : (otherUser.status || '');
                 }
             }
             
@@ -637,6 +658,9 @@ async function loadChatDetails(chatId) {
 
             // Group avatar, announcement-only composer and join-request badge (groups.js)
             applyChatDetails(chat);
+
+            // Message request bar (profile.js)
+            if (typeof applyMessageRequestState === 'function') applyMessageRequestState(chat);
         }
     } catch (error) {
         console.error('Load chat details error:', error);
@@ -658,6 +682,10 @@ async function createChat(chatType, chatName, participantIds) {
         });
         
         if (response.success) {
+            if (response.data && response.data.messageRequest) {
+                showNotification('Sent as a message request: they\'ll see it in their Requests until they accept.', 'info');
+            }
+
             // Reload chats
             await loadChats();
             
@@ -844,10 +872,11 @@ function renderUserSearchResults(users) {
     userList.innerHTML = users.map(user => {
         const initial = (user.full_name || user.username).charAt(0).toUpperCase();
         const isSelected = selectedUsers.some(u => u.id === user.id);
+        const avatarSrc = typeof userAvatarSrc === 'function' ? userAvatarSrc(user.avatar_url) : null;
         
         return `
             <div class="user-item ${isSelected ? 'selected' : ''}" data-user-id="${user.id}">
-                <div class="user-item-avatar">${initial}</div>
+                <div class="user-item-avatar">${typeof avatarInnerHtml === 'function' ? avatarInnerHtml(initial, avatarSrc) : escapeHtml(initial)}</div>
                 <div class="user-item-info">
                     <div class="user-item-name">${escapeHtml(user.full_name || user.username)}</div>
                     <div class="user-item-username">@${escapeHtml(user.username)}</div>

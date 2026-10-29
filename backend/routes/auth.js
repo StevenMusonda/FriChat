@@ -15,6 +15,7 @@ const {
     validateChangePassword,
     validateVerifyEmail,
     validateSessionIdParam,
+    validateProfileUpdate,
     checkValidation
 } = require('../utils/validation');
 
@@ -99,7 +100,7 @@ router.post('/logout', sessionActionLimiter, requireRefreshHeader, optionalAuth,
 
 // Protected routes
 router.get('/profile', authenticateToken, authController.getProfile);
-router.put('/profile', authenticateToken, authController.updateProfile);
+router.put('/profile', sessionActionLimiter, authenticateToken, validateProfileUpdate, checkValidation, authController.updateProfile);
 router.put('/password', changePasswordLimiter, authenticateToken, validateChangePassword, checkValidation, authController.changePassword);
 router.post('/resend-verification', resendIpLimiter, authenticateToken, resendUserLimiter, authController.resendVerification);
 

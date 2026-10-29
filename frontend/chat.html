@@ -20,15 +20,15 @@
         <!-- Sidebar -->
         <aside class="chat-sidebar" id="chatSidebar">
             <div class="sidebar-header">
-                <div class="user-profile">
-                    <div class="user-avatar" id="userAvatar">
+                <button type="button" class="user-profile" id="userProfileBtn" title="Your profile" aria-label="Your profile">
+                    <span class="user-avatar" id="userAvatar">
                         <span id="userInitial">U</span>
-                    </div>
-                    <div class="user-info">
-                        <h3 id="userName">User</h3>
+                    </span>
+                    <span class="user-info">
+                        <span class="user-name" id="userName">User</span>
                         <span class="user-status online" id="userStatus">Online</span>
-                    </div>
-                </div>
+                    </span>
+                </button>
                 <div class="sidebar-actions">
                     <button class="icon-btn" id="newChatBtn" title="New Chat">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -42,21 +42,8 @@
                     </button>
                     <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-                        </svg>
-                    </button>
-                    <button class="icon-btn" id="themeToggle" title="Toggle Theme">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="5"></circle>
-                            <line x1="12" y1="1" x2="12" y2="3"></line>
-                            <line x1="12" y1="21" x2="12" y2="23"></line>
-                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                            <line x1="1" y1="12" x2="3" y2="12"></line>
-                            <line x1="21" y1="12" x2="23" y2="12"></line>
-                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                         </svg>
                     </button>
                     <button class="icon-btn" id="logoutBtn" title="Logout">
@@ -113,7 +100,7 @@
                             <path d="M19 12H5M12 19l-7-7 7-7"/>
                         </svg>
                     </button>
-                    <div class="chat-info">
+                    <div class="chat-info" id="chatHeaderInfo">
                         <div class="chat-avatar" id="chatAvatar">
                             <span id="chatInitial">C</span>
                         </div>
@@ -189,6 +176,16 @@
 
                 <!-- Shown while files are dragged over the chat (composer.js) -->
                 <div class="drop-overlay" aria-hidden="true"><span>Drop files to add them to your message</span></div>
+
+                <!-- Message request from someone you share no chat with (profile.js) -->
+                <div class="message-request-bar" id="messageRequestBar" role="region" aria-label="Message request" hidden>
+                    <p class="message-request-text" id="messageRequestText"></p>
+                    <div class="message-request-actions" id="messageRequestActions">
+                        <button type="button" class="btn btn-primary btn-small" id="requestAcceptBtn">Accept</button>
+                        <button type="button" class="btn btn-secondary btn-small" id="requestDeleteBtn">Delete</button>
+                        <button type="button" class="btn btn-danger btn-small" id="requestBlockBtn">Block</button>
+                    </div>
+                </div>
 
                 <div class="message-input-container">
                     <!-- Files waiting to be sent: previews, progress, remove/cancel (composer.js) -->
@@ -354,7 +351,7 @@
         </div>
     </div>
 
-    <!-- Notifications & App Settings Modal -->
+    <!-- Settings: Profile, Privacy, Notifications, Devices, Appearance -->
     <div class="modal" id="settingsModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
         <div class="modal-content settings-modal">
             <div class="modal-header">
@@ -362,113 +359,293 @@
                 <button class="modal-close" id="closeSettingsModal" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
-                <section class="settings-section" aria-labelledby="settingsNotificationsHeading">
-                    <h4 id="settingsNotificationsHeading">Notifications</h4>
-                    <label class="settings-row" for="pushToggle">
-                        <span class="settings-row-text">
-                            <span class="settings-row-title">Enable notifications</span>
-                            <span class="settings-row-hint" id="pushStatus" role="status">Get notified about new messages when FriChat is closed.</span>
-                        </span>
-                        <input type="checkbox" class="switch" id="pushToggle">
-                    </label>
-                </section>
+                <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+                    <button type="button" class="settings-tab" role="tab" id="settingsTabProfile" aria-controls="settingsPanelProfile" aria-selected="true" data-settings-tab="profile">Profile</button>
+                    <button type="button" class="settings-tab" role="tab" id="settingsTabPrivacy" aria-controls="settingsPanelPrivacy" aria-selected="false" tabindex="-1" data-settings-tab="privacy">Privacy</button>
+                    <button type="button" class="settings-tab" role="tab" id="settingsTabNotifications" aria-controls="settingsPanelNotifications" aria-selected="false" tabindex="-1" data-settings-tab="notifications">Notifications</button>
+                    <button type="button" class="settings-tab" role="tab" id="settingsTabDevices" aria-controls="settingsPanelDevices" aria-selected="false" tabindex="-1" data-settings-tab="devices">Devices</button>
+                    <button type="button" class="settings-tab" role="tab" id="settingsTabAppearance" aria-controls="settingsPanelAppearance" aria-selected="false" tabindex="-1" data-settings-tab="appearance">Appearance</button>
+                </div>
 
-                <section class="settings-section" aria-labelledby="settingsChatHeading">
-                    <h4 id="settingsChatHeading">Chat</h4>
-                    <label class="settings-row" for="enterToSendToggle">
-                        <span class="settings-row-text">
-                            <span class="settings-row-title">Press Enter to send</span>
-                            <span class="settings-row-hint">On: Enter sends, Shift+Enter adds a line. Off: Enter adds a line, Shift+Enter sends. Ctrl+Enter always sends.</span>
-                        </span>
-                        <input type="checkbox" class="switch" id="enterToSendToggle" checked>
-                    </label>
-                </section>
+                <!-- Profile (profile.js) -->
+                <div class="settings-panel" role="tabpanel" id="settingsPanelProfile" aria-labelledby="settingsTabProfile" data-settings-panel="profile">
+                    <section class="settings-section" aria-labelledby="settingsPhotoHeading">
+                        <h4 id="settingsPhotoHeading">Photo</h4>
+                        <div class="profile-photo-row">
+                            <span class="profile-photo-preview" id="profilePhotoPreview" aria-hidden="true"></span>
+                            <div class="profile-photo-actions">
+                                <input type="file" id="profilePhotoInput" accept="image/jpeg,image/png,image/webp" hidden>
+                                <button type="button" class="btn btn-secondary btn-small" id="profilePhotoBtn">Upload photo</button>
+                                <button type="button" class="btn btn-secondary btn-small" id="profilePhotoRemoveBtn" hidden>Remove</button>
+                                <span class="settings-row-hint">JPEG, PNG or WebP, up to 5 MB. Cropped to a square.</span>
+                            </div>
+                        </div>
+                        <p class="settings-status" id="profilePhotoStatus" role="status"></p>
+                    </section>
 
-                <section class="settings-section" aria-labelledby="settingsDndHeading">
-                    <h4 id="settingsDndHeading">Do not disturb</h4>
-                    <label class="settings-row" for="dndToggle">
-                        <span class="settings-row-text">
-                            <span class="settings-row-title">Pause notifications</span>
-                            <span class="settings-row-hint">No pushes or sounds until you turn this off.</span>
-                        </span>
-                        <input type="checkbox" class="switch" id="dndToggle">
-                    </label>
-                    <label class="settings-row" for="quietHoursToggle">
-                        <span class="settings-row-text">
-                            <span class="settings-row-title">Quiet hours</span>
-                            <span class="settings-row-hint">Every day, in your timezone (<span id="quietHoursZone"></span>).</span>
-                        </span>
-                        <input type="checkbox" class="switch" id="quietHoursToggle">
-                    </label>
-                    <div class="quiet-hours-times" id="quietHoursTimes" hidden>
-                        <label for="quietStart">From
-                            <input type="time" id="quietStart" value="22:00" required>
+                    <section class="settings-section" aria-labelledby="settingsAboutHeading">
+                        <h4 id="settingsAboutHeading">About you</h4>
+                        <form class="settings-form" id="profileForm" novalidate>
+                            <label for="profileDisplayName">Display name
+                                <input type="text" id="profileDisplayName" maxlength="100" autocomplete="name" required>
+                            </label>
+                            <label for="profileBio">Bio
+                                <textarea id="profileBio" maxlength="160" rows="3" placeholder="A few words about you"></textarea>
+                                <span class="settings-row-hint"><span id="profileBioCount">0</span>/160</span>
+                            </label>
+                            <button type="submit" class="btn btn-primary btn-small" id="profileSaveBtn">Save profile</button>
+                            <p class="settings-status" id="profileStatus" role="status"></p>
+                        </form>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsCustomStatusHeading">
+                        <h4 id="settingsCustomStatusHeading">Status</h4>
+                        <form class="settings-form" id="customStatusForm" novalidate>
+                            <div class="custom-status-inputs">
+                                <label for="customStatusEmoji" class="custom-status-emoji-label">Emoji
+                                    <input type="text" id="customStatusEmoji" maxlength="16" placeholder="🙂" autocomplete="off">
+                                </label>
+                                <label for="customStatusText">What's happening?
+                                    <input type="text" id="customStatusText" maxlength="80" placeholder="In a meeting" autocomplete="off">
+                                </label>
+                            </div>
+                            <div class="planner-chips custom-status-presets" id="customStatusPresets" aria-label="Suggestions"></div>
+                            <label for="customStatusDuration">Clear after
+                                <select id="customStatusDuration" class="settings-select">
+                                    <option value="30m">30 minutes</option>
+                                    <option value="1h">1 hour</option>
+                                    <option value="4h">4 hours</option>
+                                    <option value="1d">Today (24 hours)</option>
+                                    <option value="1w">This week</option>
+                                    <option value="never" selected>Don't clear</option>
+                                </select>
+                            </label>
+                            <p class="settings-row-hint" id="customStatusCurrent"></p>
+                            <div class="settings-button-row">
+                                <button type="submit" class="btn btn-primary btn-small" id="customStatusSetBtn">Set status</button>
+                                <button type="button" class="btn btn-secondary btn-small" id="customStatusClearBtn" hidden>Clear status</button>
+                            </div>
+                            <p class="settings-status" id="customStatusStatus" role="status"></p>
+                        </form>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsEmailHeading">
+                        <h4 id="settingsEmailHeading">Email</h4>
+                        <div class="settings-row">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title" id="emailAddress"></span>
+                                <span class="settings-row-hint" id="emailVerifyStatus" role="status"></span>
+                            </span>
+                            <button type="button" class="btn btn-secondary btn-small" id="resendVerificationBtn" hidden>Resend link</button>
+                        </div>
+                    </section>
+
+                </div>
+
+                <!-- Privacy (profile.js; enforced by the server) -->
+                <div class="settings-panel" role="tabpanel" id="settingsPanelPrivacy" aria-labelledby="settingsTabPrivacy" data-settings-panel="privacy" hidden>
+                    <section class="settings-section" aria-labelledby="settingsWhoHeading">
+                        <h4 id="settingsWhoHeading">Who can see my personal info</h4>
+                        <label class="settings-row" for="privacyLastSeen">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Last seen and online</span>
+                                <span class="settings-row-hint">Who sees when you're online or were last active.</span>
+                            </span>
+                            <select id="privacyLastSeen" class="settings-select" data-privacy-field>
+                                <option value="everyone">Everyone</option>
+                                <option value="contacts">My contacts</option>
+                                <option value="nobody">Nobody</option>
+                            </select>
                         </label>
-                        <label for="quietEnd">To
-                            <input type="time" id="quietEnd" value="07:00" required>
+                        <label class="settings-row" for="privacyPhoto">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Profile photo</span>
+                                <span class="settings-row-hint">Everyone else sees your initial.</span>
+                            </span>
+                            <select id="privacyPhoto" class="settings-select" data-privacy-field>
+                                <option value="everyone">Everyone</option>
+                                <option value="contacts">My contacts</option>
+                                <option value="nobody">Nobody</option>
+                            </select>
                         </label>
-                    </div>
-                    <p class="settings-status" id="dndStatus" role="status"></p>
-                </section>
-
-                <!-- Account & security (security.js) -->
-                <section class="settings-section" aria-labelledby="settingsEmailHeading">
-                    <h4 id="settingsEmailHeading">Email</h4>
-                    <div class="settings-row">
-                        <span class="settings-row-text">
-                            <span class="settings-row-title" id="emailAddress"></span>
-                            <span class="settings-row-hint" id="emailVerifyStatus" role="status"></span>
-                        </span>
-                        <button type="button" class="btn btn-secondary btn-small" id="resendVerificationBtn" hidden>Resend link</button>
-                    </div>
-                </section>
-
-                <section class="settings-section" aria-labelledby="settingsPasswordHeading">
-                    <h4 id="settingsPasswordHeading">Change password</h4>
-                    <form class="settings-form" id="changePasswordForm" novalidate>
-                        <label for="currentPassword">Current password
-                            <input type="password" id="currentPassword" autocomplete="current-password" required>
+                        <label class="settings-row" for="privacyBio">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Bio and status</span>
+                                <span class="settings-row-hint">Your bio and custom status.</span>
+                            </span>
+                            <select id="privacyBio" class="settings-select" data-privacy-field>
+                                <option value="everyone">Everyone</option>
+                                <option value="contacts">My contacts</option>
+                                <option value="nobody">Nobody</option>
+                            </select>
                         </label>
-                        <label for="newPassword">New password
-                            <input type="password" id="newPassword" autocomplete="new-password" minlength="6" required>
+                        <p class="settings-note">"My contacts" means people you share a chat with. Message requests you haven't accepted don't count.</p>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsGroupsPrivacyHeading">
+                        <h4 id="settingsGroupsPrivacyHeading">Groups</h4>
+                        <label class="settings-row" for="privacyGroups">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Who can add me to groups</span>
+                                <span class="settings-row-hint">You can still join with an invite link.</span>
+                            </span>
+                            <select id="privacyGroups" class="settings-select" data-privacy-field>
+                                <option value="everyone">Everyone</option>
+                                <option value="contacts">My contacts</option>
+                                <option value="nobody">Nobody</option>
+                            </select>
                         </label>
-                        <label for="confirmNewPassword">Confirm new password
-                            <input type="password" id="confirmNewPassword" autocomplete="new-password" minlength="6" required>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsMessagingPrivacyHeading">
+                        <h4 id="settingsMessagingPrivacyHeading">Messaging</h4>
+                        <label class="settings-row" for="privacyReadReceipts">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Read receipts</span>
+                                <span class="settings-row-hint">If you turn this off, you won't see read receipts from other people either.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="privacyReadReceipts" data-privacy-field checked>
                         </label>
-                        <p class="settings-note">Changing your password signs you out on every other device.</p>
-                        <button type="submit" class="btn btn-primary btn-small" id="changePasswordBtn">Change password</button>
-                        <p class="settings-status" id="changePasswordStatus" role="status"></p>
-                    </form>
-                </section>
+                        <label class="settings-row" for="privacyTyping">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Typing indicator</span>
+                                <span class="settings-row-hint">Let others see when you're typing.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="privacyTyping" data-privacy-field checked>
+                        </label>
+                        <p class="settings-status" id="privacyStatus" role="status"></p>
+                    </section>
 
-                <section class="settings-section" aria-labelledby="settingsDevicesHeading">
-                    <h4 id="settingsDevicesHeading">Devices</h4>
-                    <ul class="device-list" id="deviceList" aria-live="polite"></ul>
-                    <button type="button" class="btn btn-secondary btn-small" id="revokeOtherSessionsBtn" hidden>Log out all other devices</button>
-                    <p class="settings-status" id="devicesStatus" role="status"></p>
-                </section>
+                    <section class="settings-section" aria-labelledby="settingsBlockedHeading">
+                        <h4 id="settingsBlockedHeading">Blocked users</h4>
+                        <ul class="blocked-list" id="blockedList" aria-live="polite"></ul>
+                        <p class="settings-status" id="blockedStatus" role="status"></p>
+                    </section>
 
-                <section class="settings-section" aria-labelledby="settingsBlockedHeading">
-                    <h4 id="settingsBlockedHeading">Blocked users</h4>
-                    <ul class="blocked-list" id="blockedList" aria-live="polite"></ul>
-                    <p class="settings-status" id="blockedStatus" role="status"></p>
-                </section>
+                </div>
 
-                <section class="settings-section" aria-labelledby="settingsAppHeading">
-                    <h4 id="settingsAppHeading">App</h4>
-                    <div class="settings-row">
-                        <span class="settings-row-text">
-                            <span class="settings-row-title">Install FriChat</span>
-                            <span class="settings-row-hint" id="installHint"></span>
-                        </span>
-                        <button type="button" class="btn btn-secondary settings-install-btn" id="installAppBtn" hidden>Install app</button>
-                    </div>
-                    <p class="settings-note" id="iosInstallNote" hidden>
-                        On iPhone or iPad: tap the Share button in Safari, then <strong>Add to Home Screen</strong>.
-                        Open FriChat from the Home Screen to turn on notifications (iOS 16.4 or later).
-                    </p>
-                </section>
+                <!-- Notifications (notifications.js) -->
+                <div class="settings-panel" role="tabpanel" id="settingsPanelNotifications" aria-labelledby="settingsTabNotifications" data-settings-panel="notifications" hidden>
+                    <section class="settings-section" aria-labelledby="settingsNotificationsHeading">
+                        <h4 id="settingsNotificationsHeading">Notifications</h4>
+                        <label class="settings-row" for="pushToggle">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Enable notifications</span>
+                                <span class="settings-row-hint" id="pushStatus" role="status">Get notified about new messages when FriChat is closed.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="pushToggle">
+                        </label>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsDndHeading">
+                        <h4 id="settingsDndHeading">Do not disturb</h4>
+                        <label class="settings-row" for="dndToggle">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Pause notifications</span>
+                                <span class="settings-row-hint">No pushes or sounds until you turn this off.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="dndToggle">
+                        </label>
+                        <label class="settings-row" for="quietHoursToggle">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Quiet hours</span>
+                                <span class="settings-row-hint">Every day, in your timezone (<span id="quietHoursZone"></span>).</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="quietHoursToggle">
+                        </label>
+                        <div class="quiet-hours-times" id="quietHoursTimes" hidden>
+                            <label for="quietStart">From
+                                <input type="time" id="quietStart" value="22:00" required>
+                            </label>
+                            <label for="quietEnd">To
+                                <input type="time" id="quietEnd" value="07:00" required>
+                            </label>
+                        </div>
+                        <p class="settings-status" id="dndStatus" role="status"></p>
+                    </section>
+
+                </div>
+
+                <!-- Devices and sign-in (security.js) -->
+                <div class="settings-panel" role="tabpanel" id="settingsPanelDevices" aria-labelledby="settingsTabDevices" data-settings-panel="devices" hidden>
+                    <section class="settings-section" aria-labelledby="settingsDevicesHeading">
+                        <h4 id="settingsDevicesHeading">Devices</h4>
+                        <ul class="device-list" id="deviceList" aria-live="polite"></ul>
+                        <button type="button" class="btn btn-secondary btn-small" id="revokeOtherSessionsBtn" hidden>Log out all other devices</button>
+                        <p class="settings-status" id="devicesStatus" role="status"></p>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsPasswordHeading">
+                        <h4 id="settingsPasswordHeading">Change password</h4>
+                        <form class="settings-form" id="changePasswordForm" novalidate>
+                            <label for="currentPassword">Current password
+                                <input type="password" id="currentPassword" autocomplete="current-password" required>
+                            </label>
+                            <label for="newPassword">New password
+                                <input type="password" id="newPassword" autocomplete="new-password" minlength="6" required>
+                            </label>
+                            <label for="confirmNewPassword">Confirm new password
+                                <input type="password" id="confirmNewPassword" autocomplete="new-password" minlength="6" required>
+                            </label>
+                            <p class="settings-note">Changing your password signs you out on every other device.</p>
+                            <button type="submit" class="btn btn-primary btn-small" id="changePasswordBtn">Change password</button>
+                            <p class="settings-status" id="changePasswordStatus" role="status"></p>
+                        </form>
+                    </section>
+
+                </div>
+
+                <!-- Appearance -->
+                <div class="settings-panel" role="tabpanel" id="settingsPanelAppearance" aria-labelledby="settingsTabAppearance" data-settings-panel="appearance" hidden>
+                    <section class="settings-section" aria-labelledby="settingsThemeHeading">
+                        <h4 id="settingsThemeHeading">Theme</h4>
+                        <label class="settings-row" for="themeToggle">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Dark mode</span>
+                                <span class="settings-row-hint">Saved on this device.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="themeToggle">
+                        </label>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsChatHeading">
+                        <h4 id="settingsChatHeading">Chat</h4>
+                        <label class="settings-row" for="enterToSendToggle">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Press Enter to send</span>
+                                <span class="settings-row-hint">On: Enter sends, Shift+Enter adds a line. Off: Enter adds a line, Shift+Enter sends. Ctrl+Enter always sends.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="enterToSendToggle" checked>
+                        </label>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsAppHeading">
+                        <h4 id="settingsAppHeading">App</h4>
+                        <div class="settings-row">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Install FriChat</span>
+                                <span class="settings-row-hint" id="installHint"></span>
+                            </span>
+                            <button type="button" class="btn btn-secondary settings-install-btn" id="installAppBtn" hidden>Install app</button>
+                        </div>
+                        <p class="settings-note" id="iosInstallNote" hidden>
+                            On iPhone or iPad: tap the Share button in Safari, then <strong>Add to Home Screen</strong>.
+                            Open FriChat from the Home Screen to turn on notifications (iOS 16.4 or later).
+                        </p>
+                    </section>
+                </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Profile card: opens when a name is clicked (profile.js) -->
+    <div class="modal" id="profileCardModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="profileCardName">
+        <div class="modal-content profile-card-modal">
+            <div class="modal-header">
+                <h3>Profile</h3>
+                <button class="modal-close" id="closeProfileCard" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="profileCardBody" aria-live="polite"></div>
         </div>
     </div>
 
@@ -810,6 +987,7 @@
     <script src="js/search.js"></script>
     <script src="js/polls.js"></script>
     <script src="js/planner.js"></script>
+    <script src="js/profile.js"></script>
     
     <script>
         // Initialize chat application
@@ -942,6 +1120,9 @@
             // Polls, scheduled messages and reminders
             initializePolls();
             initializePlanner();
+
+            // Profile and privacy settings, profile cards, avatars and message requests
+            initializeProfile();
 
             // Older pages on scroll up, read state and jump button near the bottom
             initializeMessageScroll();

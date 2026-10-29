@@ -6,6 +6,7 @@
  */
 
 const { executeQuery, queryOne } = require('../config/database');
+const { applyUserPrivacy } = require('../utils/privacy');
 const { inviteLinksEnabled } = require('../config/groups');
 const groups = require('../utils/groups');
 const invites = require('../utils/invites');
@@ -206,16 +207,20 @@ async function listJoinRequests(req, res) {
             ORDER BY r.created_at ASC, r.id ASC
         `, [chatId]);
 
+        const data = rows.map(row => ({
+            id: row.id,
+            userId: row.user_id,
+            username: row.username,
+            fullName: row.full_name,
+            avatarUrl: row.avatar_url,
+            createdAt: row.created_at
+        }));
+        // Photos only as each requester's privacy settings allow
+        await applyUserPrivacy(req.user.id, data, { id: 'userId', avatar: 'avatarUrl', status: null, customStatus: null });
+
         res.json({
             success: true,
-            data: rows.map(row => ({
-                id: row.id,
-                userId: row.user_id,
-                username: row.username,
-                fullName: row.full_name,
-                avatarUrl: row.avatar_url,
-                createdAt: row.created_at
-            }))
+            data
         });
     } catch (error) {
         serverError(res, 'List join requests', error, 'Failed to load join requests');
@@ -340,7 +345,9 @@ async function listBans(req, res) {
         const check = await groups.requireGroupMember(chatId, req.user.id, { admin: true });
         if (check.error) return sendError(res, check.error);
 
-        res.json({ success: true, data: await groups.listBans(chatId) });
+        const bans = await groups.listBans(chatId);
+        await applyUserPrivacy(req.user.id, bans, { id: 'userId', avatar: 'avatarUrl', status: null, customStatus: null });
+        res.json({ success: true, data: bans });
     } catch (error) {
         serverError(res, 'List bans', error, 'Failed to load banned users');
     }

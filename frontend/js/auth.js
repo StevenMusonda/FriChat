@@ -438,21 +438,18 @@ async function getProfile() {
 /**
  * Update user profile
  */
-async function updateProfile(fullName, avatarUrl) {
+async function updateProfile(fullName) {
     try {
+        // Photos are uploaded (Settings > Profile), never set to a URL
         const response = await apiRequest(CONFIG.ENDPOINTS.PROFILE, {
             method: 'PUT',
-            body: JSON.stringify({
-                fullName,
-                avatarUrl
-            })
+            body: JSON.stringify({ fullName })
         });
 
         if (response.success) {
             // Update stored user data
             const currentUser = getCurrentUser();
             currentUser.fullName = fullName;
-            currentUser.avatarUrl = avatarUrl;
             localStorage.setItem(CONFIG.STORAGE_KEYS.USER_DATA, JSON.stringify(currentUser));
         }
 

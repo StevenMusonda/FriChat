@@ -5591,3 +5591,367 @@ body.dark-theme .planner-edit-time {
     font-size: 0.85rem;
     color: var(--text-tertiary);
 }
+
+/* ===== Profile, privacy, settings tabs and message requests (phase 9) ===== */
+
+/* Sidebar: your own profile is a button that opens Settings > Profile */
+button.user-profile {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 12px;
+}
+
+button.user-profile:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 4px;
+}
+
+.user-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.user-info .user-name {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-info .user-status {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Photos inside every round avatar */
+.user-avatar img,
+.chat-item-avatar img,
+.user-item-avatar img,
+.message-avatar img,
+.profile-photo-preview img,
+.profile-card-avatar img,
+.profile-avatar-large img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border-radius: 50%;
+}
+
+.chat-item-avatar,
+.user-item-avatar {
+    overflow: hidden;
+}
+
+.chat-item-custom-status {
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--text-tertiary);
+    max-width: 9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.member-custom-status {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Names and avatars that open a profile card */
+.profile-link,
+#chatHeaderInfo {
+    cursor: pointer;
+}
+
+.message-sender.profile-link:hover,
+.member-info.profile-link:hover .member-name {
+    text-decoration: underline;
+}
+
+.profile-link:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Settings tabs: scroll sideways on narrow screens instead of wrapping */
+.settings-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 0 -4px 4px;
+    padding: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background-color: var(--bg-primary);
+    z-index: 1;
+}
+
+.settings-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.settings-tab {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.settings-tab:hover {
+    background-color: var(--bg-secondary);
+}
+
+.settings-tab[aria-selected="true"] {
+    background-color: var(--primary-color);
+    color: #ffffff;
+}
+
+.settings-tab:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.settings-select,
+.settings-form textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.95rem;
+}
+
+.settings-form textarea {
+    resize: vertical;
+    min-height: 64px;
+}
+
+.settings-row .settings-select {
+    flex-shrink: 0;
+    max-width: 45%;
+}
+
+.settings-button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.profile-photo-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.profile-photo-preview,
+.profile-card-avatar {
+    width: 88px;
+    height: 88px;
+    min-width: 88px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #ffffff;
+    font-size: 2rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.profile-photo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.profile-photo-actions .settings-row-hint {
+    flex-basis: 100%;
+}
+
+.custom-status-inputs {
+    display: grid;
+    grid-template-columns: 5.5em 1fr;
+    gap: 10px;
+}
+
+.custom-status-inputs input {
+    width: 100%;
+    min-width: 0;
+}
+
+.custom-status-presets {
+    margin: 0;
+}
+
+/* Profile card */
+.profile-card-modal {
+    max-width: 380px;
+}
+
+.profile-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+}
+
+.profile-card-avatar {
+    width: 112px;
+    height: 112px;
+    min-width: 112px;
+    font-size: 2.6rem;
+    margin-bottom: 8px;
+}
+
+.profile-card-name {
+    font-size: 1.2rem;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.profile-card-username,
+.profile-card-presence {
+    font-size: 0.9rem;
+    color: var(--text-tertiary);
+}
+
+.profile-card-custom-status {
+    margin-top: 4px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+.profile-card-section {
+    width: 100%;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+    text-align: left;
+}
+
+.profile-card-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-bottom: 4px;
+}
+
+.profile-card-bio {
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.profile-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+/* Message request bar above the composer */
+.message-request-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+}
+
+.message-request-bar[hidden] {
+    display: none;
+}
+
+.message-request-text {
+    flex: 1 1 240px;
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.message-request-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.message-request-actions[hidden] {
+    display: none;
+}
+
+.requests-toggle {
+    color: var(--primary-color);
+}
+
+@media (max-width: 480px) {
+    .settings-row {
+        flex-wrap: wrap;
+    }
+
+    .settings-row .settings-select {
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .profile-photo-row {
+        align-items: flex-start;
+    }
+
+    .profile-photo-preview {
+        width: 72px;
+        height: 72px;
+        min-width: 72px;
+    }
+
+    .message-request-bar {
+        padding: 10px 12px;
+    }
+
+    .message-request-actions {
+        width: 100%;
+    }
+
+    .message-request-actions .btn {
+        flex: 1 1 0;
+    }
+}

@@ -90,6 +90,15 @@ const CONFIG = {
         SCHEDULED_MESSAGE: (id) => `/scheduled-messages/${id}`,
         REMINDERS: '/reminders',
         REMINDER: (id) => `/reminders/${id}`,
+
+        // Profile, privacy and message requests (phase 9)
+        ME: '/users/me',
+        MY_PROFILE: '/users/me/profile',
+        MY_AVATAR: '/users/me/avatar',
+        MY_STATUS: '/users/me/status',
+        MY_PRIVACY: '/users/me/privacy',
+        USER_PROFILE: (userId) => `/users/${userId}`,
+        MESSAGE_REQUEST: (chatId, action) => `/chats/${chatId}/request/${action}`,
     },
     
     // Messages fetched per page when opening a chat or scrolling up

@@ -6,6 +6,7 @@
 const { executeQuery, queryOne } = require('../config/database');
 const { toBool } = require('./messageQueries');
 const { checkDirectChatBlock } = require('./blocks');
+const { checkRequestReply } = require('./messageRequests');
 
 const ANNOUNCEMENT_ONLY_MESSAGE = 'Only admins can send messages in this group';
 
@@ -37,14 +38,15 @@ function postingError(membership) {
 
 /**
  * Every send path (REST send, file upload into a chat, forward, socket send_message) goes through this.
- * Direct chats also refuse while either user has blocked the other.
+ * Direct chats also refuse while either user has blocked the other, and while the chat is a message
+ * request this user hasn't accepted.
  */
 async function checkCanPost(chatId, userId) {
     const membership = await getMembership(chatId, userId);
     const error = postingError(membership);
     if (error) return error;
     if (membership.chat_type === 'direct') {
-        return checkDirectChatBlock(chatId, userId);
+        return (await checkDirectChatBlock(chatId, userId)) || checkRequestReply(chatId, userId);
     }
     return null;
 }

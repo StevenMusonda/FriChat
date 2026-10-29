@@ -2,6 +2,8 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS message_requests;
+DROP TABLE IF EXISTS privacy_settings;
 DROP TABLE IF EXISTS message_reminders;
 DROP TABLE IF EXISTS scheduled_messages;
 DROP TABLE IF EXISTS poll_votes;
@@ -37,7 +39,11 @@ CREATE TABLE users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100),
-    avatar_url VARCHAR(255),
+    avatar_url VARCHAR(255), -- path under uploads/, e.g. 'uploads/avatars/<random>.webp' (upload only)
+    bio VARCHAR(160) NULL,
+    custom_status_text VARCHAR(80) NULL,
+    custom_status_emoji VARCHAR(16) NULL,
+    custom_status_expires_at TIMESTAMP NULL DEFAULT NULL, -- NULL = until cleared
     status ENUM('online', 'offline', 'away') DEFAULT 'offline',
     last_seen TIMESTAMP NULL,
     email_verified_at DATETIME NULL, -- NULL = email not verified yet
@@ -450,6 +456,34 @@ CREATE TABLE message_reminders (
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     INDEX idx_reminders_due (status, remind_at),
     INDEX idx_reminders_user (user_id, status)
+);
+
+-- Who sees what (no row = everyone sees everything, receipts and typing on).
+-- Audiences: 'everyone' | 'contacts' (people you share an accepted chat with) | 'nobody'
+CREATE TABLE privacy_settings (
+    user_id INT PRIMARY KEY,
+    last_seen_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- online status and last seen
+    photo_audience VARCHAR(10) NOT NULL DEFAULT 'everyone',
+    bio_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- bio and custom status
+    groups_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- who can add you to groups
+    read_receipts BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see your reads, you don't see theirs
+    typing_indicators BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see you typing
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- A direct chat started by someone who shared no chat with the recipient (one row per chat)
+CREATE TABLE message_requests (
+    chat_id INT PRIMARY KEY,
+    requester_id INT NOT NULL,
+    recipient_id INT NOT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | accepted | deleted | blocked
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    decided_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_message_requests_recipient (recipient_id, status)
 );
 
 -- Create a view for easy message retrieval with user info

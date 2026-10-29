@@ -3,6 +3,8 @@
  */
 
 const { executeQuery, queryOne, dbType } = require('../config/database');
+const { readReceiptsEnabled, receiptlessMemberRooms } = require('./privacy');
+const { isAwaitingAcceptance } = require('./messageRequests');
 
 // Stored in muted_until for "mute always"
 const MUTE_FOREVER = '9999-12-31 00:00:00';
@@ -46,9 +48,27 @@ async function getUnreadMentionCount(chatId, userId) {
 }
 
 /**
+ * Does this user's reading show up as read receipts in this chat? Not when they turned read receipts
+ * off, and not while the chat is a message request they haven't accepted.
+ */
+async function sendsReadReceipts(chatId, userId) {
+    if (!(await readReceiptsEnabled(userId))) return false;
+    return !(await isAwaitingAcceptance(chatId, userId));
+}
+
+/**
+ * Send a read-receipt event to the chat, except to members who turned read receipts off
+ */
+async function emitToReceiptViewers(io, chatId, event, payload) {
+    const hidden = await receiptlessMemberRooms(chatId);
+    const target = io.to(`chat_${chatId}`);
+    (hidden.length > 0 ? target.except(hidden) : target).emit(event, payload);
+}
+
+/**
  * Move the user's read position forward to messageId (or the newest message when omitted).
  * Never moves it backwards. Tells the user's other tabs, and tells the chat when
- * messages became read so senders can update their receipts.
+ * messages became read so senders can update their receipts (unless the reader's receipts are off).
  * Returns null if the user isn't a member.
  */
 async function markChatRead(io, chatId, userId, messageId = null) {
@@ -73,6 +93,7 @@ async function markChatRead(io, chatId, userId, messageId = null) {
     }
 
     const advanced = !!target && target > previous;
+    const receipts = advanced && await sendsReadReceipts(chatId, userId);
 
     if (advanced) {
         await executeQuery(`
@@ -82,10 +103,12 @@ async function markChatRead(io, chatId, userId, messageId = null) {
         `, [target, chatId, userId, target]);
 
         // Keep sender-facing read receipts (messages.status) in step
-        await executeQuery(`
-            UPDATE messages SET status = 'read'
-            WHERE chat_id = ? AND id > ? AND id <= ? AND sender_id <> ? AND status <> 'read'
-        `, [chatId, previous, target, userId]);
+        if (receipts) {
+            await executeQuery(`
+                UPDATE messages SET status = 'read'
+                WHERE chat_id = ? AND id > ? AND id <= ? AND sender_id <> ? AND status <> 'read'
+            `, [chatId, previous, target, userId]);
+        }
     }
 
     const state = {
@@ -97,8 +120,8 @@ async function markChatRead(io, chatId, userId, messageId = null) {
 
     if (io) {
         io.to(`user_${userId}`).emit('read_position_updated', state);
-        if (advanced) {
-            io.to(`chat_${chatId}`).emit('messages_read', {
+        if (receipts) {
+            await emitToReceiptViewers(io, chatId, 'messages_read', {
                 chatId: state.chatId,
                 readerId: userId,
                 upToMessageId: target
@@ -107,6 +130,70 @@ async function markChatRead(io, chatId, userId, messageId = null) {
     }
 
     return state;
+}
+
+/**
+ * Send read receipts for everything the user has already read in this chat (after they accept a
+ * message request, whose reads were held back until then)
+ */
+async function publishReadReceipts(io, chatId, userId) {
+    if (!(await sendsReadReceipts(chatId, userId))) return;
+    const membership = await queryOne(
+        'SELECT last_read_message_id FROM group_members WHERE chat_id = ? AND user_id = ?',
+        [chatId, userId]
+    );
+    const upTo = membership && membership.last_read_message_id;
+    if (!upTo) return;
+
+    await executeQuery(`
+        UPDATE messages SET status = 'read'
+        WHERE chat_id = ? AND id <= ? AND sender_id <> ? AND status <> 'read'
+    `, [chatId, upTo, userId]);
+    if (io) {
+        await emitToReceiptViewers(io, chatId, 'messages_read', { chatId: Number(chatId), readerId: userId, upToMessageId: upTo });
+    }
+}
+
+const STATUS_RANK = { sent: 0, delivered: 1, read: 2 };
+
+/**
+ * A member reports one message as 'delivered' or 'read' (REST and the message_status socket event).
+ * Only other people's messages, only forwards, and 'read' becomes 'delivered' when the reader
+ * doesn't send read receipts in this chat.
+ * @returns {Promise<{ error } | { messageId, chatId, status, changed }>}
+ */
+async function updateMessageStatus(io, messageId, userId, status) {
+    if (status !== 'delivered' && status !== 'read') {
+        return { error: { status: 400, message: "status must be 'delivered' or 'read'" } };
+    }
+    const message = await queryOne(`
+        SELECT m.id, m.chat_id, m.sender_id, m.status
+        FROM messages m
+        JOIN group_members gm ON gm.chat_id = m.chat_id AND gm.user_id = ?
+        WHERE m.id = ?
+    `, [userId, messageId]);
+    if (!message) {
+        return { error: { status: 404, message: 'Message not found or access denied' } };
+    }
+
+    let next = status;
+    if (next === 'read' && !(await sendsReadReceipts(message.chat_id, userId))) next = 'delivered';
+
+    const result = { messageId: Number(message.id), chatId: Number(message.chat_id), status: message.status, changed: false };
+    if (Number(message.sender_id) === Number(userId) || STATUS_RANK[next] <= (STATUS_RANK[message.status] || 0)) {
+        return result;
+    }
+
+    await executeQuery('UPDATE messages SET status = ? WHERE id = ?', [next, message.id]);
+    if (io) {
+        const payload = { messageId: result.messageId, status: next, userId };
+        if (next === 'read') {
+            await emitToReceiptViewers(io, message.chat_id, 'message_status_update', payload);
+        } else {
+            io.to(`chat_${message.chat_id}`).emit('message_status_update', payload);
+        }
+    }
+    return { ...result, status: next, changed: true };
 }
 
 /**
@@ -194,6 +281,9 @@ module.exports = {
     getUnreadMentionCount,
     setMentionsOnly,
     markChatRead,
+    sendsReadReceipts,
+    publishReadReceipts,
+    updateMessageStatus,
     recordNewMessage,
     getChatSettings,
     setMute,

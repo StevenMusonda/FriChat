@@ -17,7 +17,21 @@ const { getMembership, leaveGroup, removeUserFromChatRoom, emitMembersUpdated, i
 const { getGroupDetailsForMember } = require('./groupController');
 const { toBool } = require('../utils/messageQueries');
 const { checkUnverifiedContact } = require('../utils/emailVerification');
-const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong, getBlockerIds, maskBlockerStatus } = require('../utils/blocks');
+const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong } = require('../utils/blocks');
+const privacy = require('../utils/privacy');
+const messageRequests = require('../utils/messageRequests');
+
+// Names each participant field for utils/privacy.js
+const LIST_PARTICIPANT_KEYS = { id: 'userId', avatar: 'avatarUrl', status: 'status', customStatus: 'customStatus' };
+const CHAT_PARTICIPANT_KEYS = { id: 'id', avatar: 'avatar_url', status: 'status', lastSeen: 'last_seen', customStatus: 'custom_status' };
+
+/**
+ * 403 when one of userIds doesn't allow adderId to put them in a group, else null
+ */
+async function checkGroupAddPrivacy(adderId, userIds) {
+    const refused = await privacy.findGroupAddRefusals(adderId, userIds);
+    return refused.length > 0 ? { ...privacy.GROUP_ADD_REFUSED, refusedUserIds: refused } : null;
+}
 
 function sendError(res, error) {
     return res.status(error.status).json({ success: false, message: error.message, code: error.code });
@@ -38,6 +52,7 @@ async function getUserChats(req, res) {
                 c.id,
                 c.chat_type,
                 c.chat_name,
+                c.avatar_url,
                 c.created_at,
                 c.updated_at,
                 gm.last_read_message_id,
@@ -79,7 +94,7 @@ async function getUserChats(req, res) {
             const chatIds = chats.map(chat => chat.id);
             const placeholders = chatIds.map(() => '?').join(', ');
 
-            const participantRows = await executeQuery(`
+            const rawParticipantRows = await executeQuery(`
                 SELECT
                     gm.chat_id,
                     u.id as userId,
@@ -94,8 +109,21 @@ async function getUserChats(req, res) {
                 ORDER BY gm.chat_id, gm.id
             `, chatIds);
 
-            // People who blocked this user show as offline to them
-            maskBlockerStatus(participantRows, await getBlockerIds(userId));
+            // PostgreSQL lowercases unquoted aliases (userid, avatarurl): key them here so the privacy
+            // filter below sees, and clears, the same fields on both databases
+            const participantRows = rawParticipantRows.map(row => ({
+                chat_id: row.chat_id,
+                userId: row.userId !== undefined ? row.userId : row.userid,
+                username: row.username,
+                fullName: row.fullName !== undefined ? row.fullName : row.fullname,
+                avatarUrl: row.avatarUrl !== undefined ? row.avatarUrl : row.avatarurl,
+                status: row.status,
+                role: row.role
+            }));
+
+            // Photos, presence and custom status only as each participant's privacy settings allow
+            // (people who blocked this user show nothing)
+            await privacy.applyUserPrivacy(userId, participantRows, LIST_PARTICIPANT_KEYS);
 
             for (const row of participantRows) {
                 const chatId = row.chat_id;
@@ -129,12 +157,18 @@ async function getUserChats(req, res) {
                 WHERE c.id IN (${placeholders})
             `, chatIds);
 
+            // With read receipts off you don't see other people's reads either
+            privacy.maskReadStatus(lastMessageRows, await privacy.readReceiptsEnabled(userId));
+
             for (const row of lastMessageRows) {
                 const chatId = row.chat_id;
                 delete row.chat_id;
                 lastMessageByChat[chatId] = row;
             }
         }
+
+        // Direct chats that are still a message request: incoming ones go to the Requests section
+        const pendingRequests = await messageRequests.getPendingRequests(chats.map(chat => chat.id));
 
         for (const chat of chats) {
             chat.unread_count = parseInt(chat.unread_count) || 0;
@@ -143,6 +177,7 @@ async function getUserChats(req, res) {
             chat.mentions_only = chat.mentions_only === true || chat.mentions_only === 1 || chat.mentions_only === '1';
             chat.participants = JSON.stringify(participantsByChat[chat.id] || []);
             chat.lastMessage = lastMessageByChat[chat.id] ? JSON.stringify(lastMessageByChat[chat.id]) : null;
+            chat.message_request = messageRequests.describeRequest(pendingRequests.get(Number(chat.id)) || null, userId);
         }
 
         res.json({
@@ -208,7 +243,7 @@ async function getChatById(req, res) {
             ORDER BY gm.joined_at ASC, gm.id ASC
         `, [chatId]);
 
-        chat.participants = maskBlockerStatus(participants, await getBlockerIds(userId));
+        chat.participants = await privacy.applyUserPrivacy(userId, participants, CHAT_PARTICIPANT_KEYS);
         chat.approve_new_members = toBool(chat.approve_new_members);
         chat.announcement_only = toBool(chat.announcement_only);
 
@@ -217,8 +252,9 @@ async function getChatById(req, res) {
             Object.assign(chat, await getGroupDetailsForMember(chatId, membership));
         } else {
             chat.my_role = membership.role;
-            // A block either way locks the composer, with the reason worded for this user
-            const blockError = await checkDirectChatBlock(chatId, userId);
+            chat.message_request = messageRequests.describeRequest(await messageRequests.getRequest(chatId), userId);
+            // A block either way, or a request not accepted yet, locks the composer (worded for this user)
+            const blockError = (await checkDirectChatBlock(chatId, userId)) || (await messageRequests.checkRequestReply(chatId, userId));
             chat.can_post = !blockError;
             chat.post_blocked_message = blockError ? blockError.message : null;
         }
@@ -290,6 +326,11 @@ async function createChat(req, res) {
             `, [userId, otherUserId]);
 
             if (existingChat) {
+                // The recipient of a request writing to the requester themselves accepts it
+                if (await messageRequests.acceptByRecipientContact(existingChat.id, userId) && req.io) {
+                    req.io.to(`user_${userId}`).emit('message_request_updated', { chatId: Number(existingChat.id), status: 'accepted' });
+                    req.io.to(`user_${otherUserId}`).emit('message_request_updated', { chatId: Number(existingChat.id), status: 'accepted' });
+                }
                 return res.json({
                     success: true,
                     message: 'Chat already exists',
@@ -309,7 +350,14 @@ async function createChat(req, res) {
                     code: 'BLOCKED'
                 });
             }
+
+            // "Who can add me to groups"
+            const privacyError = await checkGroupAddPrivacy(userId, participants);
+            if (privacyError) return sendError(res, privacyError);
         }
+
+        // Someone the other person shares no chat with lands in their Requests
+        const isMessageRequest = chatType === 'direct' && !(await privacy.isContact(userId, participants[0]));
 
         // Unverified accounts only reach people they already share a chat with
         const contactError = await checkUnverifiedContact(req.user, participants);
@@ -346,10 +394,14 @@ async function createChat(req, res) {
             );
         }
 
+        if (isMessageRequest) {
+            await messageRequests.createRequest(chatId, userId, participants[0]);
+        }
+
         res.status(201).json({
             success: true,
-            message: 'Chat created successfully',
-            data: { chatId: chatId }
+            message: isMessageRequest ? 'Message request created' : 'Chat created successfully',
+            data: { chatId: chatId, messageRequest: isMessageRequest }
         });
     } catch (error) {
         console.error('Create chat error:', error);
@@ -415,6 +467,16 @@ async function addMember(req, res) {
 
         const contactError = await checkUnverifiedContact(req.user, [newUserId]);
         if (contactError) return sendError(res, contactError);
+
+        // "Who can add me to groups"
+        const privacyError = await checkGroupAddPrivacy(currentUserId, [newUserId]);
+        if (privacyError) {
+            return res.status(403).json({
+                success: false,
+                message: 'This user doesn\'t allow you to add them to groups.',
+                code: privacyError.code
+            });
+        }
 
         // Add member; earlier history starts out read so they don't join to a wall of unread
         await executeQuery(
@@ -531,7 +593,7 @@ async function searchUsers(req, res) {
 
         res.json({
             success: true,
-            data: maskBlockerStatus(users, await getBlockerIds(userId))
+            data: await privacy.applyUserPrivacy(userId, users, { customStatus: null })
         });
     } catch (error) {
         console.error('Search users error:', error);

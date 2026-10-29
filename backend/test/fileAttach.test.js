@@ -77,6 +77,8 @@ function createWorld(dbType) {
             return [{ id: NEW_MESSAGE_ID, chat_id: CHAT_ID, sender_id: ME, content: null, message_type: 'file' }];
         }
         // Phase 6 block checks: nobody is blocked in these tests
+        // Phase 9 tables: no rows = default privacy settings, no message requests
+        if (/privacy_settings|message_requests/.test(sql)) return [];
         if (/user_blocks/.test(sql)) return [];
         throw new Error(`Unexpected query: ${sql}`);
     };

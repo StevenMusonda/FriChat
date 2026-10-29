@@ -405,7 +405,9 @@ function renderMessageHtml(message) {
     const currentUser = getCurrentUser();
     const isSent = message.sender_id === currentUser.userId;
     const senderInitial = escapeHtml((message.full_name || message.username).charAt(0).toUpperCase());
-    
+    // Clicking the sender's name opens their profile card (profile.js)
+    const senderProfileAttrs = `data-profile-user-id="${Number(message.sender_id)}" role="button" tabindex="0"`;
+
     // Parse reactions if they exist
     let reactions = [];
     if (message.reactions && typeof message.reactions === 'string') {
@@ -435,7 +437,7 @@ function renderMessageHtml(message) {
             <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
                 <div class="message-avatar">${senderInitial}</div>
                 <div class="message-content">
-                    ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
+                    ${!isSent ? `<div class="message-sender profile-link" ${senderProfileAttrs}>${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
                     <div class="message-bubble">
                         <div class="message-deleted">🚫 This message was deleted</div>
                     </div>
@@ -464,9 +466,9 @@ function renderMessageHtml(message) {
                     </svg>
                 </button>
             </div>
-            <div class="message-avatar">${senderInitial}</div>
+            <div class="message-avatar profile-link" ${senderProfileAttrs}>${senderInitial}</div>
             <div class="message-content">
-                ${!isSent ? `<div class="message-sender">${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
+                ${!isSent ? `<div class="message-sender profile-link" ${senderProfileAttrs}>${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
                 <div class="message-bubble">
                     ${message.is_forwarded ? `<div class="message-forwarded">${FORWARD_ICON_SVG}<span>Forwarded</span></div>` : ''}
                     ${renderReplyQuote(message.reply_to)}

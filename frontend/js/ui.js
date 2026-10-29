@@ -19,25 +19,23 @@ function initializeUI() {
 }
 
 /**
- * Initialize theme toggle
+ * Dark mode switch (Settings > Appearance)
  */
 function initializeThemeToggle() {
     const themeToggle = document.getElementById('themeToggle');
-    
-    if (!themeToggle) return;
-    
+
     // Load saved theme
     const savedTheme = localStorage.getItem(CONFIG.STORAGE_KEYS.THEME) || 'light';
     if (savedTheme === 'dark') {
         document.body.classList.add('dark-theme');
     }
-    
-    // Toggle theme
-    themeToggle.addEventListener('click', () => {
-        document.body.classList.toggle('dark-theme');
-        
-        const isDark = document.body.classList.contains('dark-theme');
-        localStorage.setItem(CONFIG.STORAGE_KEYS.THEME, isDark ? 'dark' : 'light');
+
+    if (!themeToggle) return;
+    themeToggle.checked = document.body.classList.contains('dark-theme');
+
+    themeToggle.addEventListener('change', () => {
+        document.body.classList.toggle('dark-theme', themeToggle.checked);
+        localStorage.setItem(CONFIG.STORAGE_KEYS.THEME, themeToggle.checked ? 'dark' : 'light');
     });
 }
 
@@ -394,20 +392,10 @@ function handleTypingIndicator(data) {
  * Handle user status updates
  */
 function handleUserStatusUpdate(data) {
-    // Update chat list
-    const chatItems = document.querySelectorAll('.chat-item');
-    chatItems.forEach(item => {
-        // This is simplified - in production, you'd need to check if the user is in this chat
-        // and update the status accordingly
-    });
-    
-    // Update current chat if it's a direct chat with this user
-    if (currentChatId) {
-        const chatStatus = document.getElementById('chatStatus');
-        if (chatStatus && chatStatus.textContent !== 'members') {
-            // This is a direct chat, update status
-            chatStatus.textContent = data.status;
-        }
+    // Only the person it's about: their participant rows and, for a direct chat with them, the header
+    // (status null = they don't share it with you; profile.js)
+    if (typeof applyPresenceUpdate === 'function') {
+        applyPresenceUpdate(data);
     }
 }
 
@@ -504,6 +492,13 @@ function showChatInfo() {
         return;
     }
 
+    // Direct chats: the other person's profile card (profile.js)
+    const partner = typeof getDirectChatOtherUser === 'function' ? getDirectChatOtherUser(chat) : null;
+    if (partner && typeof openProfileCard === 'function') {
+        openProfileCard(partner.userId);
+        return;
+    }
+
     const chatInfoTitle = document.getElementById('chatInfoTitle');
     if (chatInfoTitle) chatInfoTitle.textContent = 'Chat Information';
     
@@ -534,10 +529,7 @@ function showChatInfo() {
                     ${participants.length > 0 ? participants.map(p => `
                         <div class="member-item">
                             <div class="member-avatar">
-                                ${p.avatar_url ? 
-                                    `<img src="${p.avatar_url}" alt="${escapeHtml(p.full_name || p.username)}">` :
-                                    `<span>${(p.full_name || p.username).charAt(0).toUpperCase()}</span>`
-                                }
+                                ${avatarInnerHtml(p.full_name || p.username, userAvatarSrc(p.avatar_url))}
                             </div>
                             <div class="member-info">
                                 <div class="member-name">${escapeHtml(p.full_name || p.username)}</div>
@@ -557,10 +549,7 @@ function showChatInfo() {
                 <div class="chat-info-section">
                     <div class="user-profile-large">
                         <div class="profile-avatar-large">
-                            ${otherUser.avatar_url ? 
-                                `<img src="${otherUser.avatar_url}" alt="${escapeHtml(otherUser.full_name || otherUser.username)}">` :
-                                `<span>${(otherUser.full_name || otherUser.username).charAt(0).toUpperCase()}</span>`
-                            }
+                            ${avatarInnerHtml(otherUser.full_name || otherUser.username, userAvatarSrc(otherUser.avatar_url))}
                         </div>
                         <h4>${escapeHtml(otherUser.full_name || otherUser.username)}</h4>
                         <p class="username">@${escapeHtml(otherUser.username)}</p>

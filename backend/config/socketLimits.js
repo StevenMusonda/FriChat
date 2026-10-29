@@ -31,6 +31,12 @@ module.exports = {
             perSocket: { capacity: 10, refillPerSecond: 2 },
             perUser: { capacity: 20, refillPerSecond: 3 }
         },
+        receipt: {
+            events: ['message_status'],
+            perSocket: { capacity: 30, refillPerSecond: 5 },
+            perUser: { capacity: 60, refillPerSecond: 10 },
+            silent: true
+        },
         join: {
             events: ['join_chat', 'authenticate'],
             perSocket: { capacity: 20, refillPerSecond: 2 },

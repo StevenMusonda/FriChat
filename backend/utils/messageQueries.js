@@ -8,13 +8,14 @@ const { EDIT_WINDOW_MINUTES, REPLY_SNIPPET_LENGTH } = require('../config/message
 const { attachMentions } = require('./mentions');
 
 // Select list for `FROM messages m ${MESSAGE_JOINS}`
+// No sender avatar: messages are broadcast to the whole chat room, so they can't be filtered per
+// viewer; clients take photos from the member lists, which apply each sender's privacy settings
 const MESSAGE_COLUMNS = `
     m.id,
     m.chat_id,
     m.sender_id,
     u.username,
     u.full_name,
-    u.avatar_url,
     m.message_type,
     m.content,
     m.file_id,

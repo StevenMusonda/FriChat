@@ -20,6 +20,7 @@ const {
     validateStarredQuery,
     validateMessagesQuery,
     validateSearchQuery,
+    validateMessageStatus,
     checkValidation
 } = require('../utils/validation');
 
@@ -72,7 +73,7 @@ const uploadLimiter = rateLimit({
 router.get('/chat/:chatId', validateMessagesQuery, checkValidation, messageController.getMessages);
 router.post('/', validateMessage, checkValidation, messageController.sendMessage);
 router.post('/upload', uploadLimiter, upload.single('file'), handleUploadError, validateUploadReply, checkValidation, messageController.uploadFile);
-router.patch('/:messageId/status', messageController.updateMessageStatus);
+router.patch('/:messageId/status', messageActionLimiter, validateMessageStatus, checkValidation, messageController.updateMessageStatus);
 
 // Edit a text message (sender only, within the edit window)
 router.patch('/:messageId', messageActionLimiter, validateEditMessage, checkValidation, messageController.editMessage);

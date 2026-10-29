@@ -6,7 +6,7 @@
 const { executeQuery, queryOne, insertAndGetId } = require('../config/database');
 const { cleanMessageText } = require('../utils/messageText');
 const path = require('path');
-const { recordNewMessage } = require('../utils/chatState');
+const { recordNewMessage, updateMessageStatus: setMessageStatus } = require('../utils/chatState');
 const { notifyNewMessage } = require('../utils/push');
 const { saveMentions, replaceMentions, attachMentions } = require('../utils/mentions');
 const { attachLinkPreview } = require('../utils/linkPreview');
@@ -14,6 +14,8 @@ const reactionRules = require('../utils/reactions');
 const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploadedFile } = require('../utils/uploads');
 const { checkCanPost, postingError } = require('../utils/groups');
 const { checkDirectChatBlock } = require('../utils/blocks');
+const { checkRequestReply } = require('../utils/messageRequests');
+const { readReceiptsEnabled, maskReadStatus } = require('../utils/privacy');
 const { getUploadLimits: getUploadLimitSettings } = require('../middleware/upload');
 const { attachPolls } = require('../utils/polls');
 const {
@@ -118,6 +120,9 @@ async function getMessages(req, res) {
         }
 
         messages = messages.map(shapeMessage);
+
+        // With read receipts off you don't see other people's reads either
+        maskReadStatus(messages, await readReceiptsEnabled(userId));
 
         // Nothing of a deleted message goes out, including what it quoted
         for (const message of messages) {
@@ -462,30 +467,19 @@ async function updateMessageStatus(req, res) {
         const { status } = req.body;
         const userId = req.user.id;
 
-        // Verify message exists and user has access
-        const message = await queryOne(`
-            SELECT m.id, m.chat_id
-            FROM messages m
-            JOIN group_members gm ON m.chat_id = gm.chat_id
-            WHERE m.id = ? AND gm.user_id = ?
-        `, [messageId, userId]);
-
-        if (!message) {
-            return res.status(404).json({
+        // Only forwards, never on your own messages; 'read' only when you send read receipts here
+        const result = await setMessageStatus(req.io, messageId, userId, status);
+        if (result.error) {
+            return res.status(result.error.status).json({
                 success: false,
-                message: 'Message not found or access denied'
+                message: result.error.message
             });
         }
 
-        // Update status
-        await executeQuery(
-            'UPDATE messages SET status = ? WHERE id = ?',
-            [status, messageId]
-        );
-
         res.json({
             success: true,
-            message: 'Message status updated'
+            message: 'Message status updated',
+            data: { messageId: result.messageId, status: result.status }
         });
     } catch (error) {
         console.error('Update message status error:', error);
@@ -1079,12 +1073,13 @@ async function forwardMessages(req, res) {
         // ...and direct chats refuse it while either person has blocked the other
         for (const membership of memberships) {
             if (membership.chat_type !== 'direct') continue;
-            const blockError = await checkDirectChatBlock(membership.chat_id, userId);
+            const blockError = (await checkDirectChatBlock(membership.chat_id, userId))
+                || (await checkRequestReply(membership.chat_id, userId));
             if (blockError) {
                 return res.status(403).json({
                     success: false,
                     message: 'You can\'t forward to one or more of those chats',
-                    code: 'BLOCKED'
+                    code: blockError.code
                 });
             }
         }
@@ -1310,6 +1305,7 @@ async function getStarredMessages(req, res) {
         `, params);
 
         const hasMore = rows.length > limit;
+        maskReadStatus(rows, await readReceiptsEnabled(userId));
         const starred = rows.slice(0, limit).map(row => {
             const message = shapeMessage(row);
             message.is_starred = true;

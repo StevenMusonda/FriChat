@@ -18,6 +18,14 @@ const {
 } = require('../config/groups');
 const { secondsFromNow } = require('./timeSql');
 const {
+    DISPLAY_NAME_MAX_LENGTH,
+    BIO_MAX_LENGTH,
+    STATUS_TEXT_MAX_LENGTH,
+    STATUS_EMOJI_MAX_CHARS,
+    STATUS_DURATION_OPTIONS,
+    AUDIENCES
+} = require('../config/profile');
+const {
     POLL_QUESTION_MAX_LENGTH,
     POLL_OPTION_MAX_LENGTH,
     POLL_MIN_OPTIONS,
@@ -865,6 +873,83 @@ const checkValidation = (req, res, next) => {
 };
 
 /**
+ * Validation rules for PATCH /api/messages/:messageId/status
+ */
+const validateMessageStatus = [
+    messageIdParamRule,
+    body('status')
+        .isIn(['delivered', 'read'])
+        .withMessage("status must be 'delivered' or 'read'")
+];
+
+// One line of profile text: control characters (and newlines) removed, trimmed, length-limited
+function profileTextRule(field, max, label) {
+    return body(field)
+        .optional({ values: 'null' })
+        .isString()
+        .withMessage(`${label} must be text`)
+        .bail()
+        .customSanitizer(value => stripControlChars(value).replace(/\n+/g, ' ').trim())
+        .isLength({ max })
+        .withMessage(`${label} must be at most ${max} characters`);
+}
+
+/**
+ * Validation rules for PUT /api/users/me/profile and PUT /api/auth/profile (send only what changes)
+ */
+const validateProfileUpdate = [
+    profileTextRule('displayName', DISPLAY_NAME_MAX_LENGTH, 'Display name'),
+    profileTextRule('fullName', DISPLAY_NAME_MAX_LENGTH, 'Display name'),
+    profileTextRule('bio', BIO_MAX_LENGTH, 'Bio'),
+    body('avatarUrl')
+        .not().exists()
+        .withMessage('Upload a photo with POST /api/users/me/avatar instead')
+];
+
+/**
+ * A custom status emoji: a few pictographs, no letters, digits, spaces or markup characters
+ */
+function isStatusEmoji(value) {
+    if (typeof value !== 'string' || value.length === 0) return false;
+    if ([...value].length > STATUS_EMOJI_MAX_CHARS) return false;
+    if (/[\s\p{Cc}\p{L}\p{N}<>&"'`]/u.test(value)) return false;
+    return /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value);
+}
+
+/**
+ * Validation rules for PUT /api/users/me/status Body: { text?, emoji?, duration? } (one of text/emoji)
+ */
+const validateCustomStatus = [
+    profileTextRule('text', STATUS_TEXT_MAX_LENGTH, 'Status'),
+    body('emoji')
+        .optional({ values: 'falsy' })
+        .custom(isStatusEmoji)
+        .withMessage('Pick a single emoji for your status'),
+    body('duration')
+        .optional()
+        .isIn(STATUS_DURATION_OPTIONS)
+        .withMessage(`duration must be one of ${STATUS_DURATION_OPTIONS.join(', ')}`),
+    body().custom((value, { req }) => {
+        if (!req.body.text && !req.body.emoji) throw new Error('Add a status text or an emoji');
+        return true;
+    })
+];
+
+/**
+ * Validation rules for PUT /api/users/me/privacy (send only what changes)
+ */
+const validatePrivacySettings = [
+    body(['lastSeen', 'photo', 'bio', 'groups'])
+        .optional()
+        .isIn(AUDIENCES)
+        .withMessage(`Audience must be one of ${AUDIENCES.join(', ')}`),
+    body(['readReceipts', 'typingIndicators'])
+        .optional()
+        .isBoolean({ strict: true })
+        .withMessage('Must be true or false')
+];
+
+/**
  * Legacy HTML escaping on write, still used for profile full names only.
  * Never use it for message text or chat names: those are stored raw (utils/messageText.js)
  * and escaped by the frontend at render time.
@@ -936,6 +1021,11 @@ module.exports = {
     validateCreateReminder,
     validateReminderIdParam,
     validateRemindersQuery,
+    validateMessageStatus,
+    validateProfileUpdate,
+    validateCustomStatus,
+    validatePrivacySettings,
+    isStatusEmoji,
     checkValidation,
     sanitizeHtml,
     validateFileType

@@ -6,16 +6,20 @@
 
 const { queryOne } = require('../config/database');
 const blocks = require('../utils/blocks');
+const { applyUserPrivacy } = require('../utils/privacy');
 
 /**
  * Presence as the other user should now see it (online status is hidden from people you block)
  */
 async function emitPresenceChange(io, blockerId, blockedId, nowBlocked) {
     if (!io) return;
-    let status = 'offline';
+    let status = null;
     if (!nowBlocked) {
+        // ...and only if the blocker's "Last seen and online" setting lets the other user see it
         const row = await queryOne('SELECT status FROM users WHERE id = ?', [blockerId]);
-        status = row && row.status === 'online' ? 'online' : 'offline';
+        const current = { id: Number(blockerId), status: row && row.status === 'online' ? 'online' : 'offline' };
+        const [visible] = await applyUserPrivacy(blockedId, [current], { customStatus: null, avatar: null });
+        status = visible.status;
     }
     io.to(`user_${blockedId}`).emit('user_status', { userId: Number(blockerId), status });
 }
@@ -25,7 +29,9 @@ async function emitPresenceChange(io, blockerId, blockedId, nowBlocked) {
  */
 async function listBlocked(req, res) {
     try {
-        res.json({ success: true, data: await blocks.listBlockedUsers(req.user.id) });
+        const list = await blocks.listBlockedUsers(req.user.id);
+        await applyUserPrivacy(req.user.id, list, { avatar: 'avatarUrl', status: null, customStatus: null });
+        res.json({ success: true, data: list });
     } catch (error) {
         console.error('List blocked users error:', error);
         res.status(500).json({ success: false, message: 'Failed to load blocked users' });
@@ -90,4 +96,4 @@ async function unblockUser(req, res) {
     }
 }
 
-module.exports = { listBlocked, blockUser, unblockUser };
+module.exports = { listBlocked, blockUser, unblockUser, emitPresenceChange };

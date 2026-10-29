@@ -6,6 +6,7 @@
 
 const { executeQuery, queryOne, dbType } = require('../config/database');
 const { checkDirectChatBlock } = require('./blocks');
+const { checkRequestReply } = require('./messageRequests');
 
 // message_reactions.emoji is VARCHAR(10), which both databases count in characters (code points)
 const MAX_EMOJI_CHARS = 10;
@@ -47,6 +48,10 @@ async function toggleReaction(messageId, userId, emoji) {
     // Reacting reaches the other person, so a block in a direct chat stops it (removing your own still works)
     const blockError = await checkDirectChatBlock(chatId, userId);
     if (blockError) return { error: blockError.message, blocked: true };
+
+    // A reaction would tell the requester their message was seen before the request is accepted
+    const requestError = await checkRequestReply(chatId, userId);
+    if (requestError) return { error: requestError.message, blocked: true };
 
     const existing = await queryOne(
         'SELECT emoji FROM message_reactions WHERE message_id = ? AND user_id = ?',

@@ -1367,4 +1367,156 @@ Use two accounts (A and B) in a group, plus a direct chat.
 
 ---
 
+## Phase 9: Profiles, privacy and message requests
+
+Decide what other people see about you, and who can reach you.
+
+### What it does
+
+- **Profile** (Settings → Profile, or tap your name at the top of the sidebar):
+  - **Photo.** JPEG, PNG or WebP, up to 5 MB. The server checks the file's first bytes (not its name or type), then sharp decodes it and writes a new 512×512 WebP, centre-cropped to a square. Nothing of the uploaded file is kept: no scripts, HTML, SVG, appended data or EXIF/GPS. The file gets a random name under `uploads/avatars/`, is served as `image/webp` with `nosniff`, and replaces (deletes) the old one. Without sharp, photo uploads are refused (`503`). Photos can't be set by URL any more: `PUT /api/auth/profile` now refuses `avatarUrl`.
+  - **Display name** and **bio** (up to 160 characters, one line).
+  - **Custom status**: an emoji and/or a short text (up to 80 characters), with **Clear after** 30 minutes, 1 hour, 4 hours, 24 hours, a week, or never. Suggestions fill the fields. An expired status is never sent by the server.
+  - Photos and status show in the chat list, the chat header, group member lists, join requests, bans and user search. Clicking a name (message sender, member, the header of a direct chat) opens a **profile card** with photo, name, status, presence and bio, plus **Message** and **Block**.
+- **Privacy** (Settings → Privacy). For **Last seen and online**, **Profile photo**, **Bio and status** and **Who can add me to groups**, pick **Everyone**, **My contacts** or **Nobody**.
+  - "My contacts" means people you share a chat with. A direct chat that is still a message request doesn't count.
+  - **Read receipts** off: your reads aren't stored as "read" or sent to anyone, and you don't see other people's reads either (they show as delivered).
+  - **Typing indicator** off: nobody sees you typing.
+  - **Everything is enforced on the server** (`utils/privacy.js`). Every API response that carries another user's photo, presence, last seen, bio or custom status is filtered for the person asking, and a hidden field is `null`. Socket events go only to people allowed to see them:
+    - `user_status` reaches everyone, your contacts, or no one.
+    - `user_profile_updated` goes to contacts only, filtered.
+    - `messages_read` / `message_status_update` skip members with receipts off.
+    - `user_typing` isn't sent at all when you turned typing off.
+  - Message payloads no longer carry the sender's avatar, because they go to the whole chat room. The UI takes photos from the filtered member lists.
+  - Making the photo audience stricter also renames the photo file, so a URL someone saved earlier stops working.
+  - Someone you blocked sees nothing of these fields, whatever you picked.
+  - "Who can add me to groups" applies when someone creates a group with you or adds you (`403 PRIVACY_GROUP_ADD`). You can still join by invite link.
+- **Message requests.** When someone you share no chat with starts a direct chat, it lands in a **Message requests** section at the top of your chat list. The chat shows a bar with **Accept**, **Delete** and **Block**.
+  - **Until you accept:** you can read but not reply or react (`403 REQUEST_PENDING`). Your reads and typing are not sent to the sender, and you don't count as contacts.
+  - **Accept:** the chat becomes normal. Reads you already made are sent as read receipts, if you share them.
+  - **Delete:** the chat disappears from your list. The sender isn't told.
+  - **Block:** blocks the sender and removes the request. Reporting comes in phase 13.
+  - Starting a chat with the sender yourself also accepts the request.
+- **Settings** now has tabs: **Profile**, **Privacy**, **Notifications**, **Devices** (signed-in devices and password) and **Appearance**. The theme toggle moved from the sidebar into Appearance (**Dark mode**). Blocked users are under Privacy, and email is under Profile. The sidebar's settings icon is now a gear.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_profile_privacy_requests.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_profile_privacy_requests_postgresql.sql
+```
+
+The migration adds:
+- To `users`: `bio`, `custom_status_text`, `custom_status_emoji` and `custom_status_expires_at`.
+- The tables `privacy_settings` (no row means everything is visible to everyone, with receipts and typing on, the same as before) and `message_requests`.
+
+Existing chats are not turned into requests. Fresh installs get the same objects from `schema.sql` / `schema_postgresql.sql`.
+
+**New env variable** (optional, already in `.env.example`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PROFILE_AVATAR_MAX_BYTES` | `5242880` | Largest profile photo upload, in bytes. |
+
+No new npm packages. `sharp` (already an optional dependency) is required for profile photo uploads. `npm install` in `backend/` installs it.
+
+### New endpoints
+
+All of them need a signed-in user and are rate limited.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/users/me` | Your own profile with everything: `{ id, username, fullName, avatarUrl, bio, customStatus: { text, emoji, expiresAt } \| null, status, lastSeen, privacy }`. |
+| PUT | `/api/users/me/profile` | **Body:** `displayName?` (≤ 100), `bio?` (≤ 160). `avatarUrl` is refused. **Rate limit:** 30/min. |
+| POST | `/api/users/me/avatar` | Multipart field `avatar`. Replaces the old photo. **Errors:** `400` for a bad or oversized file, `503` without sharp. **Rate limit:** 10/min. |
+| DELETE | `/api/users/me/avatar` | Removes your photo. |
+| PUT | `/api/users/me/status` | **Body:** `emoji?`, `text?` (≤ 80, at least one of the two), `duration`: `30m` \| `1h` \| `4h` \| `1d` \| `1w` \| `never`. |
+| DELETE | `/api/users/me/status` | Clears your status. |
+| GET | `/api/users/me/privacy` | `{ lastSeen, photo, bio, groups, readReceipts, typingIndicators }`. |
+| PUT | `/api/users/me/privacy` | Any of those fields. Audiences are `everyone` \| `contacts` \| `nobody`, switches are strict booleans. |
+| GET | `/api/users/:userId` | The profile card as you may see it: `{ id, username, fullName, avatarUrl, bio, customStatus, status, lastSeen, isSelf, isContact, blockedByMe }`. Hidden fields are `null`. **Rate limit:** 60/min. |
+| POST | `/api/chats/:chatId/request/accept` | Recipient only (`404` for anyone else, `409` if already decided). |
+| POST | `/api/chats/:chatId/request/delete` | Recipient only. Hides the chat for the recipient. |
+| POST | `/api/chats/:chatId/request/block` | Recipient only. Blocks the sender and hides the chat. |
+
+**Changed:**
+- `GET /api/chats`: each chat has `message_request: { status, incoming } | null`, and participants carry `customStatus`. PostgreSQL now returns the participant keys camelCase (`userId`, `fullName`, `avatarUrl`), the same as MySQL.
+- `GET /api/chats/:chatId`: has `message_request`. Participants carry `last_seen` and `custom_status`. Hidden `status`, `last_seen` and `avatar_url` are `null` (they used to say "offline" for blockers).
+- `POST /api/chats`: returns `data.messageRequest`.
+- `PATCH /api/messages/:messageId/status`: now validated and rate limited. `status` must be `delivered` or `read`, it only moves forward, it doesn't apply to your own messages, and it is broadcast.
+- `PUT /api/auth/profile`: only takes `fullName`.
+
+### New and changed Socket.IO events
+
+| Direction | Event | Payload / notes |
+|---|---|---|
+| server → `user_<id>` | `user_profile_updated` | `{ id, username, fullName, avatarUrl, customStatus, status }`, filtered as a contact may see it. Your own tabs get your full profile. |
+| server → `user_<id>` | `privacy_settings_updated` | Your settings, for your other tabs. |
+| server → `user_<id>` | `message_request_updated` | `{ chatId, status }`. The recipient gets accepted, deleted and blocked; the sender gets only accepted. |
+| server → users | `user_status` | Now only to the people your last-seen setting allows. `status: null` means "no longer shared with you". |
+| server → chat room | `messages_read`, `message_status_update` | Not sent for readers with receipts off, or for request recipients before they accept. Members with receipts off don't receive them. |
+| client → server | `message_status` | Same rules as the REST route. Rate limited (new `receipt` group in `config/socketLimits.js`). |
+| client → server | `typing` | Dropped when your typing indicator is off, or in a request you haven't accepted. |
+
+`CACHE_VERSION` is now `frichat-shell-v10` (new `js/profile.js`).
+
+### Manual test checklist
+
+Use three accounts: A, B (shares a chat with A) and C (shares nothing with A).
+
+1. [ ] Run the migration and restart the server. Settings shows the tabs Profile, Privacy, Notifications, Devices and Appearance. **Appearance → Dark mode** switches the theme and is remembered after a reload. The sidebar has no sun icon any more.
+2. [ ] A: **Profile → Upload photo** with a wide JPEG. It shows as a square in the sidebar, in A's chat items for B, in B's chat header with A and in group member lists. Uploading again replaces it, and **Remove** brings back the initial.
+3. [ ] Try uploading a `.svg`, or an `.html` file renamed to `.png`. Both are refused with "must be a JPEG, PNG or WebP image".
+4. [ ] A: set display name and bio, **Save profile**. B sees the new name live in the chat list and on A's profile card (click A's name in a group message).
+5. [ ] A: status 🎉 "Party", **Clear after 30 minutes**. B sees "🎉 Party" next to A in the chat list, in the header and on the card. Set it to 1 minute through the API (or wait) and check that it disappears without a reload within about a minute.
+6. [ ] A: **Privacy →** all three audiences on **Nobody**. B reloads: no photo (initial only), no status, no "online / last seen", and no bio on the card. In DevTools → Network, check `GET /api/chats`, `GET /api/chats/<id>` and `GET /api/users/<A>`: there is no `uploads/avatars/...` path, bio or status text of A anywhere, and `status` / `last_seen` are `null`. In the WebSocket frames, A going offline and online sends B nothing.
+7. [ ] A: **My contacts**. B (a contact) sees everything again. C, searching for A in **New chat**, sees no photo.
+8. [ ] A: **Read receipts off**. B sends A a message and A reads it. B's tick never turns "read". B reads A's message: A sees no "read" tick either.
+9. [ ] A: **Typing indicator off**. A types in the chat with B, and B sees no "is typing".
+10. [ ] A: **Who can add me to groups → Nobody**. B creates a group with A: "One or more of these people don't allow you to add them to groups." Adding A to an existing group fails the same way. A can still join by invite link.
+11. [ ] C starts a direct chat with A. C sees "Sent as a message request". A sees **Message requests · 1** at the top of the list. Opening it shows the bar (Accept / Delete / Block) and a locked composer. A reading it shows no "read" to C, and A's typing isn't sent.
+12. [ ] A: **Accept**. The composer unlocks and C's ticks turn "read" (if A shares receipts). Repeat with a new account and **Delete**: the chat disappears for A, and C sees nothing change. Repeat with **Block**: the chat disappears and the user shows up under **Privacy → Blocked users**.
+13. [ ] A phone-width window (360 px) in both themes: the tabs scroll sideways, the privacy rows stack, and the profile card, the request bar buttons and the status form fit without sideways scrolling.
+
+### Tests
+
+`cd backend && npm test`: 636 tests, 44 more than before, all passing.
+- `test/phase9.test.js` (44 tests) runs on both fake drivers against an in-memory world of users, settings, chats, blocks and requests. It covers:
+  - **"Nobody":** a leak scan of `GET /api/chats/:id`, `GET /api/users/:id` and user search for the hidden photo, bio, status and last seen.
+  - **Audiences:** "My contacts" for a contact versus a pending requester, blockers, expired statuses, and legacy non-upload avatar URLs being dropped.
+  - **Socket targeting:** presence for nobody, contacts and everyone, and profile updates going to contacts only.
+  - **Read receipts:** off for the reader and for the viewer, `read` becoming `delivered`, and status reports that only move forward.
+  - **Typing switch** and **group-add refusals**.
+  - **Message requests:** created only for strangers, reply refused before accepting, receipts sent on accept, delete telling the sender nothing, block, and only one decision by the recipient.
+  - **Validation rules.**
+  - **Photo pipeline:** HTML, SVG and fake GIF are refused. A PNG with an appended `<script>` comes out as a clean 512×512 WebP without EXIF. Rename and delete never leave `uploads/avatars`.
+  - **Frontend helpers** from the real `profile.js`: only server-made photo paths and escaped markup.
+  - **The PostgreSQL chat list** with lowercased keys. The live check below found this leak, and it is fixed.
+- Existing fakes learned the two new tables (no rows = defaults). Three assertions changed on purpose:
+  - The chat list runs 7 constant queries instead of 4. There is still no N+1.
+  - Participants carry `customStatus`.
+  - A blocker's hidden status is `null` instead of `'offline'`.
+- **Live check on the local PostgreSQL 18**, in two throwaway databases that were dropped afterwards (28/28):
+  - The HEAD schema plus this migration, run twice, matches a fresh `schema_postgresql.sql` exactly: 237 columns, 90 indexes and 239 constraints.
+  - The real server on that database with three real accounts covered:
+    - Profile, status expiry, and the photo upload: a PNG with appended script came out as a 512×512 `image/webp` with `nosniff` and no script bytes.
+    - The SVG refusal, and the rename after a stricter audience.
+    - "Nobody" leaking nothing in 6 responses.
+    - Group-add refusal, the request flow (send, reply refused, accept, double decision, wrong user), receipts staying off, contacts versus strangers, and block.
+    - Auth and validation on the new routes.
+
+### Known limitations
+
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise the statements. The MySQL migration uses `ADD COLUMN` without `IF NOT EXISTS`, so run it once.
+- **Display names are still HTML-escaped on write** (the legacy `sanitizeHtml` rule, kept for consistency with registration). A name like `Tom & Jerry` shows as `Tom &amp; Jerry`, as before. Bio and status are stored raw and rendered with `textContent`.
+- **Read receipts in groups** use the existing single `messages.status` column, so "read" means "someone with receipts on read it". Turning receipts back on doesn't retroactively mark older reads.
+- **Presence for non-contacts:** when you tighten "Last seen" from Everyone, connected non-contacts get `status: null` right away. Profile changes reach only contacts live; other viewers (for example a search result) see them on their next load.
+- **Reporting** is not part of this phase (Block only).
+- **Push notifications** still go out for messages in a pending request (so you notice it). The preview shows the sender's name, which is never a hidden field.
+- **The UI wasn't driven in a real browser session.** It was covered by syntax checks, the sandbox tests and the live HTTP checks. Please go through the checklist above, especially 5, 6 and 13.
+
+---
+
 **Enjoy the new features! 🎉**

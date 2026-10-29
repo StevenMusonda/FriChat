@@ -2,6 +2,8 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS message_requests CASCADE;
+DROP TABLE IF EXISTS privacy_settings CASCADE;
 DROP TABLE IF EXISTS message_reminders CASCADE;
 DROP TABLE IF EXISTS scheduled_messages CASCADE;
 DROP TABLE IF EXISTS poll_votes CASCADE;
@@ -51,7 +53,11 @@ CREATE TABLE users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100),
-    avatar_url VARCHAR(255),
+    avatar_url VARCHAR(255), -- path under uploads/, e.g. 'uploads/avatars/<random>.webp' (upload only)
+    bio VARCHAR(160) NULL,
+    custom_status_text VARCHAR(80) NULL,
+    custom_status_emoji VARCHAR(16) NULL,
+    custom_status_expires_at TIMESTAMP NULL, -- NULL = until cleared
     status user_status DEFAULT 'offline',
     last_seen TIMESTAMP,
     email_verified_at TIMESTAMP NULL, -- NULL = email not verified yet
@@ -431,6 +437,31 @@ CREATE TABLE message_reminders (
 
 CREATE INDEX idx_reminders_due ON message_reminders(status, remind_at);
 CREATE INDEX idx_reminders_user ON message_reminders(user_id, status);
+
+-- Who sees what (no row = everyone sees everything, receipts and typing on).
+-- Audiences: 'everyone' | 'contacts' (people you share an accepted chat with) | 'nobody'
+CREATE TABLE privacy_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    last_seen_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- online status and last seen
+    photo_audience VARCHAR(10) NOT NULL DEFAULT 'everyone',
+    bio_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- bio and custom status
+    groups_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- who can add you to groups
+    read_receipts BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see your reads, you don't see theirs
+    typing_indicators BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see you typing
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- A direct chat started by someone who shared no chat with the recipient (one row per chat)
+CREATE TABLE message_requests (
+    chat_id INTEGER PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | accepted | deleted | blocked
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    decided_at TIMESTAMP NULL
+);
+
+CREATE INDEX idx_message_requests_recipient ON message_requests(recipient_id, status);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
