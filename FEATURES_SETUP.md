@@ -1677,4 +1677,185 @@ Use two accounts, A and B, in a direct chat. Add a group where A is admin and B 
 
 ---
 
+## Phase 11: Voice and video calls (1:1)
+
+Call the other person in a direct chat, with voice or video. Media goes peer to peer over WebRTC; the server only relays the signaling (Socket.IO) and keeps the history. Group calls are out of scope.
+
+### What it does
+
+- **Starting a call.** A direct chat's header has a **phone** and a **camera** button. Calls are refused (with a message) in groups, in chats you're not in, when either person blocked the other, and until a message request is accepted.
+- **Ringing.** The other person's tabs all show an **incoming-call modal** with the caller's name and photo, **Accept** and **Decline**, and a ringtone (generated with Web Audio, no sound files). During **do-not-disturb or quiet hours** it rings silently and says so. The caller hears a ringback tone.
+- **One call per user.** Calling someone who is already in a call (or being rung) gets **busy** ("Bob is on another call"). You can't start a second call yourself.
+- **30 seconds** without an answer ends the call as **missed**. Accepting on one tab stops the others ringing.
+- **In the call:** a full-screen view with the remote video, your own camera as picture-in-picture (mirrored), **mute**, **camera on/off** (video calls), **share screen** (desktop browsers only), **hang up**, and a call timer. Without remote video it shows the other person's photo and the timer.
+- **Camera and microphone errors** end the attempt with a clear message: access blocked, no device, device in use by another app, an unanswered permission prompt (**20 s timeout**), or an insecure page (not https/localhost). A video call whose **camera** is missing or busy carries on with audio only. Every wait has a timeout (invite 10 s, ringing 30 s + 5 s safety, connecting 32 s), so the UI never hangs.
+- **Connection drops.** If the connection goes to `disconnected` (for 2.5 s) or `failed`, the caller does **one ICE restart** with fresh ICE/TURN credentials. If it isn't connected again within **12 s**, the call ends with "Call ended: the connection was lost." If the **socket** drops mid-call, the server keeps the call for **15 s**, and the page rebinds it with `call_sync` when it reconnects.
+- **History.** Every attempt is a row in the new `calls` table, and a **notice** is posted in the chat, worded for each person: "Missed video call" (red) / "Video call, no answer", "Voice call, 4:12", "You declined a voice call" / "Voice call declined", "Voice call, busy". Notices follow the chat's disappearing-messages timer and send no message push.
+- **Calls panel** (phone button next to the starred/planner buttons in the sidebar): recent calls with direction, status, duration and time, **voice and video call-back buttons**, and "Load more". Clicking a row opens the chat. It refreshes live when a call ends.
+- **Push for incoming calls** (when no FriChat tab is visible, never during DND): "Incoming video call: Alice is calling you". It stays on screen until handled where the platform allows, expires after 30 s at the push service, and is replaced by "Missed video call" if nobody answers. Clicking it opens the chat; the page fetches the ringing call (`call_sync`) and shows the Accept/Decline modal.
+
+#### What a service worker can and can't do for calls
+
+A web push can only show a **notification**. It can't ring continuously, show a full-screen answer screen, or keep a call alive with the page closed.
+- **Desktop Chrome/Edge/Firefox:** the notification shows while the browser runs (Chrome/Edge can keep running in the background). `requireInteraction` keeps it until clicked in Chrome/Edge; Firefox and macOS may hide it sooner.
+- **Android Chrome:** the notification arrives with the browser closed and vibrates. Tapping opens FriChat, which shows the modal if the call is still ringing.
+- **iOS/iPadOS Safari (16.4+):** push works **only for the installed app** (Add to Home Screen). One notification sound, no continuous ring, and `requireInteraction` is ignored.
+- Accept/Decline buttons in the notification itself aren't offered: answering needs the page for camera/microphone access anyway.
+
+### Requirements
+
+- **HTTPS is required** for camera and microphone (browsers block `getUserMedia` on plain http). `http://localhost` is the only exception, which is enough for testing on one machine. To test on a phone or a second device, serve the frontend and backend over https (a reverse proxy like Caddy/nginx, or a tunnel such as ngrok / cloudflared) and set `CONFIG.API_BASE_URL` / `SOCKET_URL` and `CORS_ORIGIN` to match.
+- **Test on two different browsers or devices.** Two tabs of the same browser share one camera, and many browsers won't give it to both.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_calls.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_calls_postgresql.sql
+```
+
+The migration adds one table, `calls` (`chat_id`, `caller_id`, `callee_id`, `call_type` voice/video, `status`, `started_at`, `answered_at`, `ended_at`, `end_reason`), with indexes on caller, callee and chat. Nothing existing changes. Fresh installs get it from `schema.sql` / `schema_postgresql.sql`. Run it before starting the new server: without the table, every invite fails.
+
+**New env variables** (all optional, in `backend/.env.example`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `STUN_URLS` | Google's public STUN | Comma-separated `stun:` URLs. |
+| `TURN_URL` | (none: no TURN) | Comma-separated `turn:` / `turns:` URLs, e.g. `turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:5349`. |
+| `TURN_SECRET` | (none) | The coturn `static-auth-secret`. The server hands out credentials valid for `TURN_TTL` seconds: username `<expiry>:<userId>`, password `base64(HMAC-SHA1(secret, username))`. The secret never reaches the browser. |
+| `TURN_TTL` | `21600` (6 h) | Lifetime of those credentials, clamped to 600–86400 s. |
+| `TURN_USERNAME`, `TURN_PASSWORD` | (none) | Fixed credentials, for a hosted TURN service that doesn't use the REST scheme. Used only when `TURN_SECRET` is empty. |
+
+No new npm packages.
+
+#### TURN: why and how
+
+STUN is enough when at least one side has a reachable address. Behind symmetric NAT, carrier-grade NAT (mobile data) or strict company firewalls, calls only connect through a **TURN relay**. Without TURN, expect some calls to stay on "Connecting…" and then end with "the connection was lost".
+
+**Running coturn** (Ubuntu/Debian, on a server with a public IP):
+
+```bash
+sudo apt install coturn
+sudo nano /etc/turnserver.conf
+sudo systemctl enable --now coturn
+```
+
+```ini
+# /etc/turnserver.conf
+listening-port=3478
+tls-listening-port=5349
+fingerprint
+use-auth-secret
+static-auth-secret=<long random string, same as TURN_SECRET>
+realm=turn.example.com
+cert=/etc/letsencrypt/live/turn.example.com/fullchain.pem
+pkey=/etc/letsencrypt/live/turn.example.com/privkey.pem
+total-quota=100
+no-multicast-peers
+# never relay into private networks
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+# behind NAT (e.g. a cloud VM): external-ip=<public IP>/<private IP>
+```
+
+Open **3478 udp+tcp**, **5349 tcp**, and the relay range **49152–65535 udp** in the firewall. Then in `backend/.env`:
+
+```
+TURN_URL=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:5349
+TURN_SECRET=<the same static-auth-secret>
+```
+
+Docker alternative: `docker run -d --network=host coturn/coturn -n --use-auth-secret --static-auth-secret=<secret> --realm=turn.example.com`.
+
+**Hosted TURN** (Metered, Twilio, Cloudflare, Xirsys…): put their TURN URLs in `TURN_URL`. If they give you a REST-API shared secret (coturn-compatible), use `TURN_SECRET`; if they give fixed credentials, use `TURN_USERNAME` and `TURN_PASSWORD`. Services that mint credentials through their own API call (e.g. Twilio's tokens) would need a small change in `backend/utils/turn.js`.
+
+**Checking it:** open `chrome://webrtc-internals` during a call, or the WebRTC "Trickle ICE" sample page with the username/password from `GET /api/calls/ice-servers`. A `relay` candidate means TURN works.
+
+### New endpoints
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/calls/ice-servers` | **Auth required.** `{ iceServers, ttl, turn }` for `RTCPeerConnection`, with fresh TURN credentials for this user. `Cache-Control: no-store`. Fetched before every call and every ICE restart. **Rate limit:** 30/min per user (shared with the history). |
+| GET | `/api/calls?limit=&before=` | **Auth required.** Your calls, newest first: `{ id, chatId, type, status, endReason, direction, startedAt, answeredAt, endedAt, durationSeconds, otherUser }` plus `pagination { hasMore, nextBefore }`. `limit` 1–100 (default 30), `before` a call id. Only chats you're still in. The other person's photo follows their privacy setting. |
+
+**Changed:** messages with `message_type: 'system'` can now have the content `call:<voice|video>:<status>:<seconds>`. Clients turn the code into text; nothing user-written is in it.
+
+### New Socket.IO events
+
+Every client event is checked on the server. The invite is checked against the chat (direct, both members, no block, request accepted). The others are checked against the call: you must be its caller or callee, and for offer/answer/candidates, the **socket** that is in the call. Rate limits: the `call` group (invite/accept/reject/cancel/hangup/sync, burst 8 per socket) and the `callSignal` group (offer/answer/candidates, burst 120, 20/s, silent).
+
+| Direction | Event | Payload / notes |
+|---|---|---|
+| client → server | `call_invite` | `{ chatId, type: 'voice' \| 'video' }` |
+| server → caller | `call_ringing` | `{ callId, chatId, type, calleeId, ringTimeoutMs }` |
+| server → `user_<callee>` | `call_invite` | `{ callId, chatId, type, caller: { id, username, fullName, avatarUrl }, silent, expiresAt }`. `silent` means the callee's DND is on. |
+| server → caller | `call_busy` | `{ callId, chatId, type, calleeId }` |
+| client → server | `call_accept` / `call_reject` | `{ callId }`. Callee only. |
+| server → caller socket | `call_accept` / `call_reject` | `{ callId }` |
+| client → server | `call_cancel` | `{ callId }`. Caller only, while ringing. |
+| server → users | `call_cancel` | `{ callId, reason: 'cancelled' \| 'declined' \| 'answered_elsewhere' }` |
+| server → both | `call_timeout` | `{ callId }` after 30 s without an answer |
+| both ways | `call_offer` / `call_answer` | `{ callId, sdp: { type, sdp }, iceRestart? }`. SDP up to 30 KB, relayed only to the other side's socket. |
+| both ways | `call_ice_candidate` | `{ callId, candidate }`, cleaned to `candidate`, `sdpMid`, `sdpMLineIndex`, `usernameFragment`. |
+| client → server | `call_hangup` | `{ callId, reason?: 'hangup' \| 'connection_failed' \| 'media_error' }`. While ringing it cancels (caller) or declines (callee). |
+| server → other side | `call_hangup` | `{ callId, reason, by }`. `reason: 'connection_lost'` when a socket didn't come back within 15 s. |
+| client → server | `call_sync` | `{ callId }` after a reconnect (rebinds the call to the new socket), or `{}` (re-sends a ringing invite). |
+| server → socket | `call_sync` | `{ callId, active, otherDevice? }` |
+| server → other side | `call_peer_reconnected` | `{ callId }`. The caller then restarts ICE if needed. |
+| server → socket | `call_error` | `{ event, code, message, callId? }`. Codes: `INVALID`, `ALREADY_IN_CALL`, `NOT_A_MEMBER`, `NOT_DIRECT`, `BLOCKED`, `REQUEST_PENDING`, `NOT_FOUND`, `ALREADY_ANSWERED`, `OTHER_DEVICE`, `CALL_ERROR`. |
+| server → both users | `call_log_updated` | `{ callId }` when a call ends (refreshes the Calls panel). |
+
+The call notice arrives as a normal `new_message` in the chat room. `CACHE_VERSION` is now `frichat-shell-v14` (new `js/calls.js`).
+
+### Manual test checklist
+
+Use accounts A and B in a direct chat, on **two different browsers or devices** (e.g. Chrome and Firefox, or a laptop and a phone). Use `http://localhost` on one machine, or https for anything else. Have a third account, C, in a direct chat with B.
+
+1. [ ] Run the migration and restart. A direct chat's header shows a phone and a camera button; a group chat's doesn't.
+2. [ ] A clicks the **camera**. The browser asks for camera and microphone. **Block** it: "Access to your camera and microphone was blocked…", and the call screen closes. Allow it and try again.
+3. [ ] A calls B (voice). A sees "Ringing…" and hears the ringback. B sees the modal with A's name and photo and hears the ringtone. B **Declines**: A sees "B declined the call." A's chat shows "Voice call declined", B's shows "You declined a voice call".
+4. [ ] A calls B (video); B **Accepts**. Both see the other's video full screen and their own in the corner, and the timer counts. Check **mute** (the other side hears nothing), **camera off** (your preview disappears, the other side sees black) and **hang up**. The notice reads "Video call, m:ss" for both, with the right duration.
+5. [ ] **Voice call:** the screen shows the photo and the timer, with no camera button. Audio flows both ways.
+6. [ ] **Missed:** A calls and B does nothing for 30 s. A sees "No answer". B's modal closes with "Missed call from A", and B's chat shows a red "Missed voice call" and an unread badge.
+7. [ ] **Busy:** while A and B are in a call, C calls B. C sees "B is on another call", B is not interrupted, and B's chat with C shows a missed call.
+8. [ ] **Two tabs for B:** both ring. Accepting in one closes the other's modal.
+9. [ ] **Do-not-disturb:** B turns DND on and A calls. B's modal appears with "Do not disturb is on: ringing silently", and no sound plays.
+10. [ ] **Blocked / request:** B blocks A, and A tries to call: "You can't call this user." Unblock. In a message request that isn't accepted yet: "Calls are available once the message request is accepted."
+11. [ ] **No camera:** on a machine without a camera (or with the camera in use by another app), start a video call. It continues as audio only, with a message.
+12. [ ] **Insecure page:** open the frontend over plain http on a LAN IP (not localhost) and click call: "Calls need a secure connection…".
+13. [ ] **Connection drop:** during a call, turn off Wi-Fi on one device for about 5 s and back on. You see "Reconnecting…", then the timer resumes. Turn it off for 30 s: the call ends on both sides with "the connection was lost".
+14. [ ] **Screen sharing** (desktop): click the screen button and pick a window. The other side sees it instead of your camera (also in a voice call). Stop with the button or the browser's "Stop sharing" bar: the camera comes back. On a phone the button isn't shown.
+15. [ ] **Push:** enable push for B, close B's FriChat tabs, and have A call B. B gets "Incoming video call: A is calling you". Click it within 30 s: FriChat opens and the Accept/Decline modal appears. Let it time out instead: the notification turns into "Missed video call".
+16. [ ] **Calls panel:** the phone button in the sidebar lists the calls above, with status, duration and direction; missed ones are red. The call-back buttons start a voice or video call; clicking a row opens the chat.
+17. [ ] **TURN:** with `TURN_URL` and `TURN_SECRET` set, `GET /api/calls/ice-servers` returns a `turn:` entry with `<expiry>:<id>` as the username. Call from a phone on mobile data to a laptop on Wi-Fi. If the direct path fails, `chrome://webrtc-internals` shows a `relay` candidate pair.
+18. [ ] **Layout:** at 360 px wide, in light and dark themes, the header buttons fit, the incoming card and call controls fit without sideways scrolling, and the self-view doesn't cover the controls.
+
+### Tests
+
+`cd backend && npm test`: **779 tests**, all passing (49 new).
+- **`test/phase11.test.js`** (38 tests):
+  - **TURN:** the coturn credential format checked against an independent HMAC, the secret never in the response, TTL clamping, default and custom STUN, hosted fixed credentials, and `TURN_URL` without credentials ignored.
+  - **Who may call**, on both fake drivers: direct members only; groups and non-members refused; blocks either way; unaccepted requests on either side; bound parameters only.
+  - **State machine** (fake store, io and clock): every callee tab rings; DND rings silently; invalid, non-member and blocked invites leave nothing behind; busy and one call per user; accepting on one tab cancels the others; offer/answer/candidates flow only between the two bound sockets (another tab, an outsider, wrong types, oversized SDP and malformed candidates are refused); reject, cancel, timeout and hangup store the right status, notice and pushes; a 4:12 duration; failed connections; the 15 s grace with `call_sync` rebinding; the caller disconnecting during the invite.
+  - **Routes:** auth first, rate limited, `no-store` ICE servers, history paging, validation, direction and duration.
+- **`test/phase11Frontend.test.js`** (11 tests) loads the real `calls.js` and `disappearing.js`: notice wording for caller and callee, durations, every camera/microphone error text, the HTTPS message, the permission-prompt timeout stopping a late stream, the audio-only fallback (and no fallback after a refusal), page/socket/service-worker wiring, and no `innerHTML` with anything but fixed icons.
+- `test/pageScripts.test.js` now treats `calls.js` as a wrapped feature module (no global name leaks).
+- **Live check on the local PostgreSQL 18**, in a throwaway database that was dropped afterwards: `schema_postgresql.sql` plus the migration (idempotent), the real server with real sessions, and three real Socket.IO clients. Checked: TURN credentials over HTTP; a refused non-member invite; ring, busy for a third caller, accept, offer/answer/candidate relay, an outsider's offer refused, and hang up after 2 s (`call:video:completed:2` notice, `calls` row completed with timestamps); cancel; a blocked call; the history endpoint and its validation.
+
+### Known limitations
+
+- **Real WebRTC media wasn't tested** (no camera, microphone or second device here). Signaling was tested end to end. Audio/video, screen sharing, ICE restart and TURN relaying need the checklist above on two real devices.
+- **Live calls are held in server memory.** A server restart ends every call (both sides then see "the connection was lost" after the reconnect timeout). Running several server instances would need a shared store (e.g. the Redis adapter plus shared call state).
+- **Only the caller restarts ICE.** If only the callee's side fails, the callee waits for the caller's restart (12 s) and otherwise ends the call. This avoids both sides sending offers at the same time.
+- **Blocking during a call** doesn't end the call in progress; it blocks new ones.
+- **Camera off sends black frames** rather than showing your photo to the other side.
+- **Ringtone and autoplay.** Browsers may keep Web Audio silent until you have clicked or typed on the page once. A tab opened fresh (e.g. from the call notification) shows the modal but may not ring; phones also vibrate.
+- **Hosted TURN with per-request API tokens** (e.g. Twilio's) isn't built in; see the TURN section.
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise the statements. The MySQL migration uses `CREATE TABLE IF NOT EXISTS`, so running it twice is harmless.
+
+---
+
 **Enjoy the new features! 🎉**

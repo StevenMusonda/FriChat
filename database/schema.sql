@@ -2,6 +2,7 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS calls;
 DROP TABLE IF EXISTS voice_note_plays;
 DROP TABLE IF EXISTS message_requests;
 DROP TABLE IF EXISTS privacy_settings;
@@ -500,6 +501,27 @@ CREATE TABLE voice_note_plays (
     PRIMARY KEY (message_id, user_id),
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 1:1 voice and video calls (history; the live call is held in server memory)
+CREATE TABLE calls (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    caller_id INT NOT NULL,
+    callee_id INT NOT NULL,
+    call_type ENUM('voice', 'video') NOT NULL,
+    -- ringing | active | completed | missed | declined | cancelled | busy | failed
+    status VARCHAR(10) NOT NULL DEFAULT 'ringing',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- when the caller rang
+    answered_at TIMESTAMP NULL DEFAULT NULL,           -- when the callee accepted (NULL = never)
+    ended_at TIMESTAMP NULL DEFAULT NULL,
+    end_reason VARCHAR(20) NULL DEFAULT NULL,           -- hangup | timeout | connection_failed | ...
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (caller_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (callee_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_calls_caller (caller_id, started_at),
+    INDEX idx_calls_callee (callee_id, started_at),
+    INDEX idx_calls_chat (chat_id)
 );
 
 -- Create a view for easy message retrieval with user info

@@ -2,6 +2,7 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS calls CASCADE;
 DROP TABLE IF EXISTS voice_note_plays CASCADE;
 DROP TABLE IF EXISTS message_requests CASCADE;
 DROP TABLE IF EXISTS privacy_settings CASCADE;
@@ -477,6 +478,25 @@ CREATE TABLE voice_note_plays (
     played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (message_id, user_id)
 );
+
+-- 1:1 voice and video calls (history; the live call is held in server memory)
+CREATE TABLE calls (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    caller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    callee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    call_type VARCHAR(5) NOT NULL CHECK (call_type IN ('voice', 'video')),
+    -- ringing | active | completed | missed | declined | cancelled | busy | failed
+    status VARCHAR(10) NOT NULL DEFAULT 'ringing',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- when the caller rang
+    answered_at TIMESTAMP NULL,                        -- when the callee accepted (NULL = never)
+    ended_at TIMESTAMP NULL,
+    end_reason VARCHAR(20) NULL                        -- hangup | timeout | connection_failed | ...
+);
+
+CREATE INDEX idx_calls_caller ON calls(caller_id, started_at);
+CREATE INDEX idx_calls_callee ON calls(callee_id, started_at);
+CREATE INDEX idx_calls_chat ON calls(chat_id);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

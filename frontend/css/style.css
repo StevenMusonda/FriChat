@@ -6534,3 +6534,420 @@ input[type="datetime-local"] {
         transition: none;
     }
 }
+
+/* ===== Calls (phase 11, calls.js) ===== */
+
+/* Call notices in the thread: "Missed video call" in red */
+.system-message.call-notice.missed .system-message-text {
+    color: var(--danger-color);
+    border-color: color-mix(in srgb, var(--danger-color) 40%, var(--border-color));
+}
+
+/* The call screen and the incoming-call card are always dark (video looks best on black) */
+.call-screen,
+.call-incoming {
+    --call-bg: #10141c;
+    --call-surface: rgba(255, 255, 255, 0.12);
+    --call-surface-hover: rgba(255, 255, 255, 0.22);
+    --call-text: #f7fafc;
+    --call-text-muted: #cbd5e0;
+}
+
+.call-incoming {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background-color: rgba(0, 0, 0, 0.55);
+}
+
+.call-incoming[hidden],
+.call-screen[hidden] {
+    display: none;
+}
+
+.call-incoming-card {
+    width: 100%;
+    max-width: 340px;
+    padding: 28px 20px 24px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, #2d3748 0%, var(--call-bg) 100%);
+    color: var(--call-text);
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+}
+
+.call-incoming-name,
+.call-peer-name {
+    margin: 14px 0 4px;
+    font-size: 1.35rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.call-incoming-type,
+.call-status {
+    margin: 0;
+    color: var(--call-text-muted);
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.call-incoming-note {
+    margin: 10px 0 0;
+    color: var(--call-text-muted);
+    font-size: 0.8rem;
+}
+
+.call-incoming-actions {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 26px;
+}
+
+.call-avatar {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #fff;
+    font-size: 2.4rem;
+    font-weight: 600;
+}
+
+.call-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.call-avatar-ringing {
+    animation: call-pulse 1.6s ease-out infinite;
+}
+
+@keyframes call-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.6); }
+    100% { box-shadow: 0 0 0 22px rgba(102, 126, 234, 0); }
+}
+
+.call-round-btn {
+    width: 60px;
+    height: 60px;
+    border: none;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #fff;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.call-round-btn:active {
+    transform: scale(0.95);
+}
+
+.call-round-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.call-round-btn:focus-visible {
+    outline: 3px solid #90cdf4;
+    outline-offset: 3px;
+}
+
+.call-accept {
+    background-color: var(--success-color);
+}
+
+.call-accept:hover:not(:disabled) {
+    background-color: #38a169;
+}
+
+.call-decline {
+    background-color: var(--danger-color);
+}
+
+.call-decline:hover:not(:disabled) {
+    background-color: #e53e3e;
+}
+
+.call-control {
+    background-color: var(--call-surface);
+}
+
+.call-control:hover:not(:disabled) {
+    background-color: var(--call-surface-hover);
+}
+
+/* Pressed: muted mic, camera off, sharing the screen */
+.call-control.active {
+    background-color: #f7fafc;
+    color: #1a202c;
+}
+
+.call-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--call-bg);
+    color: var(--call-text);
+    overflow: hidden;
+}
+
+.call-remote-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background-color: #000;
+}
+
+.call-info {
+    position: relative;
+    z-index: 1;
+    padding: 16px;
+    text-align: center;
+    max-width: 100%;
+}
+
+/* With remote video the name and timer move to a small bar at the top */
+.call-screen.has-remote-video .call-info {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 14px 16px 28px;
+    background: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+}
+
+.call-screen.has-remote-video .call-avatar {
+    display: none;
+}
+
+.call-screen.has-remote-video .call-peer-name {
+    margin-top: 0;
+    font-size: 1.1rem;
+}
+
+.call-local-video {
+    position: absolute;
+    z-index: 2;
+    right: 16px;
+    bottom: 110px;
+    width: 180px;
+    max-width: 32vw;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    background-color: #000;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    /* Mirror the camera like a mirror; a shared screen is shown as it is */
+    transform: scaleX(-1);
+}
+
+.call-local-video.is-screen {
+    transform: none;
+    aspect-ratio: 16 / 10;
+    object-fit: contain;
+}
+
+.call-controls {
+    position: absolute;
+    z-index: 3;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    padding: 20px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.55));
+}
+
+/* The page under the call screen doesn't scroll */
+body.in-call {
+    overflow: hidden;
+}
+
+/* ----- Calls panel ----- */
+.calls-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.call-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-right: 6px;
+    border: 1px solid var(--glass-border, var(--border-color));
+    border-radius: 12px;
+    background-color: var(--glass-bg-subtle, var(--bg-secondary));
+}
+
+.call-row-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.call-row-open:hover {
+    background-color: var(--glass-bg, var(--bg-tertiary));
+}
+
+.call-row-avatar {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+}
+
+.call-row-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.call-row-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.call-row-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    color: var(--text-tertiary);
+    font-size: 0.8rem;
+}
+
+.call-row-status > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.call-row-status.missed {
+    color: var(--danger-color);
+}
+
+.call-row-type {
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
+.call-row-time {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    font-size: 0.75rem;
+}
+
+.call-row-btn {
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .call-local-video {
+        right: 12px;
+        bottom: 104px;
+        width: 110px;
+    }
+
+    .call-controls {
+        gap: 14px;
+    }
+
+    .call-round-btn {
+        width: 54px;
+        height: 54px;
+    }
+
+    .call-row-time {
+        display: none;
+    }
+
+    .calls-modal .modal-header,
+    .calls-modal .modal-body {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .call-row-btn {
+        min-width: 36px;
+        padding: 6px;
+    }
+}
+
+/* Phone widths: the call buttons make five header actions, so they get narrower and the name keeps room */
+@media (max-width: 480px) {
+    .chat-header .chat-info {
+        gap: 8px;
+    }
+
+    .chat-header .chat-actions {
+        gap: 0;
+    }
+
+    .chat-header .chat-actions .icon-btn {
+        min-width: 34px;
+        width: 34px;
+        padding: 5px;
+    }
+
+    .chat-header .chat-actions .icon-btn svg {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+@media (max-width: 360px) {
+    .chat-header .chat-actions .icon-btn {
+        min-width: 31px;
+        width: 31px;
+        padding: 4px;
+    }
+
+    .chat-header .chat-info .chat-avatar {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .call-avatar-ringing {
+        animation: none;
+    }
+}

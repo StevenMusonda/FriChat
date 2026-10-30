@@ -25,7 +25,7 @@ const PAGES = fs.readdirSync(FRONTEND).filter(file => file.endsWith('.html')).so
 
 // The feature scripts that keep their names to themselves (window.FriChat for what's shared)
 const FEATURE_MODULES = ['formatter', 'mentions', 'groups', 'security', 'search', 'media', 'composer',
-    'polls', 'planner', 'profile', 'disappearing', 'voice'].map(name => `js/${name}.js`);
+    'polls', 'planner', 'profile', 'disappearing', 'voice', 'calls'].map(name => `js/${name}.js`);
 
 const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'typeof', 'async',
     'await', 'new', 'delete', 'void', 'in', 'of', 'do', 'else', 'try', 'throw', 'super', 'import', 'yield']);

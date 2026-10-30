@@ -39,6 +39,7 @@ const {
     POLL_MIN_OPTIONS,
     POLL_MAX_OPTIONS
 } = require('../config/scheduling');
+const { HISTORY_MAX_PAGE_SIZE: CALL_HISTORY_MAX_PAGE_SIZE } = require('../config/calls');
 
 /**
  * Validation rules for user registration
@@ -278,6 +279,23 @@ const validateStarredQuery = [
     query('limit')
         .optional()
         .isInt({ min: 1, max: 100 })
+        .withMessage('limit must be between 1 and 100')
+        .toInt(),
+
+    query('before')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid cursor')
+        .toInt()
+];
+
+/**
+ * Validation rules for the Calls tab: GET /api/calls?limit=&before=
+ */
+const validateCallHistoryQuery = [
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: CALL_HISTORY_MAX_PAGE_SIZE })
         .withMessage('limit must be between 1 and 100')
         .toInt(),
 
@@ -1040,6 +1058,7 @@ module.exports = {
     validateMessage,
     validateUploadReply,
     validateDisappearingTimer,
+    validateCallHistoryQuery,
     checkUploadValidation,
     isWaveform,
     validateMessageIdParam,

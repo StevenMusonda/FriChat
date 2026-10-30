@@ -227,8 +227,8 @@ async function sendToSubscription(subscription, payload) {
             { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
             JSON.stringify(payload),
             // topic lets the push service replace an undelivered notification for the same chat
-            // (or the same reminder: payload.tag)
-            { TTL: PUSH_TTL, urgency: 'high', topic: payload.tag || `chat-${payload.chatId}` }
+            // (or the same reminder: payload.tag); payload.ttl shortens delivery (a ringing call)
+            { TTL: payload.ttl || PUSH_TTL, urgency: 'high', topic: payload.tag || `chat-${payload.chatId}` }
         );
         return 'sent';
     } catch (error) {

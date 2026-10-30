@@ -605,6 +605,8 @@ async function openChat(chatId, options = {}) {
     // Voice note playing or being recorded, disappearing-messages clock (voice.js, disappearing.js)
     if (typeof FriChat.resetVoiceState === 'function') FriChat.resetVoiceState();
     if (typeof FriChat.resetDisappearingState === 'function') FriChat.resetDisappearingState();
+    // Voice/video call buttons belong to the chat being left (calls.js)
+    if (typeof FriChat.resetCallHeader === 'function') FriChat.resetCallHeader();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();
@@ -696,6 +698,9 @@ async function loadChatDetails(chatId) {
 
             // Disappearing messages timer: header clock, who may change it (disappearing.js)
             if (typeof FriChat.applyDisappearingDetails === 'function') FriChat.applyDisappearingDetails(chat);
+
+            // Voice/video call buttons for direct chats (calls.js)
+            if (typeof FriChat.applyCallDetails === 'function') FriChat.applyCallDetails(chat);
         }
     } catch (error) {
         console.error('Load chat details error:', error);

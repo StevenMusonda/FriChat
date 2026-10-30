@@ -23,6 +23,7 @@ let accountEventHandlers = [];
 let rateLimitHandlers = [];
 let plannerEventHandlers = [];
 let lifecycleEventHandlers = [];
+let callEventHandlers = [];
 
 // Group profile/settings, members, leaving and join requests (handled in groups.js)
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
@@ -33,6 +34,9 @@ const ACCOUNT_EVENTS = ['email_verified', 'block_updated', 'user_profile_updated
 const PLANNER_EVENTS = ['poll_updated', 'scheduled_message_updated', 'reminder_due', 'reminder_updated'];
 // Voice notes played, disappearing messages timer changed, expired messages removed (voice.js, disappearing.js)
 const LIFECYCLE_EVENTS = ['voice_note_played', 'chat_disappearing_updated', 'messages_expired'];
+// 1:1 calls: ringing, answering, WebRTC signaling and the call log (calls.js)
+const CALL_EVENTS = ['call_invite', 'call_ringing', 'call_accept', 'call_reject', 'call_busy', 'call_cancel', 'call_timeout',
+    'call_offer', 'call_answer', 'call_ice_candidate', 'call_hangup', 'call_peer_reconnected', 'call_sync', 'call_error', 'call_log_updated'];
 
 // Handshake refusals the server sends (server.js io.use)
 const EXPIRED_TOKEN_ERRORS = ['Invalid or expired token', 'Access token required'];
@@ -88,6 +92,9 @@ function initializeWebSocket() {
 
         // The server pushes notifications only while no visible tab is watching
         sendPresence();
+
+        // A call in progress rebinds to this new socket; otherwise a ringing call is shown again (calls.js)
+        callEventHandlers.forEach(handler => handler('connect', {}));
     });
     
     socket.on('disconnect', (reason) => {
@@ -213,6 +220,12 @@ function initializeWebSocket() {
     LIFECYCLE_EVENTS.forEach((event) => {
         socket.on(event, (data) => {
             lifecycleEventHandlers.forEach(handler => handler(event, data || {}));
+        });
+    });
+
+    CALL_EVENTS.forEach((event) => {
+        socket.on(event, (data) => {
+            callEventHandlers.forEach(handler => handler(event, data || {}));
         });
     });
 
@@ -499,6 +512,22 @@ function onLifecycleEvent(handler) {
 }
 
 /**
+ * Register handler(event, data) for the events in CALL_EVENTS (and 'connect' after every (re)connect)
+ */
+function onCallEvent(handler) {
+    callEventHandlers.push(handler);
+}
+
+/**
+ * Send a call event (calls.js); false when the socket isn't connected
+ */
+function emitCallEvent(event, data) {
+    if (!socket || !socket.connected) return false;
+    socket.emit(event, data);
+    return true;
+}
+
+/**
  * Register handler({ event, retryAfterMs, disconnected }) for rate-limited events
  */
 function onRateLimited(handler) {
@@ -529,5 +558,6 @@ function disconnectWebSocket() {
         socketErrorHandlers = [];
         plannerEventHandlers = [];
         lifecycleEventHandlers = [];
+        callEventHandlers = [];
     }
 }

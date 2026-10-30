@@ -21,6 +21,7 @@ const blockRoutes = require('./routes/blocks');
 const pollRoutes = require('./routes/polls');
 const userRoutes = require('./routes/users');
 const { scheduledRouter, remindersRouter } = require('./routes/schedule');
+const callRoutes = require('./routes/calls');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -42,6 +43,8 @@ const { emitPresence, typingIndicatorsEnabled } = require('./utils/privacy');
 const { isAwaitingAcceptance } = require('./utils/messageRequests');
 const { chatExpiresAtSql } = require('./utils/timeSql');
 const { markVoicePlayed } = require('./utils/voiceNotes');
+const { createCallManager } = require('./utils/calls');
+const callPush = require('./utils/callPush');
 
 // What clients may ask for; a file's real type comes from its upload record ('voice' = audio)
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file', 'voice'];
@@ -101,6 +104,7 @@ app.use('/api/polls', pollRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/scheduled-messages', scheduledRouter);
 app.use('/api/reminders', remindersRouter);
+app.use('/api/calls', callRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -117,6 +121,9 @@ const connectedUsers = new Map(); // userId -> socketId
 // Token buckets for send_message, typing, reactions and joins (limits in config/socketLimits.js)
 const socketLimiter = createSocketRateLimiter();
 setInterval(socketLimiter.sweep, 60 * 1000).unref();
+
+// 1:1 voice/video calls: signaling, ringing, busy/timeout and history (utils/calls.js)
+const callManager = createCallManager({ io, push: callPush });
 
 /**
  * Socket.IO's view of the client IP (X-Forwarded-For only when TRUST_PROXY is set)
@@ -482,6 +489,13 @@ io.on('connection', (socket) => {
             console.error('Voice played error:', error);
         }
     });
+
+    /**
+     * Calls: call_invite, call_accept, call_reject, call_cancel, call_offer, call_answer,
+     * call_ice_candidate, call_hangup and call_sync. Each handler checks that this socket's user is
+     * the caller or callee (invites: both share the direct chat, no block, request accepted).
+     */
+    callManager.register(socket, onLimited);
 
     /**
      * Typing indicator

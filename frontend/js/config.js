@@ -14,6 +14,9 @@ const CONFIG = {
     
     // API Endpoints
     ENDPOINTS: {
+        // 1:1 calls (calls.js)
+        CALL_ICE_SERVERS: '/calls/ice-servers',
+        CALLS: '/calls',
         // Auth
         REGISTER: '/auth/register',
         LOGIN: '/auth/login',
@@ -136,6 +139,14 @@ const CONFIG = {
     POLL_MAX_OPTIONS: 12,
     POLL_QUESTION_MAX_LENGTH: 300,
     POLL_OPTION_MAX_LENGTH: 100,
+
+    // Calls (backend/config/calls.js RING_TIMEOUT_MS decides; this is only the page's safety net)
+    CALL_RING_TIMEOUT_MS: 30 * 1000,
+    // Waiting for the camera/microphone (an unanswered permission prompt) before giving up
+    CALL_MEDIA_TIMEOUT_MS: 20 * 1000,
+    // Waiting for the connection to come back after an ICE restart before ending the call
+    CALL_RECONNECT_TIMEOUT_MS: 12 * 1000,
+    CALLS_PAGE_SIZE: 30,
 
     // Storage Keys
     STORAGE_KEYS: {

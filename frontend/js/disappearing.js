@@ -30,6 +30,9 @@ function disappearingLabel(seconds) {
  * Plain text of a system notice ("disappearing:604800" from the server). Callers escape it.
  */
 function describeSystemMessage(message) {
+    // "Missed video call" / "Voice call, 4:12" (calls.js)
+    if (typeof FriChat.isCallNotice === 'function' && FriChat.isCallNotice(message)) return FriChat.describeCallNotice(message);
+
     const match = /^disappearing:(\d+)$/.exec(String(message && message.content || ''));
     if (!match) return 'Chat settings were changed';
 
@@ -45,9 +48,13 @@ function describeSystemMessage(message) {
  * Centred notice in the thread (no actions: it can't be replied to, forwarded or reacted to)
  */
 function renderSystemMessageHtml(message) {
+    // Call notices get a phone/camera icon (fixed markup from calls.js), red when the call was missed
+    const isCall = typeof FriChat.isCallNotice === 'function' && FriChat.isCallNotice(message);
+    const icon = isCall ? FriChat.callNoticeIconHtml(message) : DISAPPEARING_CLOCK_SVG;
+    const classes = `system-message${isCall ? ' call-notice' : ''}${isCall && FriChat.isMissedCallNotice(message) ? ' missed' : ''}`;
     return `
-        <div class="system-message" data-system-message-id="${parseInt(message.id)}" role="note">
-            <span class="system-message-text">${DISAPPEARING_CLOCK_SVG}<span>${escapeHtml(describeSystemMessage(message))}</span></span>
+        <div class="${classes}" data-system-message-id="${parseInt(message.id)}" role="note">
+            <span class="system-message-text">${icon}<span>${escapeHtml(describeSystemMessage(message))}</span></span>
             <span class="system-message-time">${formatTime(message.created_at)}</span>
         </div>
     `;

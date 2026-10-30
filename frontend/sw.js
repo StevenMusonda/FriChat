@@ -5,7 +5,7 @@
  * API responses are never cached.
  */
 
-const CACHE_VERSION = 'frichat-shell-v13';
+const CACHE_VERSION = 'frichat-shell-v14';
 
 const APP_SHELL = [
     'chat.html',
@@ -38,6 +38,7 @@ const APP_SHELL = [
     'js/profile.js',
     'js/voice.js',
     'js/disappearing.js',
+    'js/calls.js',
     'js/security.js',
     'js/join.js',
     'vendor/qrcode-generator/qrcode.js',
@@ -147,13 +148,19 @@ self.addEventListener('push', (event) => {
     }
 
     const chatId = data.chatId || null;
+    // An incoming call stays on screen until it's handled (where the platform allows); its "Missed call"
+    // replaces it through the same tag. A service worker can't ring or show an answer screen itself:
+    // clicking opens the page, which shows the Accept/Decline modal (calls.js, call_sync).
+    const isCall = data.type === 'call';
     const notification = self.registration.showNotification(data.title || 'FriChat', {
         body: data.body || 'New message',
         icon: scoped('icons/icon-192.png'),
         badge: scoped('icons/badge-96.png'),
-        // One notification per chat (a newer message replaces it and alerts again); reminders have their own tag
+        // One notification per chat (a newer message replaces it and alerts again); reminders and calls have their own tag
         tag: data.tag || (chatId ? `chat-${chatId}` : 'frichat'),
         renotify: true,
+        requireInteraction: isCall,
+        vibrate: isCall ? [400, 200, 400, 200, 400] : undefined,
         timestamp: Date.now(),
         data: { chatId: chatId, messageId: data.messageId || null, url: data.url || 'chat.html' }
     });

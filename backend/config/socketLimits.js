@@ -37,6 +37,19 @@ module.exports = {
             perUser: { capacity: 60, refillPerSecond: 10 },
             silent: true
         },
+        // Starting, answering and ending calls
+        call: {
+            events: ['call_invite', 'call_accept', 'call_reject', 'call_cancel', 'call_hangup', 'call_sync'],
+            perSocket: { capacity: 8, refillPerSecond: 0.5 },
+            perUser: { capacity: 16, refillPerSecond: 1 }
+        },
+        // WebRTC signaling inside a call: a burst of ICE candidates at the start and on restarts
+        callSignal: {
+            events: ['call_offer', 'call_answer', 'call_ice_candidate'],
+            perSocket: { capacity: 120, refillPerSecond: 20 },
+            perUser: { capacity: 200, refillPerSecond: 30 },
+            silent: true
+        },
         join: {
             events: ['join_chat', 'authenticate'],
             perSocket: { capacity: 20, refillPerSecond: 2 },

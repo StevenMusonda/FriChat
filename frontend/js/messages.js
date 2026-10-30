@@ -657,7 +657,7 @@ function getMessagePreviewText(messageType, text, fileName) {
         case 'voice':
             return '🎤 Voice message';
         case 'system':
-            return '⏱ Disappearing messages changed';
+            return /^call:/.test(text || '') ? '📞 Call' : '⏱ Disappearing messages changed';
         default:
             return text || '';
     }
