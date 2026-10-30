@@ -1,7 +1,7 @@
 /**
  * Scheduler for timed jobs: auto-unpinning expired messages, auth cleanup, (phase 8)
  * scheduled messages, reminders and polls that close at a set time, and (phase 10) deleting
- * disappearing messages whose time is up.
+ * disappearing messages whose time is up, and (phase 12) event reminders and list item due dates.
  *
  * The timed jobs keep their state in the database (scheduled_messages, message_reminders, polls),
  * so nothing is lost on a restart: the first tick after startup handles whatever came due meanwhile.
@@ -13,6 +13,8 @@ const { processDueScheduledMessages } = require('./scheduledMessages');
 const { fireDueReminders } = require('./reminders');
 const { closeDuePolls } = require('./polls');
 const { deleteExpiredMessages } = require('./disappearing');
+const { fireDueEventReminders } = require('./events');
+const { fireDueListItems } = require('./lists');
 const { SCHEDULER_TICK_SECONDS } = require('../config/scheduling');
 
 /**
@@ -61,6 +63,8 @@ async function runTimedJobs(io) {
             ['scheduled', processDueScheduledMessages],
             ['reminders', fireDueReminders],
             ['polls', closeDuePolls],
+            ['eventReminders', fireDueEventReminders],
+            ['listItems', fireDueListItems],
             ['expired', deleteExpiredMessages]
         ]) {
             try {
@@ -92,7 +96,7 @@ function startScheduler(io = null) {
     runTimedJobs(io);
 
     console.log('✓ Message pin scheduler started (runs every 5 minutes)');
-    console.log(`✓ Scheduled messages, reminders, polls and disappearing messages checked every ${SCHEDULER_TICK_SECONDS} s`);
+    console.log(`✓ Scheduled messages, reminders, polls and disappearing messages, event reminders and list due dates checked every ${SCHEDULER_TICK_SECONDS} s`);
 }
 
 module.exports = { startScheduler, removeExpiredPins, removeExpiredAuthRows, runTimedJobs };

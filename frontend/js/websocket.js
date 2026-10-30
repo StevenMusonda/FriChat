@@ -24,6 +24,7 @@ let rateLimitHandlers = [];
 let plannerEventHandlers = [];
 let lifecycleEventHandlers = [];
 let callEventHandlers = [];
+let planEventHandlers = [];
 
 // Group profile/settings, members, leaving and join requests (handled in groups.js)
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
@@ -37,6 +38,9 @@ const LIFECYCLE_EVENTS = ['voice_note_played', 'chat_disappearing_updated', 'mes
 // 1:1 calls: ringing, answering, WebRTC signaling and the call log (calls.js)
 const CALL_EVENTS = ['call_invite', 'call_ringing', 'call_accept', 'call_reject', 'call_busy', 'call_cancel', 'call_timeout',
     'call_offer', 'call_answer', 'call_ice_candidate', 'call_hangup', 'call_peer_reconnected', 'call_sync', 'call_error', 'call_log_updated'];
+
+// Events and shared lists: new answers, reminders, list changes (events.js, lists.js)
+const PLAN_EVENTS = ['event_updated', 'event_reminder', 'list_updated', 'list_deleted', 'list_item_due'];
 
 // Handshake refusals the server sends (server.js io.use)
 const EXPIRED_TOKEN_ERRORS = ['Invalid or expired token', 'Access token required'];
@@ -226,6 +230,12 @@ function initializeWebSocket() {
     CALL_EVENTS.forEach((event) => {
         socket.on(event, (data) => {
             callEventHandlers.forEach(handler => handler(event, data || {}));
+        });
+    });
+
+    PLAN_EVENTS.forEach((event) => {
+        socket.on(event, (data) => {
+            planEventHandlers.forEach(handler => handler(event, data || {}));
         });
     });
 
@@ -528,6 +538,23 @@ function emitCallEvent(event, data) {
 }
 
 /**
+ * Register handler(event, data) for the events in PLAN_EVENTS
+ */
+function onPlanEvent(handler) {
+    planEventHandlers.push(handler);
+}
+
+/**
+ * Send an event answer or a list change (events.js, lists.js); false when the socket isn't
+ * connected, so the caller uses the REST endpoint instead
+ */
+function emitPlanEvent(event, data) {
+    if (!socket || !socket.connected) return false;
+    socket.emit(event, data);
+    return true;
+}
+
+/**
  * Register handler({ event, retryAfterMs, disconnected }) for rate-limited events
  */
 function onRateLimited(handler) {
@@ -559,5 +586,6 @@ function disconnectWebSocket() {
         plannerEventHandlers = [];
         lifecycleEventHandlers = [];
         callEventHandlers = [];
+        planEventHandlers = [];
     }
 }

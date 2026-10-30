@@ -13,6 +13,7 @@ const {
     validateCustomStatus,
     validatePrivacySettings,
     validateUserIdParam,
+    validateBirthday,
     checkValidation
 } = require('../utils/validation');
 
@@ -47,6 +48,8 @@ router.post('/me/avatar', avatarLimiter, uploadUserAvatar, handleUserAvatarUploa
 router.delete('/me/avatar', avatarLimiter, userController.removeAvatar);
 router.put('/me/status', profileLimiter, validateCustomStatus, checkValidation, userController.setCustomStatus);
 router.delete('/me/status', profileLimiter, userController.clearCustomStatus);
+router.put('/me/birthday', profileLimiter, validateBirthday, checkValidation, userController.setBirthday);
+router.delete('/me/birthday', profileLimiter, userController.clearBirthday);
 router.get('/me/privacy', profileCardLimiter, userController.getPrivacy);
 router.put('/me/privacy', profileLimiter, validatePrivacySettings, checkValidation, userController.updatePrivacy);
 

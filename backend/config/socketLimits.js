@@ -31,6 +31,12 @@ module.exports = {
             perSocket: { capacity: 10, refillPerSecond: 2 },
             perUser: { capacity: 20, refillPerSecond: 3 }
         },
+        // Event answers and shared list changes (ticking through a shopping list comes in bursts)
+        plan: {
+            events: ['event_rsvp', 'list_item_add', 'list_item_update', 'list_item_remove'],
+            perSocket: { capacity: 20, refillPerSecond: 3 },
+            perUser: { capacity: 40, refillPerSecond: 5 }
+        },
         receipt: {
             events: ['message_status', 'voice_played'],
             perSocket: { capacity: 30, refillPerSecond: 5 },

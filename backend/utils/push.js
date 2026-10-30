@@ -126,6 +126,11 @@ function buildPreview(message, { disappearing = false } = {}) {
         const text = `📊 Poll: ${question}`;
         return text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH - 1)}…` : text;
     }
+    if (message.message_type === 'event') {
+        const title = String(message.content || '').replace(/\s+/g, ' ').trim();
+        const text = `📅 Event: ${title}`;
+        return text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH - 1)}…` : text;
+    }
 
     // Raw text (utils/messageText.js); the notification API shows it as plain text
     const text = String(message.content || '').replace(/\s+/g, ' ').trim();

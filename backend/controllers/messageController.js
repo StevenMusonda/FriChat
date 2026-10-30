@@ -19,6 +19,8 @@ const { checkRequestReply } = require('../utils/messageRequests');
 const { readReceiptsEnabled, maskReadStatus } = require('../utils/privacy');
 const { getUploadLimits: getUploadLimitSettings, maxSizeFor } = require('../middleware/upload');
 const { attachPolls } = require('../utils/polls');
+const { attachEvents } = require('../utils/events');
+const { attachListRefs } = require('../utils/lists');
 const { attachVoicePlays } = require('../utils/voiceNotes');
 const { chatExpiresAtSql } = require('../utils/timeSql');
 const {
@@ -142,6 +144,10 @@ async function getMessages(req, res) {
 
         // Options, counts and this user's votes for poll messages
         await attachPolls(messages, userId);
+
+        // Event cards (answers, this user's RSVP) and the titles/names behind event and list notices
+        await attachEvents(messages, userId);
+        await attachListRefs(messages);
 
         // Voice notes: played by someone (own notes) / by this user (other people's)
         await attachVoicePlays(messages, userId);
@@ -1073,6 +1079,14 @@ async function forwardMessages(req, res) {
             return res.status(400).json({
                 success: false,
                 message: 'Polls cannot be forwarded'
+            });
+        }
+
+        // Same for events: the answers and reminders belong to the chat it was planned in
+        if (sources.some(m => m.message_type === 'event')) {
+            return res.status(400).json({
+                success: false,
+                message: 'Events cannot be forwarded'
             });
         }
 

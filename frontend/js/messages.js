@@ -654,10 +654,15 @@ function getMessagePreviewText(messageType, text, fileName) {
             return `📎 ${fileName || 'File'}`;
         case 'poll':
             return `📊 ${text || 'Poll'}`;
+        case 'event':
+            return `📅 ${text || 'Event'}`;
         case 'voice':
             return '🎤 Voice message';
         case 'system':
-            return /^call:/.test(text || '') ? '📞 Call' : '⏱ Disappearing messages changed';
+            if (/^call:/.test(text || '')) return '📞 Call';
+            if (/^(event_updated|event_cancelled):/.test(text || '')) return '📅 Event updated';
+            if (/^list_created:/.test(text || '')) return '☑ New list';
+            return '⏱ Disappearing messages changed';
         default:
             return text || '';
     }
@@ -789,6 +794,12 @@ function renderMessageContent(message) {
             return typeof FriChat.renderPollHtml === 'function'
                 ? FriChat.renderPollHtml(message)
                 : `<div class="message-text">📊 ${escapeHtml(message.content || 'Poll')}</div>`;
+
+        case 'event':
+            // Card with time, place, answers and names (events.js); every text in it is escaped
+            return typeof FriChat.renderEventCardHtml === 'function'
+                ? FriChat.renderEventCardHtml(message)
+                : `<div class="message-text">📅 ${escapeHtml(message.content || 'Event')}</div>`;
 
         case 'voice':
             // Player with waveform, seek, speed (voice.js); numbers only, no user text

@@ -2,6 +2,11 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS chat_list_items CASCADE;
+DROP TABLE IF EXISTS chat_lists CASCADE;
+DROP TABLE IF EXISTS event_reminders CASCADE;
+DROP TABLE IF EXISTS event_rsvps CASCADE;
+DROP TABLE IF EXISTS chat_events CASCADE;
 DROP TABLE IF EXISTS calls CASCADE;
 DROP TABLE IF EXISTS voice_note_plays CASCADE;
 DROP TABLE IF EXISTS message_requests CASCADE;
@@ -45,7 +50,7 @@ DROP TYPE IF EXISTS message_status CASCADE;
 CREATE TYPE user_status AS ENUM ('online', 'offline', 'away');
 CREATE TYPE chat_type AS ENUM ('direct', 'group');
 CREATE TYPE member_role AS ENUM ('admin', 'member');
-CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'file', 'poll', 'voice', 'system');
+CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'file', 'poll', 'voice', 'system', 'event');
 CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read');
 
 -- Users table
@@ -60,6 +65,9 @@ CREATE TABLE users (
     custom_status_text VARCHAR(80) NULL,
     custom_status_emoji VARCHAR(16) NULL,
     custom_status_expires_at TIMESTAMP NULL, -- NULL = until cleared
+    birthday_day SMALLINT NULL, -- birthday: day and month, year optional (the year is never shown to others)
+    birthday_month SMALLINT NULL,
+    birthday_year SMALLINT NULL,
     status user_status DEFAULT 'offline',
     last_seen TIMESTAMP,
     email_verified_at TIMESTAMP NULL, -- NULL = email not verified yet
@@ -454,6 +462,7 @@ CREATE TABLE privacy_settings (
     photo_audience VARCHAR(10) NOT NULL DEFAULT 'everyone',
     bio_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- bio and custom status
     groups_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- who can add you to groups
+    birthday_audience VARCHAR(10) NOT NULL DEFAULT 'contacts', -- who sees your birthday (and its banner in shared groups)
     read_receipts BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see your reads, you don't see theirs
     typing_indicators BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see you typing
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -497,6 +506,81 @@ CREATE TABLE calls (
 CREATE INDEX idx_calls_caller ON calls(caller_id, started_at);
 CREATE INDEX idx_calls_callee ON calls(callee_id, started_at);
 CREATE INDEX idx_calls_chat ON calls(chat_id);
+
+-- Phase 12: events (a message of type 'event' is the card), RSVPs, reminders and shared lists
+CREATE TABLE chat_events (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id INTEGER NULL REFERENCES messages(id) ON DELETE SET NULL, -- the card; NULL once that message is gone
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(150) NOT NULL,
+    description TEXT NULL,
+    location VARCHAR(200) NULL,
+    starts_at TIMESTAMP NOT NULL,
+    ends_at TIMESTAMP NOT NULL,
+    timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', -- IANA zone the creator planned it in (shown next to the time)
+    status VARCHAR(10) NOT NULL DEFAULT 'active', -- active | cancelled
+    cancelled_at TIMESTAMP NULL,
+    revision INTEGER NOT NULL DEFAULT 0,  -- bumped on every edit (the .ics SEQUENCE)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL
+);
+
+CREATE INDEX idx_chat_events_chat ON chat_events(chat_id, starts_at);
+CREATE INDEX idx_chat_events_message ON chat_events(message_id);
+
+-- One answer per member: going | maybe | declined (no row = no answer yet)
+CREATE TABLE event_rsvps (
+    event_id INTEGER NOT NULL REFERENCES chat_events(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    response VARCHAR(8) NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, user_id)
+);
+
+-- Reminders the creator picked (at start, 1 hour before, 1 day before), fired by the scheduler
+CREATE TABLE event_reminders (
+    id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES chat_events(id) ON DELETE CASCADE,
+    offset_seconds INTEGER NOT NULL,      -- 0, 3600 or 86400 before the start
+    remind_at TIMESTAMP NOT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | fired | skipped (time had passed) | cancelled
+    fired_at TIMESTAMP NULL,
+    UNIQUE (event_id, offset_seconds)
+);
+
+CREATE INDEX idx_event_reminders_due ON event_reminders(status, remind_at);
+
+-- Named checklists in a chat (shopping list, to-do)
+CREATE TABLE chat_lists (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL
+);
+
+CREATE INDEX idx_chat_lists_chat ON chat_lists(chat_id);
+
+CREATE TABLE chat_list_items (
+    id SERIAL PRIMARY KEY,
+    list_id INTEGER NOT NULL REFERENCES chat_lists(id) ON DELETE CASCADE,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- same as the list's
+    text VARCHAR(300) NOT NULL,
+    created_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+    done BOOLEAN NOT NULL DEFAULT FALSE,
+    done_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL, -- who ticked it
+    done_at TIMESTAMP NULL,
+    due_at TIMESTAMP NULL,
+    due_set_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL, -- gets the due-date reminder
+    due_reminder_status VARCHAR(10) NOT NULL DEFAULT 'none', -- none | pending | fired
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL
+);
+
+CREATE INDEX idx_list_items_list ON chat_list_items(list_id);
+CREATE INDEX idx_list_items_due ON chat_list_items(due_reminder_status, due_at);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

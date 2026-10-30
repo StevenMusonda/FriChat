@@ -1856,6 +1856,121 @@ Use accounts A and B in a direct chat, on **two different browsers or devices** 
 - **Hosted TURN with per-request API tokens** (e.g. Twilio's) isn't built in; see the TURN section.
 - **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise the statements. The MySQL migration uses `CREATE TABLE IF NOT EXISTS`, so running it twice is harmless.
 
+## Phase 12: Events, shared lists and birthdays
+
+Planning tools for families and teams, in any chat (groups and direct chats).
+
+### What it does
+
+- **Events.** Chat options (⋮) → **New event**: title, start and end (your local time, sent as an ISO instant), location, description, and reminders (**1 day before**, **1 hour before**, **when it starts**). The event appears in the chat as a **card** with the time in each viewer's own timezone (plus "18:00 in Europe/Berlin" when it was planned in another zone), the place, **Going / Maybe / Can't go** buttons, live counts and the first names going. The creator is "going" automatically.
+- **Answers are live.** Every member's card, the Events tab and the details dialog update as soon as anyone answers (Socket.IO, with a REST fallback). Clicking your current answer takes it back. Cancelled and ended events can't be answered.
+- **Details dialog** (card → **Details**): everything above, the description, everyone's names per answer, **Add to calendar (.ics)**, **Show in chat**, and for the creator **Edit** and **Cancel event**.
+- **Edits and cancellations** are for the creator only. Members get a system notice in the chat ("Ana changed the time and place of “Dinner”", "Ana cancelled “Dinner”"); clicking it opens the event. Changing only the reminder choices posts nothing. Moving the start re-schedules every reminder for the new time.
+- **Reminders** go to members who answered **going or maybe** (and are still in the chat), as an in-app notice and a Web Push when push is enabled (DND and quiet hours respected). Each fires **once**: the scheduler claims a row (`pending → fired`) before sending, so overlapping ticks and restarts can't double-send. A reminder whose time has already passed when the event is created or moved is stored as `skipped` and never fires late; cancelling an event cancels its pending reminders.
+- **Events & lists in chat info.** Group info and a direct chat's profile card have an **Events & lists** section with **Events** (upcoming, plus past events) and **Lists** tabs. Also reachable from chat options → **Events & lists**.
+- **My events** (calendar button in the sidebar): upcoming or past events across all your chats, grouped by day, filterable to "I'm going" / "Maybe".
+- **.ics download**: UTC times, a stable `UID`, `SEQUENCE` = number of edits (re-importing updates the copy in your calendar), `STATUS:CANCELLED` for cancelled events.
+- **Shared lists.** Lists tab → type a name → **Create** (posts "Ana created the list “Groceries”"). In the list dialog every member can **add**, **tick**, **edit** (✎: text and due date) and **remove** (×) items. Ticked items move to a collapsible **Completed** section with "✓ Bob · today 14:02". If two people tick the same item, the first one keeps the credit. All changes reach every member's open list live. Renaming or deleting a whole list is for its creator or a group admin.
+- **Due dates** on items (clock button when adding, or ✎): the person who set the date gets a reminder (in-app + push) when it comes due, once, unless the item is done by then. Overdue items show in red.
+- **Birthdays.** Settings → Profile → **Birthday**: day and month, year optional. The **year is never shown to anyone else**. Settings → Privacy → **Birthday** sets who sees it (default **My contacts**). Profile cards show "🎂 7 November" when allowed. In **groups**, members see a small banner on the day ("🎂 It's Bob's birthday today") with **Wish happy birthday**, which sends "Happy birthday @bob! 🎂🎉" through the normal send path. "Today" is the viewer's local date. 29 February birthdays show on 28 February in other years. The banner can be dismissed for the day. "Nobody" (or a block) hides the banner too.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_events_lists_birthdays.sql
+# PostgreSQL (safe to run more than once; use psql -f, which autocommits the ALTER TYPE)
+psql -U postgres -d frichat -f database/add_events_lists_birthdays_postgresql.sql
+```
+
+The migration adds `'event'` to `message_type`; the tables `chat_events`, `event_rsvps` (primary key `(event_id, user_id)`: one answer per member), `event_reminders` (unique `(event_id, offset_seconds)`), `chat_lists` and `chat_list_items`; the columns `users.birthday_day`, `birthday_month`, `birthday_year`; and `privacy_settings.birthday_audience` (default `'contacts'`). Existing rows are untouched. Fresh installs get all of it from `schema.sql` / `schema_postgresql.sql`. Run it before starting the new server: without it, the scheduler logs an error for the two new jobs every tick, and profile endpoints fail on the missing columns.
+
+**No new env variables and no new npm packages.** The jobs run on the existing scheduler tick (`SCHEDULER_TICK_SECONDS`, default 15 s), so reminders are on time to within one tick. The service worker cache is now `frichat-shell-v15` (new `js/events.js` and `js/lists.js`).
+
+### New endpoints
+
+All need auth and are rate limited per user.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/events` | `{ chatId, title, startsAt, endsAt, description?, location?, timezone?, reminders? }`. Times are ISO 8601 **with an offset**; start in the future, end after start, at most 31 days long, within 730 days. `reminders` ⊆ `['start','1h','1d']`. Posting rules as for messages (members; admins only in announcement-only groups). Returns the card message (`message.event`). 15/min. |
+| GET | `/api/events?chatId=&scope=upcoming\|past` | One chat's events (members only, else 403), or **without `chatId`** "My events" across your chats. Each event has `counts`, `rsvps { going, maybe, declined: [{ userId, name }] }`, `reminders`, `myRsvp`, `startsAt`, `endsAt`, `timezone`, `status`, `started`, `ended`, `revision`. 60/min. |
+| GET | `/api/events/:eventId` | Members only (404 otherwise). |
+| GET | `/api/events/:eventId/ics` | `text/calendar` attachment. Members only. |
+| PATCH | `/api/events/:eventId` | Creator only (403). Send only what changes. Posts `event_updated:<id>:<fields>` unless only `reminders` changed. 409 when cancelled, or when moving an event that has ended. |
+| POST | `/api/events/:eventId/cancel` | Creator only. Posts `event_cancelled:<id>`. Cancelling twice is a no-op. |
+| PUT | `/api/events/:eventId/rsvp` | `{ response: 'going' \| 'maybe' \| 'declined' \| null }`. Members only; 409 for cancelled/ended events. |
+| GET | `/api/lists?chatId=` | The chat's lists with `counts { total, done }`. Members only. |
+| POST | `/api/lists` | `{ chatId, name }` (≤ 100 chars, ≤ 50 lists per chat). Posts `list_created:<id>`. 10/min. |
+| GET | `/api/lists/:listId` | The list with `items [{ id, text, done, doneBy { userId, name }, doneAt, dueAt, createdBy }]`. |
+| PATCH / DELETE | `/api/lists/:listId` | Rename `{ name }` / delete. Creator or group admin. |
+| POST | `/api/lists/:listId/items` | `{ text, dueAt? }` (≤ 300 chars, ≤ 200 items). |
+| PATCH | `/api/lists/items/:itemId` | Any of `{ text, dueAt (null clears), done }`. |
+| DELETE | `/api/lists/items/:itemId` | |
+| PUT / DELETE | `/api/users/me/birthday` | `{ day, month, year? }` (a real date; 29 Feb without a year is fine). |
+| GET | `/api/chats/:chatId/birthdays?date=YYYY-MM-DD` | Members of a **group** with a birthday on that date (the viewer's local date, within ±1 day of today), filtered by their privacy setting and blocks. `[]` for direct chats. |
+
+**Changed:** `GET/PUT /api/users/me/privacy` and `GET /api/users/me` include `birthday` (the audience); `GET /api/users/me` and `GET /api/users/:userId` include `birthday` (`{ day, month }`, plus `year` for yourself only, or `null`). Message pages put `event` on `event` messages and `event_ref` / `list_ref` on the new notices. Events can't be forwarded.
+
+### New Socket.IO events
+
+Rate limit group `plan` (burst 20 per socket, 40 per user). Every client event checks that you're a member of the chat the event/list/item belongs to, with the same functions as the REST routes; refusals come back as `error` with `event` set.
+
+| Direction | Event | Payload |
+|---|---|---|
+| client → server | `event_rsvp` | `{ eventId, response: 'going' \| 'maybe' \| 'declined' \| null }` |
+| server → `chat_<id>` | `event_updated` | The event (no `myRsvp`; clients find themselves in `rsvps`) after an answer, edit or cancel. |
+| server → `user_<id>` | `event_reminder` | `{ event, reminder: 'start' \| '1h' \| '1d', text }` |
+| client → server | `list_item_add` | `{ listId, text, dueAt? }` |
+| client → server | `list_item_update` | `{ itemId, text?, dueAt?, done? }` |
+| client → server | `list_item_remove` | `{ itemId }` |
+| server → `chat_<id>` | `list_updated` | The whole list with items, after any change. |
+| server → `chat_<id>` | `list_deleted` | `{ listId, chatId }` |
+| server → `user_<id>` | `list_item_due` | `{ itemId, listId, chatId, listName, text }` to whoever set the due date |
+
+New cards and notices arrive as normal `new_message` events.
+
+### Manual test checklist
+
+Use accounts A and B in a group (A admin), C in a direct chat with A, and D who is in neither. Two browsers side by side.
+
+1. [ ] Run the migration and restart; the server log shows no scheduler errors.
+2. [ ] A: ⋮ → **New event**, "Dinner", start in 3 minutes, end in 1 hour, reminders **when it starts** and **1 day before**. The card appears for A and B at once; A's **Going** is selected; counts "1 going · 0 maybe · 0 can't go".
+3. [ ] B clicks **Maybe**. A's card shows "1 maybe" without reloading. B clicks **Maybe** again: the answer is taken back on both screens.
+4. [ ] B answers Maybe again. **Details** shows A under Going and B under Maybe.
+5. [ ] **Add to calendar**: the `.ics` opens in your calendar app at the right local time.
+6. [ ] B opens Details: no Edit/Cancel. A edits the location: both see "A changed the place of “Dinner”"; clicking the notice opens the event.
+7. [ ] After 3 minutes (+ up to 15 s) A and B each get **one** "Dinner is starting now" notice (and a push if enabled and the tab is hidden). The 1-day reminder never fires (it was already past).
+8. [ ] A cancels: the card shows "Cancelled", the buttons are disabled, a notice appears, and the .ics link is gone.
+9. [ ] **Timezones:** set B's system timezone to another zone and reload: the card shows B's local time plus "… in <A's zone>".
+10. [ ] **My events** (calendar button in the sidebar) lists events from the group and the direct chat with A; the filters and Upcoming/Past work.
+11. [ ] Group info → **Events & lists**: both tabs work. In the direct chat, the header (profile card) shows the same section.
+12. [ ] **Lists:** A creates "Groceries" (notice appears). B adds "Milk" and "Bread": A's open list shows them live. A ticks Milk: B sees it move to **Completed** with "✓ A". Edit an item's text, remove one; both screens follow.
+13. [ ] Add an item with a due date 2 minutes ahead: only the person who set it gets "Due in “Groceries”: …" once. Tick an item before its due time: no reminder.
+14. [ ] B (not the creator, not admin) sees no Rename/Delete on A's list; A can delete it and B's open list closes with "This list was deleted".
+15. [ ] **Birthdays:** B sets today's day and month. A opens the group: the banner says it's B's birthday; **Wish happy birthday** sends the message with an @mention and the button disappears. A's profile card for B shows the day and month, never the year. B sets Privacy → Birthday → Nobody: after reopening the chat, A sees no banner and no birthday on the card.
+16. [ ] **Outsider:** as D, `GET /api/events/<id>`, `/api/events/<id>/ics`, `/api/lists/<id>` return 404 and `/api/lists?chatId=<group>` / `/api/chats/<group>/birthdays?date=…` return 403.
+17. [ ] **Layout:** at 360 px, light and dark themes: the card, the event form (start/end stack), the list dialog and the birthday banner fit without sideways scrolling.
+
+### Tests
+
+`cd backend && npm test`: **826 tests**, all passing (47 new).
+- **`test/phase12.test.js`** (39 tests), on both fake drivers with tables that enforce the real keys: event input cleaning, timezone-proof times and limits; RSVPs (members only, racing/repeated events keep one answer, live room updates with names, cancelled/ended refused); creator-only edit/cancel with the right notices, reminders re-scheduled on a new start; reminders once to going/maybe members only, overlapping ticks, a fresh "restarted" instance, cancelled and late reminders skipped; history, notices (never leaking another chat's event) and My events; lists (members only, live updates, first ticker keeps credit, rename/delete rights, due reminders once to the setter, done items and leavers skipped); socket events for non-members; `.ics` escaping, folding and injection; birthday dates, the banner's privacy, blocks and 29 February; validation and that every route is authenticated and rate limited.
+- **`test/phase12Frontend.test.js`** (8 tests) loads the real `events.js`: the card escapes all user text, derives the viewer's answer from the name lists, disables closed events, shows the planned timezone; notice wording and links; page/service-worker/socket wiring; no `innerHTML` with user text in `events.js` or `lists.js`.
+- `test/pageScripts.test.js` now loads `events.js` and `lists.js` as wrapped feature modules; `test/phase9.test.js`'s fake database answers the new birthday lookup ("not set").
+- **Live check on the local PostgreSQL**, in throwaway databases (not the app's): the previous schema plus the migration twice, and a fresh `schema_postgresql.sql`, give identical columns. Then the real server and three real Socket.IO clients (two members and an outsider) ran 47 checks: event card, live RSVP, outsider refused on every REST and socket path, .ics, creator-only edit and its notice, My events, history, lists live with tick attribution, due reminder, birthdays and privacy, reminders fired exactly once, cancel, validation.
+
+### Known limitations
+
+- **The UI wasn't clicked through in a browser here.** The scripts load together (page-scripts test), the card rendering and wording are unit tested, and the server side was tested live, but the dialogs, layout at 360 px and dark theme need the checklist above.
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise every statement; the MySQL migration's `ALTER TABLE ... ADD COLUMN` lines fail if run twice (they're not idempotent in MySQL), so run it once.
+- **No recurring events** and no all-day events; an event needs an end time.
+- **Due-date reminders go only to whoever set the date**, not to everyone in the chat (there's no "assignee").
+- **Reminder timing** depends on the scheduler tick (default 15 s).
+- **Deleting an event's card** (delete for everyone, or disappearing messages) keeps the event in the Events tab and My events; it's not cancelled.
+- **Birthday banners** are for groups only (in a direct chat the birthday is on the profile card). The "wished" and "dismissed" state is remembered per browser (localStorage), not per account.
+- **Times in "My events"** are grouped by the start day in your timezone; a multi-day event shows under its first day only.
+
 ---
 
 **Enjoy the new features! 🎉**

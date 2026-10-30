@@ -72,7 +72,7 @@ function showMessageActions(messageId, event) {
                 Edit
             </div>
         ` : ''}
-        ${message.message_type !== 'poll' ? `
+        ${message.message_type !== 'poll' && message.message_type !== 'event' ? `
             <div class="message-action-item" onclick="openForwardModal([${messageId}])">
                 ${FORWARD_ICON_SVG}
                 Forward

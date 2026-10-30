@@ -8,6 +8,7 @@ const chatController = require('../controllers/chatController');
 const groupController = require('../controllers/groupController');
 const searchController = require('../controllers/searchController');
 const requestController = require('../controllers/requestController');
+const userController = require('../controllers/userController');
 const { authenticateToken } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { uploadGroupAvatar, handleAvatarUploadError } = require('../middleware/groupAvatarUpload');
@@ -27,6 +28,7 @@ const {
     validateChatUserParams,
     validateSharedMediaQuery,
     validateDisappearingTimer,
+    validateBirthdaysQuery,
     checkValidation
 } = require('../utils/validation');
 
@@ -99,6 +101,9 @@ router.post('/:chatId/leave', groupActionLimiter, validateLeaveGroup, checkValid
 
 // Shared media panel: ?type=media|files|links, ?before= / ?after= message id cursors
 router.get('/:chatId/media', sharedMediaLimiter, validateSharedMediaQuery, checkValidation, searchController.getSharedMedia);
+
+// Members whose birthday is today (the viewer's local date), for the banner in groups (phase 12)
+router.get('/:chatId/birthdays', sharedMediaLimiter, validateBirthdaysQuery, checkValidation, userController.getChatBirthdays);
 
 // User search
 router.get('/search/users', chatController.searchUsers);

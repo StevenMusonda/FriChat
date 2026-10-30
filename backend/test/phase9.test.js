@@ -127,6 +127,8 @@ function createWorld(dbType, privacyOverrides = {}) {
         const sql = rawSql.replace(/\$\d+/g, '?');
 
         // --- privacy ---
+        // Phase 12 birthdays (utils/birthdays.js): nobody here has one set
+        if (/birthday/.test(sql)) return [];
         if (/FROM users u LEFT JOIN privacy_settings ps ON ps.user_id = u.id WHERE u.id IN/.test(sql)) {
             return params.map(Number).filter(id => world.users[id]).map(id => ({ ...world.users[id], ...(settingsRow(id) || {}) }));
         }

@@ -103,6 +103,19 @@ const CONFIG = {
         MY_PRIVACY: '/users/me/privacy',
         USER_PROFILE: (userId) => `/users/${userId}`,
         MESSAGE_REQUEST: (chatId, action) => `/chats/${chatId}/request/${action}`,
+
+        // Events, shared lists and birthdays (phase 12)
+        EVENTS: '/events',
+        EVENT: (eventId) => `/events/${eventId}`,
+        EVENT_RSVP: (eventId) => `/events/${eventId}/rsvp`,
+        EVENT_CANCEL: (eventId) => `/events/${eventId}/cancel`,
+        EVENT_ICS: (eventId) => `/events/${eventId}/ics`,
+        LISTS: '/lists',
+        LIST: (listId) => `/lists/${listId}`,
+        LIST_ITEMS: (listId) => `/lists/${listId}/items`,
+        LIST_ITEM: (itemId) => `/lists/items/${itemId}`,
+        MY_BIRTHDAY: '/users/me/birthday',
+        CHAT_BIRTHDAYS: (chatId) => `/chats/${chatId}/birthdays`,
     },
     
     // Messages fetched per page when opening a chat or scrolling up
@@ -139,6 +152,13 @@ const CONFIG = {
     POLL_MAX_OPTIONS: 12,
     POLL_QUESTION_MAX_LENGTH: 300,
     POLL_OPTION_MAX_LENGTH: 100,
+
+    // Mirrors backend/config/planning.js (the server enforces them)
+    EVENT_TITLE_MAX_LENGTH: 150,
+    EVENT_DESCRIPTION_MAX_LENGTH: 2000,
+    EVENT_LOCATION_MAX_LENGTH: 200,
+    LIST_NAME_MAX_LENGTH: 100,
+    LIST_ITEM_MAX_LENGTH: 300,
 
     // Calls (backend/config/calls.js RING_TIMEOUT_MS decides; this is only the page's safety net)
     CALL_RING_TIMEOUT_MS: 30 * 1000,

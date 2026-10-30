@@ -6951,3 +6951,535 @@ body.in-call {
         animation: none;
     }
 }
+
+/* ===== Phase 12: events, shared lists, birthdays (events.js, lists.js) ===== */
+
+/* Event card in a message (sized like a poll card) */
+.event-card {
+    min-width: 220px;
+    max-width: 360px;
+    width: 100%;
+}
+
+.event-card.pending {
+    opacity: 0.7;
+}
+
+.event-card-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    opacity: 0.8;
+    margin-bottom: 2px;
+}
+
+.event-card-title {
+    font-weight: 600;
+    font-size: 1rem;
+    overflow-wrap: anywhere;
+}
+
+.event-card.cancelled .event-card-title {
+    text-decoration: line-through;
+}
+
+.event-card.cancelled,
+.event-card.ended {
+    opacity: 0.85;
+}
+
+.event-card-when {
+    margin-top: 4px;
+    font-size: 0.88rem;
+}
+
+.event-card-zone,
+.event-card-where,
+.event-card-names {
+    font-size: 0.8rem;
+    opacity: 0.85;
+    overflow-wrap: anywhere;
+}
+
+.event-card-where {
+    margin-top: 2px;
+}
+
+.event-card-meta {
+    margin-top: 6px;
+    font-size: 0.78rem;
+    opacity: 0.8;
+}
+
+.event-rsvp-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.event-rsvp-btn {
+    flex: 1 1 auto;
+    min-width: 64px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.event-rsvp-btn:hover:not(:disabled) {
+    border-color: var(--primary-color);
+}
+
+.event-rsvp-btn.chosen {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: #ffffff;
+}
+
+.event-rsvp-btn:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.event-rsvp-btn:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* On the sender's own (coloured) bubble */
+.message.sent .event-rsvp-btn {
+    border-color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+}
+
+.message.sent .event-rsvp-btn.chosen {
+    background: #ffffff;
+    border-color: #ffffff;
+    color: var(--message-sent-bg, #667eea);
+}
+
+.message.sent .event-rsvp-btn:focus-visible {
+    outline-color: #ffffff;
+}
+
+/* Event and list notices can be clicked to open them */
+.system-message.plan-notice .system-message-text {
+    cursor: pointer;
+}
+
+.system-message.plan-notice:hover .system-message-text,
+.system-message.plan-notice:focus-visible .system-message-text {
+    border-color: var(--primary-color);
+    color: var(--text-primary);
+}
+
+.system-message.plan-notice:focus-visible {
+    outline: none;
+}
+
+/* Rows of events / lists (chat info section and My events) */
+.plans-panel {
+    margin-top: 10px;
+}
+
+.plans-new-btn {
+    margin-bottom: 10px;
+}
+
+.event-rows {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.event-rows.past {
+    opacity: 0.8;
+}
+
+.event-row-btn {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.event-row-btn:hover,
+.event-row-btn:focus-visible {
+    border-color: var(--primary-color);
+}
+
+.event-row-btn.cancelled .event-row-title {
+    text-decoration: line-through;
+}
+
+.event-row-title {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.event-row-when,
+.event-row-meta {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+}
+
+.event-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.event-badge {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.event-badge.going {
+    background: var(--success-color);
+    color: #ffffff;
+}
+
+.event-badge.maybe {
+    background: var(--warning-color);
+    color: #ffffff;
+}
+
+.event-badge.cancelled {
+    background: var(--danger-color);
+    color: #ffffff;
+}
+
+.my-events-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.my-events-day-label {
+    margin: 6px 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-tertiary);
+}
+
+/* Event details dialog */
+.event-details-state {
+    display: inline-block;
+    margin-bottom: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.event-details-state.cancelled {
+    background: var(--danger-color);
+    color: #ffffff;
+}
+
+.event-details-when {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.event-details-row {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.event-details-description {
+    margin: 10px 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-primary);
+}
+
+.event-people {
+    margin-top: 12px;
+}
+
+.event-people-head {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.event-details-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+/* Event form */
+.event-time-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.event-time-grid input,
+#eventModal textarea {
+    width: 100%;
+}
+
+#eventModal textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    resize: vertical;
+}
+
+.event-reminders {
+    margin: 12px 0 0;
+    padding: 10px 12px 2px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.event-reminders legend {
+    padding: 0 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Shared lists */
+.list-new-row,
+.list-add-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.list-new-row input,
+.list-add-row input,
+.list-add-due input,
+.list-edit-fields input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+}
+
+.list-add-due {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: -4px 0 10px;
+}
+
+.list-add-due[hidden] {
+    display: none;
+}
+
+.list-manage {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 6px;
+}
+
+.list-manage:empty {
+    display: none;
+}
+
+.modal .list-delete-link {
+    color: var(--danger-color);
+}
+
+.list-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.list-item:last-child {
+    border-bottom: none;
+}
+
+.list-item-check {
+    width: 20px;
+    height: 20px;
+    margin-top: 1px;
+    flex-shrink: 0;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
+
+.list-item-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.list-item-text {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.list-item.done .list-item-text {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
+
+.list-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.76rem;
+    color: var(--text-tertiary);
+}
+
+.list-item-due.overdue {
+    color: var(--danger-color);
+    font-weight: 600;
+}
+
+.list-item-action {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    font-size: 1.05rem;
+    color: var(--text-tertiary);
+}
+
+.list-item.editing {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.list-edit-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.list-edit-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.list-completed {
+    margin-top: 10px;
+}
+
+.list-items.completed {
+    opacity: 0.85;
+}
+
+/* Birthday banner under the chat header, and the birthday form */
+.birthday-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    flex-shrink: 0;
+}
+
+.birthday-bar[hidden] {
+    display: none;
+}
+
+.birthday-bar-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.birthday-bar-close {
+    width: 28px;
+    height: 28px;
+    font-size: 1.1rem;
+}
+
+.birthday-inputs {
+    display: grid;
+    grid-template-columns: 5em 1fr 8em;
+    gap: 10px;
+}
+
+.birthday-inputs select,
+.birthday-inputs input {
+    width: 100%;
+}
+
+@media (max-width: 480px) {
+    .event-card {
+        min-width: 0;
+    }
+
+    .event-time-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .birthday-inputs {
+        grid-template-columns: 5em 1fr;
+    }
+
+    .birthday-inputs label:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .birthday-bar {
+        padding: 6px 12px;
+    }
+
+    .list-item-action {
+        width: 36px;
+        height: 36px;
+    }
+}

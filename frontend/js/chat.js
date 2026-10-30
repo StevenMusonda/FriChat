@@ -181,6 +181,8 @@ function renderChatList(chats) {
                 lastMessageText = `📎 ${fileName || 'File'}`;
             } else if (messageType === 'poll') {
                 lastMessageText = `📊 ${content || 'Poll'}`;
+            } else if (messageType === 'event') {
+                lastMessageText = `📅 ${content || 'Event'}`;
             } else if (messageType === 'voice') {
                 lastMessageText = '🎤 Voice message';
             } else if (messageType === 'system') {
@@ -439,6 +441,9 @@ function toggleChatOptionsMenu(event) {
               + (chat.mentions_only ? `<div class="chat-options-note">${chat.is_muted ? 'Muted, but @mentions still notify you' : 'Other messages don\'t notify you'}</div>` : '')
             : '')
         + '<div class="chat-options-separator" role="separator"></div>'
+        + item('plans:event', 'New event')
+        + item('plans:open', 'Events &amp; lists')
+        + '<div class="chat-options-separator" role="separator"></div>'
         + item('disappearing:open', escapeHtml(typeof FriChat.disappearingMenuLabel === 'function' ? FriChat.disappearingMenuLabel() : 'Disappearing messages'))
         + '<div class="chat-options-separator" role="separator"></div>'
         + (chat.archived_at ? item('archive:off', 'Unarchive chat') : item('archive:on', 'Archive chat'));
@@ -464,6 +469,9 @@ function toggleChatOptionsMenu(event) {
             setChatMentionsOnly(chat.id, value === 'on');
         } else if (kind === 'disappearing') {
             FriChat.openDisappearingModal();
+        } else if (kind === 'plans') {
+            if (value === 'event') FriChat.openEventForm();
+            else FriChat.openChatPlans();
         } else {
             setChatArchived(chat.id, value === 'on');
         }
@@ -607,6 +615,8 @@ async function openChat(chatId, options = {}) {
     if (typeof FriChat.resetDisappearingState === 'function') FriChat.resetDisappearingState();
     // Voice/video call buttons belong to the chat being left (calls.js)
     if (typeof FriChat.resetCallHeader === 'function') FriChat.resetCallHeader();
+    // Birthday banner of the chat being left (events.js)
+    if (typeof FriChat.resetPlanChatState === 'function') FriChat.resetPlanChatState();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();
@@ -701,6 +711,9 @@ async function loadChatDetails(chatId) {
 
             // Voice/video call buttons for direct chats (calls.js)
             if (typeof FriChat.applyCallDetails === 'function') FriChat.applyCallDetails(chat);
+
+            // Birthday banner in groups (events.js)
+            if (typeof FriChat.applyPlanChatState === 'function') FriChat.applyPlanChatState(chat);
         }
     } catch (error) {
         console.error('Load chat details error:', error);

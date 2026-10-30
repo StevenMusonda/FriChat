@@ -73,6 +73,10 @@
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                     <span class="chat-info-badge" id="plannerBadge" aria-hidden="true" hidden></span>
                 </button>
+                <!-- Events across all your chats (events.js) -->
+                <button type="button" class="icon-btn starred-btn" id="myEventsBtn" title="My events" aria-label="My events">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </button>
             </div>
 
             <!-- Unverified email (security.js) -->
@@ -170,6 +174,9 @@
                     <span id="scheduledBarText"></span>
                     <button type="button" class="poll-link" id="scheduledBarBtn">View</button>
                 </div>
+
+                <!-- Someone in this group has a birthday today (events.js) -->
+                <div class="birthday-bar" id="birthdayBar" role="status" hidden></div>
 
                 <div class="messages-wrapper" id="messagesWrapper">
                     <div class="messages-container" id="messagesContainer">
@@ -463,6 +470,29 @@
                         </form>
                     </section>
 
+                    <section class="settings-section" aria-labelledby="settingsBirthdayHeading">
+                        <h4 id="settingsBirthdayHeading">Birthday</h4>
+                        <form class="settings-form" id="birthdayForm" novalidate>
+                            <div class="birthday-inputs">
+                                <label for="birthdayDay">Day
+                                    <select id="birthdayDay" class="settings-select"><option value="">–</option></select>
+                                </label>
+                                <label for="birthdayMonth">Month
+                                    <select id="birthdayMonth" class="settings-select"><option value="">–</option></select>
+                                </label>
+                                <label for="birthdayYear">Year (optional)
+                                    <input type="number" id="birthdayYear" min="1900" inputmode="numeric" placeholder="Only you see it">
+                                </label>
+                            </div>
+                            <p class="settings-row-hint">Who sees it is set under Privacy. Groups show a small banner on the day.</p>
+                            <div class="settings-button-row">
+                                <button type="submit" class="btn btn-primary btn-small" id="birthdaySaveBtn">Save birthday</button>
+                                <button type="button" class="btn btn-secondary btn-small" id="birthdayClearBtn" hidden>Remove</button>
+                            </div>
+                            <p class="settings-status" id="birthdayStatus" role="status"></p>
+                        </form>
+                    </section>
+
                     <section class="settings-section" aria-labelledby="settingsEmailHeading">
                         <h4 id="settingsEmailHeading">Email</h4>
                         <div class="settings-row">
@@ -510,6 +540,17 @@
                             <select id="privacyBio" class="settings-select" data-privacy-field>
                                 <option value="everyone">Everyone</option>
                                 <option value="contacts">My contacts</option>
+                                <option value="nobody">Nobody</option>
+                            </select>
+                        </label>
+                        <label class="settings-row" for="privacyBirthday">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">Birthday</span>
+                                <span class="settings-row-hint">Day and month only; the year is never shown. "Nobody" also hides the group banner.</span>
+                            </span>
+                            <select id="privacyBirthday" class="settings-select" data-privacy-field>
+                                <option value="everyone">Everyone</option>
+                                <option value="contacts" selected>My contacts</option>
                                 <option value="nobody">Nobody</option>
                             </select>
                         </label>
@@ -1074,6 +1115,125 @@
         </div>
     </div>
 
+    <!-- Events & lists of the open chat, from the chat options menu (events.js, lists.js) -->
+    <div class="modal" id="chatPlansModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="chatPlansTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="chatPlansTitle">Events &amp; lists</h3>
+                <button class="modal-close" id="closeChatPlans" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="chatPlansBody"></div>
+        </div>
+    </div>
+
+    <!-- Events across all your chats (events.js) -->
+    <div class="modal" id="myEventsModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="myEventsTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="myEventsTitle">My events</h3>
+                <button class="modal-close" id="closeMyEvents" aria-label="Close">&times;</button>
+            </div>
+            <div class="planner-tabs" role="tablist" aria-label="Upcoming or past">
+                <button type="button" class="planner-tab" role="tab" data-my-events-scope="upcoming">Upcoming</button>
+                <button type="button" class="planner-tab" role="tab" data-my-events-scope="past">Past</button>
+            </div>
+            <div class="modal-body">
+                <div class="my-events-toolbar">
+                    <label for="myEventsFilter" class="settings-row-hint">Show</label>
+                    <select id="myEventsFilter" class="settings-select">
+                        <option value="all">All events in my chats</option>
+                        <option value="going">I'm going</option>
+                        <option value="maybe">Maybe</option>
+                    </select>
+                </div>
+                <p class="settings-row-hint">Times are shown in your timezone (<span id="myEventsZone"></span>).</p>
+                <div class="planner-list" id="myEventsList" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- One event: when, where, who's going, add to calendar, edit/cancel (events.js) -->
+    <div class="modal" id="eventDetailsModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="eventDetailsTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="eventDetailsTitle">Event</h3>
+                <button class="modal-close" id="closeEventDetails" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body event-details" id="eventDetailsBody" aria-live="polite"></div>
+        </div>
+    </div>
+
+    <!-- A shared list: add, tick, edit, remove; completed items below (lists.js) -->
+    <div class="modal" id="listModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="listModalTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="listModalTitle">List</h3>
+                <button class="modal-close" id="closeListModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="list-manage" id="listManage"></div>
+                <div class="list-add-row">
+                    <input type="text" id="listAddText" placeholder="Add an item…" autocomplete="off" aria-label="New item">
+                    <button type="button" class="icon-btn" id="listAddDueToggle" title="Add a due date" aria-label="Add a due date">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    </button>
+                    <button type="button" class="btn btn-primary btn-small" id="listAddBtn">Add</button>
+                </div>
+                <div class="list-add-due" id="listAddDueRow" hidden>
+                    <label for="listAddDue" class="settings-row-hint">Due (you get a reminder)</label>
+                    <input type="datetime-local" id="listAddDue">
+                </div>
+                <div class="list-items-wrap" id="listItems" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create or edit an event (events.js); on top of the other event dialogs -->
+    <div class="modal" id="eventModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
+        <div class="modal-content planner-modal">
+            <div class="modal-header">
+                <h3 id="eventModalTitle">New event</h3>
+                <button class="modal-close" id="closeEventModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="eventTitle">Title</label>
+                    <input type="text" id="eventTitle" placeholder="Sunday lunch, Team offsite…" autocomplete="off">
+                </div>
+                <div class="event-time-grid">
+                    <div class="form-group">
+                        <label for="eventStart">Starts</label>
+                        <input type="datetime-local" id="eventStart">
+                    </div>
+                    <div class="form-group">
+                        <label for="eventEnd">Ends</label>
+                        <input type="datetime-local" id="eventEnd">
+                    </div>
+                </div>
+                <span class="settings-row-hint">Your timezone: <span id="eventZone"></span>. Everyone sees it in their own time.</span>
+                <div class="form-group">
+                    <label for="eventLocation">Location (optional)</label>
+                    <input type="text" id="eventLocation" placeholder="Address or meeting link" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="eventDescription">Description (optional)</label>
+                    <textarea id="eventDescription" rows="3"></textarea>
+                </div>
+                <fieldset class="event-reminders">
+                    <legend>Remind everyone who's going or maybe</legend>
+                    <label class="planner-check"><input type="checkbox" data-event-reminder="1d"> 1 day before</label>
+                    <label class="planner-check"><input type="checkbox" data-event-reminder="1h"> 1 hour before</label>
+                    <label class="planner-check"><input type="checkbox" data-event-reminder="start"> When it starts</label>
+                </fieldset>
+                <p class="settings-status" id="eventStatus" role="status"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelEventModal">Cancel</button>
+                <button class="btn btn-primary" id="eventSubmitBtn">Create event</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Due reminders (planner.js) -->
     <div class="reminder-notices" id="reminderNotices" aria-live="assertive"></div>
 
@@ -1100,7 +1260,9 @@
     <script src="js/voice.js"></script>
     <script src="js/disappearing.js"></script>
     <script src="js/calls.js"></script>
-    
+    <script src="js/events.js"></script>
+    <script src="js/lists.js"></script>
+
     <script>
         // Start one feature: if it throws (or its script didn't load, so FriChat.initializeX is missing),
         // log it and carry on, so one broken feature can't stop the others or the chat list
@@ -1256,6 +1418,10 @@
 
             // 1:1 voice and video calls: header buttons, incoming modal, call screen, Calls panel
             startFeature('Calls', () => FriChat.initializeCalls());
+
+            // Events (cards, answers, My events, birthday banner) and shared lists
+            startFeature('Events', () => FriChat.initializeEvents());
+            startFeature('Lists', () => FriChat.initializeLists());
 
             // Older pages on scroll up, read state and jump button near the bottom
             startFeature('Message scroll', () => initializeMessageScroll());

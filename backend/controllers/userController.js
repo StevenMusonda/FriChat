@@ -11,6 +11,7 @@ const avatars = require('../utils/avatars');
 const { STATUS_DURATIONS } = require('../config/profile');
 const { plusSecondsSql } = require('../utils/timeSql');
 const { getBlockRelations } = require('../utils/blocks');
+const birthdays = require('../utils/birthdays');
 
 // Stricter audience = fewer people; a photo whose audience shrinks gets a new file name
 const AUDIENCE_RANK = { everyone: 0, contacts: 1, nobody: 2 };
@@ -21,12 +22,19 @@ function serverError(res, label, error, message) {
 }
 
 /**
+ * Privacy settings plus the birthday audience (kept in utils/birthdays.js)
+ */
+async function fullPrivacySettings(userId) {
+    return { ...(await privacy.getPrivacySettings(userId)), birthday: await birthdays.getBirthdayAudience(userId) };
+}
+
+/**
  * Your own profile with everything (privacy only applies to other people)
  */
 async function ownProfile(userId) {
     const profile = await privacy.getVisibleProfile(userId, userId);
     if (!profile) return null;
-    return { ...profile, privacy: await privacy.getPrivacySettings(userId) };
+    return { ...profile, birthday: await birthdays.getOwnBirthday(userId), privacy: await fullPrivacySettings(userId) };
 }
 
 /**
@@ -161,7 +169,7 @@ async function clearCustomStatus(req, res) {
  */
 async function getPrivacy(req, res) {
     try {
-        res.json({ success: true, data: await privacy.getPrivacySettings(req.user.id) });
+        res.json({ success: true, data: await fullPrivacySettings(req.user.id) });
     } catch (error) {
         serverError(res, 'Get privacy settings', error, 'Failed to load your privacy settings');
     }
@@ -174,6 +182,8 @@ async function updatePrivacy(req, res) {
     try {
         const userId = req.user.id;
         const { previous, settings } = await privacy.savePrivacySettings(userId, req.body);
+        if (privacy.isAudience(req.body.birthday)) await birthdays.saveBirthdayAudience(userId, req.body.birthday);
+        settings.birthday = await birthdays.getBirthdayAudience(userId);
 
         // Someone who saved the photo URL while it was visible to them loses it with a stricter audience
         if (AUDIENCE_RANK[settings.photo] > AUDIENCE_RANK[previous.photo]) {
@@ -221,6 +231,7 @@ async function getUserProfile(req, res) {
             success: true,
             data: {
                 ...profile,
+                birthday: await birthdays.visibleBirthday(viewerId, userId),
                 isSelf: userId === Number(viewerId),
                 isContact: await privacy.isContact(viewerId, userId),
                 blockedByMe: blocked.includes(userId)
@@ -231,7 +242,52 @@ async function getUserProfile(req, res) {
     }
 }
 
+/**
+ * PUT /api/users/me/birthday Body: { day, month, year? } (validateBirthday checks it is a real date)
+ */
+async function setBirthday(req, res) {
+    try {
+        const userId = req.user.id;
+        const year = req.body.year === undefined || req.body.year === null ? null : req.body.year;
+        await birthdays.saveBirthday(userId, { day: req.body.day, month: req.body.month, year });
+        res.json({ success: true, message: 'Birthday saved', data: await ownProfile(userId) });
+    } catch (error) {
+        serverError(res, 'Set birthday', error, 'Failed to save your birthday');
+    }
+}
+
+/**
+ * DELETE /api/users/me/birthday
+ */
+async function clearBirthday(req, res) {
+    try {
+        await birthdays.clearBirthday(req.user.id);
+        res.json({ success: true, message: 'Birthday removed', data: await ownProfile(req.user.id) });
+    } catch (error) {
+        serverError(res, 'Clear birthday', error, 'Failed to remove your birthday');
+    }
+}
+
+/**
+ * GET /api/chats/:chatId/birthdays?date=YYYY-MM-DD - members of a group whose birthday is on the
+ * viewer's local date, as their privacy settings allow (members only)
+ */
+async function getChatBirthdays(req, res) {
+    try {
+        const result = await birthdays.birthdaysInChat(req.user.id, req.params.chatId, req.query.date);
+        if (result.error) {
+            return res.status(result.error.status).json({ success: false, message: result.error.message });
+        }
+        res.json({ success: true, data: result.birthdays });
+    } catch (error) {
+        serverError(res, 'Chat birthdays', error, 'Failed to load birthdays');
+    }
+}
+
 module.exports = {
+    setBirthday,
+    clearBirthday,
+    getChatBirthdays,
     getMe,
     updateProfile,
     uploadAvatar,

@@ -40,6 +40,17 @@ const {
     POLL_MAX_OPTIONS
 } = require('../config/scheduling');
 const { HISTORY_MAX_PAGE_SIZE: CALL_HISTORY_MAX_PAGE_SIZE } = require('../config/calls');
+const {
+    EVENT_TITLE_MAX_LENGTH,
+    EVENT_DESCRIPTION_MAX_LENGTH,
+    EVENT_LOCATION_MAX_LENGTH,
+    EVENT_REMINDER_OFFSETS,
+    RSVP_RESPONSES,
+    LIST_NAME_MAX_LENGTH,
+    LIST_ITEM_MAX_LENGTH
+} = require('../config/planning');
+const { eventSecondsFromNow } = require('./events');
+const { checkBirthday } = require('./birthdays');
 
 /**
  * Validation rules for user registration
@@ -925,6 +936,229 @@ const validateRemindersQuery = [
 ];
 
 /**
+ * Phase 12: events. Text is cleaned (control characters, one line, trimming) in utils/events.js;
+ * these rules check types and rough lengths. Times are ISO 8601 with an offset.
+ */
+function eventTimeRule(field) {
+    return body(field)
+        .custom((value) => {
+            const parsed = eventSecondsFromNow(value);
+            if (!parsed.ok) throw new Error(parsed.error);
+            return true;
+        });
+}
+
+function eventTextRules() {
+    return [
+        body('description')
+            .optional({ values: 'null' })
+            .isString()
+            .withMessage('The description must be text')
+            .isLength({ max: EVENT_DESCRIPTION_MAX_LENGTH + 100 })
+            .withMessage(`The description must be at most ${EVENT_DESCRIPTION_MAX_LENGTH} characters`),
+
+        body('location')
+            .optional({ values: 'null' })
+            .isString()
+            .withMessage('The location must be text')
+            .isLength({ max: EVENT_LOCATION_MAX_LENGTH + 50 })
+            .withMessage(`The location must be at most ${EVENT_LOCATION_MAX_LENGTH} characters`),
+
+        body('timezone')
+            .optional()
+            .custom(isValidTimezone)
+            .withMessage('Unknown timezone'),
+
+        body('reminders')
+            .optional()
+            .isArray({ max: Object.keys(EVENT_REMINDER_OFFSETS).length })
+            .withMessage('reminders must be a list'),
+
+        body('reminders.*')
+            .isIn(Object.keys(EVENT_REMINDER_OFFSETS))
+            .withMessage(`Reminders must be ${Object.keys(EVENT_REMINDER_OFFSETS).join(', ')}`)
+    ];
+}
+
+const validateCreateEvent = [
+    body('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Valid chat ID is required')
+        .toInt(),
+
+    body('title')
+        .isString()
+        .withMessage('The title must be text')
+        .isLength({ min: 1, max: EVENT_TITLE_MAX_LENGTH + 50 })
+        .withMessage(`The title must be at most ${EVENT_TITLE_MAX_LENGTH} characters`),
+
+    ...eventTextRules(),
+    eventTimeRule('startsAt'),
+    eventTimeRule('endsAt')
+];
+
+const validateEventIdParam = [
+    param('eventId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid event ID')
+        .toInt()
+];
+
+// Send only what changes
+const validateUpdateEvent = [
+    ...validateEventIdParam,
+
+    body('title')
+        .optional()
+        .isString()
+        .withMessage('The title must be text')
+        .isLength({ min: 1, max: EVENT_TITLE_MAX_LENGTH + 50 })
+        .withMessage(`The title must be at most ${EVENT_TITLE_MAX_LENGTH} characters`),
+
+    ...eventTextRules(),
+    eventTimeRule('startsAt').optional(),
+    eventTimeRule('endsAt').optional(),
+
+    body()
+        .custom((value) => value && ['title', 'description', 'location', 'timezone', 'startsAt', 'endsAt', 'reminders']
+            .some(field => value[field] !== undefined))
+        .withMessage('Send at least one field to change')
+];
+
+const validateRsvp = [
+    ...validateEventIdParam,
+
+    // null takes the answer back
+    body('response')
+        .custom((value) => value === null || RSVP_RESPONSES.includes(value))
+        .withMessage(`response must be ${RSVP_RESPONSES.join(', ')} or null`)
+];
+
+const validateEventsQuery = [
+    query('chatId')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    query('scope')
+        .optional()
+        .isIn(['upcoming', 'past'])
+        .withMessage('scope must be upcoming or past')
+];
+
+/**
+ * Phase 12: shared lists (text cleaned in utils/lists.js, which the socket events use too)
+ */
+const validateListIdParam = [
+    param('listId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid list ID')
+        .toInt()
+];
+
+function listNameRule() {
+    return body('name')
+        .isString()
+        .withMessage('The list name must be text')
+        .isLength({ min: 1, max: LIST_NAME_MAX_LENGTH + 50 })
+        .withMessage(`The list name must be at most ${LIST_NAME_MAX_LENGTH} characters`);
+}
+
+const validateCreateList = [
+    body('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Valid chat ID is required')
+        .toInt(),
+    listNameRule()
+];
+
+const validateRenameList = [...validateListIdParam, listNameRule()];
+
+const validateListsQuery = [
+    query('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Valid chat ID is required')
+        .toInt()
+];
+
+function listItemTextRule() {
+    return body('text')
+        .isString()
+        .withMessage('The item must be text')
+        .isLength({ min: 1, max: LIST_ITEM_MAX_LENGTH + 50 })
+        .withMessage(`The item must be at most ${LIST_ITEM_MAX_LENGTH} characters`);
+}
+
+const validateAddListItem = [
+    ...validateListIdParam,
+    listItemTextRule(),
+    // null or missing = no due date
+    futureTimeRule('dueAt').optional({ values: 'null' })
+];
+
+const validateListItemIdParam = [
+    param('itemId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid item ID')
+        .toInt()
+];
+
+const validateUpdateListItem = [
+    ...validateListItemIdParam,
+    listItemTextRule().optional(),
+    // null clears the due date
+    futureTimeRule('dueAt').optional({ values: 'null' }),
+    body('done')
+        .optional()
+        .isBoolean({ strict: true })
+        .withMessage('done must be true or false'),
+    body()
+        .custom((value) => value && (value.text !== undefined || value.dueAt !== undefined || value.done !== undefined))
+        .withMessage('Send text, dueAt or done')
+];
+
+/**
+ * Phase 12: birthdays
+ */
+const validateBirthday = [
+    body('day')
+        .isInt({ min: 1, max: 31 })
+        .withMessage('Pick a day')
+        .toInt(),
+
+    body('month')
+        .isInt({ min: 1, max: 12 })
+        .withMessage('Pick a month')
+        .toInt(),
+
+    body('year')
+        .optional({ values: 'null' })
+        .isInt()
+        .withMessage('The year must be a number')
+        .toInt(),
+
+    body().custom((value, { req }) => {
+        const year = req.body.year === undefined || req.body.year === null ? null : req.body.year;
+        const error = checkBirthday(req.body.day, req.body.month, year);
+        if (error) throw new Error(error);
+        return true;
+    })
+];
+
+const validateBirthdaysQuery = [
+    param('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    // The viewer's local date, so "today" is today where they are
+    query('date')
+        .matches(/^\d{4}-\d{2}-\d{2}$/)
+        .withMessage('date must be YYYY-MM-DD')
+];
+
+/**
  * Middleware to check validation results
  */
 const checkValidation = (req, res, next) => {
@@ -1016,7 +1250,7 @@ const validateCustomStatus = [
  * Validation rules for PUT /api/users/me/privacy (send only what changes)
  */
 const validatePrivacySettings = [
-    body(['lastSeen', 'photo', 'bio', 'groups'])
+    body(['lastSeen', 'photo', 'bio', 'groups', 'birthday'])
         .optional()
         .isIn(AUDIENCES)
         .withMessage(`Audience must be one of ${AUDIENCES.join(', ')}`),
@@ -1106,6 +1340,20 @@ module.exports = {
     validateProfileUpdate,
     validateCustomStatus,
     validatePrivacySettings,
+    validateCreateEvent,
+    validateEventIdParam,
+    validateUpdateEvent,
+    validateRsvp,
+    validateEventsQuery,
+    validateCreateList,
+    validateListIdParam,
+    validateRenameList,
+    validateListsQuery,
+    validateAddListItem,
+    validateListItemIdParam,
+    validateUpdateListItem,
+    validateBirthday,
+    validateBirthdaysQuery,
     isStatusEmoji,
     checkValidation,
     sanitizeHtml,

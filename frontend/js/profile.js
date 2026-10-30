@@ -30,7 +30,8 @@ const PRIVACY_CONTROLS = {
     privacyBio: 'bio',
     privacyGroups: 'groups',
     privacyReadReceipts: 'readReceipts',
-    privacyTyping: 'typingIndicators'
+    privacyTyping: 'typingIndicators',
+    privacyBirthday: 'birthday'
 };
 
 // GET /api/users/me (your own profile with privacy settings)
@@ -231,7 +232,93 @@ function applyMyProfile(profile) {
     const clearBtn = document.getElementById('customStatusClearBtn');
     if (clearBtn) clearBtn.hidden = !current;
 
+    if (profile.birthday !== undefined) applyBirthdayForm(myProfile.birthday);
     if (myProfile.privacy) applyPrivacySettings(myProfile.privacy);
+}
+
+// ===== Birthday =====
+
+/**
+ * "7 November" (no year: other people never see it)
+ */
+function birthdayLabel(birthday) {
+    if (!birthday || !birthday.day || !birthday.month) return '';
+    // A leap year, so 29 February formats
+    return new Date(2000, birthday.month - 1, birthday.day).toLocaleDateString([], { day: 'numeric', month: 'long' });
+}
+
+function fillBirthdaySelects() {
+    const day = document.getElementById('birthdayDay');
+    const month = document.getElementById('birthdayMonth');
+    if (!day || !month || day.options.length > 1) return;
+    for (let d = 1; d <= 31; d++) day.appendChild(FriChat.h('option', { text: String(d), attrs: { value: d } }));
+    for (let m = 1; m <= 12; m++) {
+        const name = new Date(2000, m - 1, 1).toLocaleDateString([], { month: 'long' });
+        month.appendChild(FriChat.h('option', { text: name, attrs: { value: m } }));
+    }
+    const year = document.getElementById('birthdayYear');
+    if (year) year.max = String(new Date().getFullYear());
+}
+
+function applyBirthdayForm(birthday) {
+    const form = document.getElementById('birthdayForm');
+    if (!form || form.contains(document.activeElement)) return;
+    document.getElementById('birthdayDay').value = birthday ? String(birthday.day) : '';
+    document.getElementById('birthdayMonth').value = birthday ? String(birthday.month) : '';
+    document.getElementById('birthdayYear').value = birthday && birthday.year ? String(birthday.year) : '';
+    document.getElementById('birthdayClearBtn').hidden = !birthday;
+}
+
+async function saveBirthday(event) {
+    event.preventDefault();
+    const day = parseInt(document.getElementById('birthdayDay').value);
+    const month = parseInt(document.getElementById('birthdayMonth').value);
+    const yearValue = document.getElementById('birthdayYear').value.trim();
+    if (!day || !month) {
+        setFieldStatus('birthdayStatus', 'Pick a day and a month', true);
+        return;
+    }
+    const year = yearValue ? parseInt(yearValue) : null;
+    if (yearValue && !Number.isInteger(year)) {
+        setFieldStatus('birthdayStatus', 'The year must be a number', true);
+        return;
+    }
+
+    const button = document.getElementById('birthdaySaveBtn');
+    button.disabled = true;
+    setFieldStatus('birthdayStatus', 'Saving…');
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.MY_BIRTHDAY, {
+            method: 'PUT',
+            body: JSON.stringify({ day, month, year })
+        });
+        if (response.success) {
+            document.activeElement.blur();
+            applyMyProfile(response.data);
+            setFieldStatus('birthdayStatus', 'Saved');
+        } else {
+            setFieldStatus('birthdayStatus', firstMessage(response, 'Failed to save your birthday'), true);
+        }
+    } catch (error) {
+        setFieldStatus('birthdayStatus', 'Failed to save your birthday', true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function clearBirthday() {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.MY_BIRTHDAY, { method: 'DELETE' });
+        if (response.success) {
+            document.activeElement.blur();
+            applyMyProfile(response.data);
+            setFieldStatus('birthdayStatus', 'Birthday removed');
+        } else {
+            setFieldStatus('birthdayStatus', response.message || 'Failed to remove your birthday', true);
+        }
+    } catch (error) {
+        setFieldStatus('birthdayStatus', 'Failed to remove your birthday', true);
+    }
 }
 
 function updateBioCount() {
@@ -433,6 +520,10 @@ async function openProfileCard(userId) {
     if (!modal || !body) return;
 
     profileCardUserId = userId;
+    // A direct chat partner's card shows the chat's "Events & lists" tabs, fresh each time (events.js);
+    // other cards leave alone the section group info may be showing
+    const partner = currentDirectPartner();
+    if (partner && Number(partner.id) === userId && typeof FriChat.resetPlansSection === 'function') FriChat.resetPlansSection();
     body.replaceChildren(FriChat.h('p', { className: 'settings-note', text: 'Loading…' }));
     modal.style.display = 'flex';
     document.getElementById('closeProfileCard').focus();
@@ -458,6 +549,12 @@ function renderProfileCard(profile) {
 
     const custom = customStatusLabel(profile.customStatus);
     const presence = presenceLabel(profile.status, profile.lastSeen);
+    const birthday = birthdayLabel(profile.birthday);
+    // For a direct chat this card is its chat info, so it gets the chat's Events and Lists tabs (events.js)
+    const partner = currentDirectPartner();
+    const plans = !profile.isSelf && partner && Number(partner.id) === Number(profile.id) && typeof FriChat.renderPlansSection === 'function'
+        ? FriChat.renderPlansSection(currentChatId)
+        : null;
 
     const actions = FriChat.h('div', { className: 'profile-card-actions' });
     if (profile.isSelf) {
@@ -472,7 +569,7 @@ function renderProfileCard(profile) {
         }));
     }
 
-    body.replaceChildren(
+    body.replaceChildren(...[
         FriChat.h('div', { className: 'profile-card' },
             avatar,
             FriChat.h('h4', { className: 'profile-card-name', text: name, attrs: { id: 'profileCardName' } }),
@@ -483,9 +580,14 @@ function renderProfileCard(profile) {
                 FriChat.h('div', { className: 'profile-card-label', text: 'Bio' }),
                 FriChat.h('p', { className: 'profile-card-bio', text: profile.bio })
             ) : null,
+            birthday ? FriChat.h('div', { className: 'profile-card-section' },
+                FriChat.h('div', { className: 'profile-card-label', text: 'Birthday' }),
+                FriChat.h('p', { className: 'profile-card-bio', text: `🎂 ${birthday}` })
+            ) : null,
             actions
-        )
-    );
+        ),
+        plans
+    ].filter(Boolean));
 }
 
 function closeProfileCard() {
@@ -724,6 +826,9 @@ function initializeProfile() {
     document.getElementById('profilePhotoRemoveBtn').addEventListener('click', removeProfilePhoto);
     document.getElementById('customStatusForm').addEventListener('submit', saveCustomStatus);
     document.getElementById('customStatusClearBtn').addEventListener('click', clearCustomStatus);
+    fillBirthdaySelects();
+    document.getElementById('birthdayForm').addEventListener('submit', saveBirthday);
+    document.getElementById('birthdayClearBtn').addEventListener('click', clearBirthday);
 
     // Privacy tab: each control saves on change
     document.querySelectorAll('[data-privacy-field]').forEach(control => {

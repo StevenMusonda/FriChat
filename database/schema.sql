@@ -2,6 +2,11 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS chat_list_items;
+DROP TABLE IF EXISTS chat_lists;
+DROP TABLE IF EXISTS event_reminders;
+DROP TABLE IF EXISTS event_rsvps;
+DROP TABLE IF EXISTS chat_events;
 DROP TABLE IF EXISTS calls;
 DROP TABLE IF EXISTS voice_note_plays;
 DROP TABLE IF EXISTS message_requests;
@@ -46,6 +51,9 @@ CREATE TABLE users (
     custom_status_text VARCHAR(80) NULL,
     custom_status_emoji VARCHAR(16) NULL,
     custom_status_expires_at TIMESTAMP NULL DEFAULT NULL, -- NULL = until cleared
+    birthday_day TINYINT NULL DEFAULT NULL, -- birthday: day and month, year optional (the year is never shown to others)
+    birthday_month TINYINT NULL DEFAULT NULL,
+    birthday_year SMALLINT NULL DEFAULT NULL,
     status ENUM('online', 'offline', 'away') DEFAULT 'offline',
     last_seen TIMESTAMP NULL,
     email_verified_at DATETIME NULL, -- NULL = email not verified yet
@@ -167,7 +175,7 @@ CREATE TABLE messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
     chat_id INT NOT NULL,
     sender_id INT NOT NULL,
-    message_type ENUM('text', 'image', 'video', 'file', 'poll', 'voice', 'system') NOT NULL, -- 'poll': content is the question, details in polls; 'system': content is a notice code
+    message_type ENUM('text', 'image', 'video', 'file', 'poll', 'voice', 'system', 'event') NOT NULL, -- 'poll': content is the question, details in polls; 'system': content is a notice code; 'event': content is the title, details in chat_events
     content TEXT, -- For text messages
     file_id INT, -- Reference to files table for media/file messages
     status ENUM('sent', 'delivered', 'read') DEFAULT 'sent',
@@ -473,6 +481,7 @@ CREATE TABLE privacy_settings (
     photo_audience VARCHAR(10) NOT NULL DEFAULT 'everyone',
     bio_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- bio and custom status
     groups_audience VARCHAR(10) NOT NULL DEFAULT 'everyone', -- who can add you to groups
+    birthday_audience VARCHAR(10) NOT NULL DEFAULT 'contacts', -- who sees your birthday (and its banner in shared groups)
     read_receipts BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see your reads, you don't see theirs
     typing_indicators BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see you typing
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -522,6 +531,90 @@ CREATE TABLE calls (
     INDEX idx_calls_caller (caller_id, started_at),
     INDEX idx_calls_callee (callee_id, started_at),
     INDEX idx_calls_chat (chat_id)
+);
+
+-- Phase 12: events (a message of type 'event' is the card), RSVPs, reminders and shared lists
+CREATE TABLE chat_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    message_id INT NULL,                 -- the card in the chat; NULL once that message is gone
+    created_by INT NOT NULL,
+    title VARCHAR(150) NOT NULL,
+    description TEXT NULL,
+    location VARCHAR(200) NULL,
+    starts_at TIMESTAMP NULL DEFAULT NULL,
+    ends_at TIMESTAMP NULL DEFAULT NULL,
+    timezone VARCHAR(64) NOT NULL DEFAULT 'UTC', -- IANA zone the creator planned it in (shown next to the time)
+    status VARCHAR(10) NOT NULL DEFAULT 'active', -- active | cancelled
+    cancelled_at TIMESTAMP NULL DEFAULT NULL,
+    revision INT NOT NULL DEFAULT 0,     -- bumped on every edit (the .ics SEQUENCE)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_chat_events_chat (chat_id, starts_at),
+    INDEX idx_chat_events_message (message_id)
+);
+
+-- One answer per member: going | maybe | declined (no row = no answer yet)
+CREATE TABLE event_rsvps (
+    event_id INT NOT NULL,
+    user_id INT NOT NULL,
+    response VARCHAR(8) NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, user_id),
+    FOREIGN KEY (event_id) REFERENCES chat_events(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Reminders the creator picked (at start, 1 hour before, 1 day before), fired by the scheduler
+CREATE TABLE event_reminders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_id INT NOT NULL,
+    offset_seconds INT NOT NULL,         -- 0, 3600 or 86400 before the start
+    remind_at TIMESTAMP NULL DEFAULT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | fired | skipped (time had passed) | cancelled
+    fired_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (event_id) REFERENCES chat_events(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_event_reminder (event_id, offset_seconds),
+    INDEX idx_event_reminders_due (status, remind_at)
+);
+
+-- Named checklists in a chat (shopping list, to-do)
+CREATE TABLE chat_lists (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    created_by INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_chat_lists_chat (chat_id)
+);
+
+CREATE TABLE chat_list_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    list_id INT NOT NULL,
+    chat_id INT NOT NULL,                -- same as the list's, so membership checks need one join
+    text VARCHAR(300) NOT NULL,
+    created_by INT NULL,
+    done BOOLEAN NOT NULL DEFAULT FALSE,
+    done_by INT NULL,                    -- who ticked it
+    done_at TIMESTAMP NULL DEFAULT NULL,
+    due_at TIMESTAMP NULL DEFAULT NULL,
+    due_set_by INT NULL,                 -- gets the due-date reminder
+    due_reminder_status VARCHAR(10) NOT NULL DEFAULT 'none', -- none | pending | fired
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (list_id) REFERENCES chat_lists(id) ON DELETE CASCADE,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (done_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (due_set_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_list_items_list (list_id),
+    INDEX idx_list_items_due (due_reminder_status, due_at)
 );
 
 -- Create a view for easy message retrieval with user info

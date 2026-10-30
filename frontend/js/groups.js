@@ -192,6 +192,7 @@ async function openGroupInfo(chatId) {
     groupInfoOpenFor = chatId;
     // Fresh tabs each time the panel opens; refreshes while it's open keep them (media.js)
     FriChat.resetSharedMediaSection();
+    if (typeof FriChat.resetPlansSection === 'function') FriChat.resetPlansSection();
     if (title) title.textContent = 'Group info';
     content.replaceChildren(h('p', { className: 'group-info-loading', text: 'Loading…' }));
     modal.style.display = 'flex';
@@ -255,6 +256,8 @@ function renderGroupInfo(chat, invites, requests, bans = []) {
         isAdmin && (chat.approve_new_members || requests.length > 0) ? renderRequestsSection(chat, requests) : null,
         renderMembersSection(chat, isAdmin),
         FriChat.renderSharedMediaSection(chat.id),
+        // Events and Lists tabs (events.js, lists.js)
+        typeof FriChat.renderPlansSection === 'function' ? FriChat.renderPlansSection(chat.id) : null,
         isAdmin && bans.length > 0 ? renderBansSection(chat, bans) : null,
         renderLeaveSection(chat)
     ].filter(Boolean));

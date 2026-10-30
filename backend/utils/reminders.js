@@ -49,7 +49,7 @@ function shapeReminder(row, now = Date.now()) {
             senderId: Number(row.sender_id),
             senderName: row.sender_full_name || row.sender_username,
             messageType: row.message_type,
-            content: row.message_type === 'text' || row.message_type === 'poll' ? row.content : null,
+            content: ['text', 'poll', 'event'].includes(row.message_type) ? row.content : null,
             fileName: row.file_name || null,
             disappearing: !!parseInt(row.disappearing)
         } : null

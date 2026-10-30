@@ -22,6 +22,8 @@ const pollRoutes = require('./routes/polls');
 const userRoutes = require('./routes/users');
 const { scheduledRouter, remindersRouter } = require('./routes/schedule');
 const callRoutes = require('./routes/calls');
+const eventRoutes = require('./routes/events');
+const listRoutes = require('./routes/lists');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -45,6 +47,8 @@ const { chatExpiresAtSql } = require('./utils/timeSql');
 const { markVoicePlayed } = require('./utils/voiceNotes');
 const { createCallManager } = require('./utils/calls');
 const callPush = require('./utils/callPush');
+const eventRules = require('./utils/events');
+const listRules = require('./utils/lists');
 
 // What clients may ask for; a file's real type comes from its upload record ('voice' = audio)
 const MESSAGE_TYPES = ['text', 'image', 'video', 'file', 'voice'];
@@ -105,6 +109,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/scheduled-messages', scheduledRouter);
 app.use('/api/reminders', remindersRouter);
 app.use('/api/calls', callRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/lists', listRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -474,6 +480,53 @@ io.on('connection', (socket) => {
             socket.emit('error', { event: 'poll_vote', message: 'Failed to save your vote' });
         }
     });
+
+    /**
+     * Answer an event: response 'going' | 'maybe' | 'declined', or null to take it back. setRsvp
+     * checks membership and that the event is still on; the (event, user) primary key keeps one answer
+     * per member however events race. The chat gets event_updated with the new counts and names.
+     */
+    onLimited('event_rsvp', async (data) => {
+        try {
+            const response = data && data.response !== undefined ? data.response : undefined;
+            const result = response === undefined
+                ? { error: { message: 'Answer going, maybe or declined' } }
+                : await eventRules.setRsvp(io, socket.userId, data.eventId, response);
+            if (result.error) {
+                socket.emit('error', { event: 'event_rsvp', message: result.error.message, eventId: data && data.eventId });
+            }
+        } catch (error) {
+            console.error('Event RSVP error:', error);
+            socket.emit('error', { event: 'event_rsvp', message: 'Failed to save your answer' });
+        }
+    });
+
+    /**
+     * Shared lists: add, edit/tick and remove items. Each function checks that this user is a member
+     * of the list's chat and the item's rules; the chat gets the whole list back (list_updated).
+     */
+    const listSocketEvents = {
+        list_item_add: (data) => listRules.addItem(io, socket.userId, data.listId, { text: data.text, dueAt: data.dueAt }),
+        list_item_update: (data) => listRules.updateItem(io, socket.userId, data.itemId, { text: data.text, dueAt: data.dueAt, done: data.done }),
+        list_item_remove: (data) => listRules.removeItem(io, socket.userId, data.itemId)
+    };
+    for (const [eventName, run] of Object.entries(listSocketEvents)) {
+        onLimited(eventName, async (data) => {
+            try {
+                if (!data || typeof data !== 'object') {
+                    socket.emit('error', { event: eventName, message: 'Invalid request' });
+                    return;
+                }
+                const result = await run(data);
+                if (result.error) {
+                    socket.emit('error', { event: eventName, message: result.error.message, listId: data.listId, itemId: data.itemId });
+                }
+            } catch (error) {
+                console.error(`List event ${eventName} error:`, error);
+                socket.emit('error', { event: eventName, message: 'Failed to update the list' });
+            }
+        });
+    }
 
     /**
      * A voice note was played. markVoicePlayed checks membership and the message type, and tells the
