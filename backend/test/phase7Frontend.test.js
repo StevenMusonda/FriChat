@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { runFrontendScript } = require('./helpers/frontendScripts');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
 const read = (file) => fs.readFileSync(path.join(FRONTEND, file), 'utf8');
@@ -61,10 +62,10 @@ function loadFrontend() {
         }
     };
     vm.createContext(sandbox);
-    vm.runInContext(read('js/groups.js'), sandbox);
+    runFrontendScript(read('js/groups.js'), sandbox);
     vm.runInContext(read('js/messages.js'), sandbox);
-    vm.runInContext(read('js/composer.js'), sandbox);
-    vm.runInContext(read('js/search.js'), sandbox);
+    runFrontendScript(read('js/composer.js'), sandbox);
+    runFrontendScript(read('js/search.js'), sandbox);
     let user = { userId: 1 };
     sandbox.getCurrentUser = () => user;
     sandbox.isEditingMessage = () => false;

@@ -4,6 +4,8 @@
  * it receives. All poll text is user content and goes through escapeHtml.
  */
 
+(function (FriChat) {
+
 // Polls with a vote on its way (the card dims until poll_updated arrives)
 const pendingPollIds = new Set();
 // The poll shown in the "View votes" dialog (kept in step with poll_updated while it's open)
@@ -58,7 +60,7 @@ function renderPollHtml(message) {
         poll.multipleChoice ? 'Multiple choice' : 'One choice',
         poll.closed
             ? 'Closed'
-            : (poll.closesAt ? `Closes ${formatPlannerTime(poll.closesAt)}` : null)
+            : (poll.closesAt ? `Closes ${FriChat.formatPlannerTime(poll.closesAt)}` : null)
     ].filter(Boolean).join(' · ');
 
     return `
@@ -173,12 +175,12 @@ async function closePollEarly(pollId) {
  */
 function pollStatusText(poll) {
     if (poll.closed) {
-        const when = poll.closedAt ? ` ${formatPlannerTime(poll.closedAt)}` : '';
+        const when = poll.closedAt ? ` ${FriChat.formatPlannerTime(poll.closedAt)}` : '';
         if (poll.closedAutomatically) return `Closed automatically${when}`;
         const by = poll.closedBy && poll.closedBy.name ? ` by ${poll.closedBy.name}` : '';
         return `Closed${by}${when}`;
     }
-    return poll.closesAt ? `Open · closes ${formatPlannerTime(poll.closesAt)}` : 'Open · no end time';
+    return poll.closesAt ? `Open · closes ${FriChat.formatPlannerTime(poll.closesAt)}` : 'Open · no end time';
 }
 
 /**
@@ -190,30 +192,30 @@ function renderPollVotes(poll) {
     if (!body || !poll) return;
     body.replaceChildren();
 
-    body.appendChild(plannerEl('div', 'poll-votes-question', poll.question));
+    body.appendChild(FriChat.plannerEl('div', 'poll-votes-question', poll.question));
     const summary = [
         `${poll.voterCount} ${poll.voterCount === 1 ? 'person voted' : 'people voted'}`,
         poll.multipleChoice ? 'Multiple choice' : 'One choice',
         poll.anonymous ? 'Anonymous' : null
     ].filter(Boolean).join(' · ');
-    body.appendChild(plannerEl('div', 'poll-votes-summary', summary));
-    body.appendChild(plannerEl('div', 'poll-votes-status', pollStatusText(poll)));
+    body.appendChild(FriChat.plannerEl('div', 'poll-votes-summary', summary));
+    body.appendChild(FriChat.plannerEl('div', 'poll-votes-status', pollStatusText(poll)));
     if (poll.anonymous) {
-        body.appendChild(plannerEl('p', 'poll-votes-note', 'This poll is anonymous, so only the counts are shown.'));
+        body.appendChild(FriChat.plannerEl('p', 'poll-votes-note', 'This poll is anonymous, so only the counts are shown.'));
     }
 
     for (const option of poll.options) {
         const percent = Math.min(Math.max(parseInt(option.percent) || 0, 0), 100);
         const votes = parseInt(option.votes) || 0;
-        const section = plannerEl('section', 'poll-votes-option');
+        const section = FriChat.plannerEl('section', 'poll-votes-option');
 
-        const head = plannerEl('div', 'poll-votes-option-head');
+        const head = FriChat.plannerEl('div', 'poll-votes-option-head');
         head.append(
-            plannerEl('span', 'poll-votes-option-text', option.text),
-            plannerEl('span', 'poll-votes-option-count', `${votes} ${votes === 1 ? 'vote' : 'votes'} · ${percent}%`)
+            FriChat.plannerEl('span', 'poll-votes-option-text', option.text),
+            FriChat.plannerEl('span', 'poll-votes-option-count', `${votes} ${votes === 1 ? 'vote' : 'votes'} · ${percent}%`)
         );
-        const bar = plannerEl('div', 'poll-votes-bar');
-        const fill = plannerEl('span', 'poll-votes-bar-fill');
+        const bar = FriChat.plannerEl('div', 'poll-votes-bar');
+        const fill = FriChat.plannerEl('span', 'poll-votes-bar-fill');
         fill.style.width = `${percent}%`;
         bar.appendChild(fill);
         section.append(head, bar);
@@ -221,15 +223,15 @@ function renderPollVotes(poll) {
         if (!poll.anonymous) {
             const voters = option.voters || [];
             if (voters.length === 0) {
-                section.appendChild(plannerEl('p', 'poll-votes-empty', 'No votes'));
+                section.appendChild(FriChat.plannerEl('p', 'poll-votes-empty', 'No votes'));
             } else {
-                const list = plannerEl('ul', 'poll-votes-voters');
+                const list = FriChat.plannerEl('ul', 'poll-votes-voters');
                 for (const voter of voters) {
                     const name = String(voter.name || 'Unknown');
-                    const item = plannerEl('li', 'poll-votes-voter');
-                    const avatar = plannerEl('span', 'poll-votes-avatar', name.charAt(0).toUpperCase());
+                    const item = FriChat.plannerEl('li', 'poll-votes-voter');
+                    const avatar = FriChat.plannerEl('span', 'poll-votes-avatar', name.charAt(0).toUpperCase());
                     avatar.setAttribute('aria-hidden', 'true');
-                    item.append(avatar, plannerEl('span', 'poll-votes-name', name));
+                    item.append(avatar, FriChat.plannerEl('span', 'poll-votes-name', name));
                     list.appendChild(item);
                 }
                 section.appendChild(list);
@@ -282,7 +284,7 @@ function closePollVotes() {
 
 function openPollModal() {
     if (!currentChatId) return;
-    if (typeof canPostInCurrentChat === 'function' && !canPostInCurrentChat()) {
+    if (typeof FriChat.canPostInCurrentChat === 'function' && !FriChat.canPostInCurrentChat()) {
         showNotification('Only admins can send messages in this group', 'error');
         return;
     }
@@ -294,7 +296,7 @@ function openPollModal() {
     const custom = document.getElementById('pollClosesAt');
     custom.hidden = true;
     custom.value = '';
-    setPlannerStatus('pollStatus', '');
+    FriChat.setPlannerStatus('pollStatus', '');
 
     const list = document.getElementById('pollOptionList');
     list.replaceChildren();
@@ -374,7 +376,7 @@ function readPollForm() {
     let closesAt = null;
     const closes = document.getElementById('pollCloses').value;
     if (closes === 'custom') {
-        const picked = parseDateTimeLocal(document.getElementById('pollClosesAt').value);
+        const picked = FriChat.parseDateTimeLocal(document.getElementById('pollClosesAt').value);
         if (!picked || picked.getTime() <= Date.now()) return { ok: false, error: 'Pick a closing time in the future' };
         closesAt = picked.toISOString();
     } else if (closes) {
@@ -396,7 +398,7 @@ function readPollForm() {
 async function submitPoll() {
     const form = readPollForm();
     if (!form.ok) {
-        setPlannerStatus('pollStatus', form.error, true);
+        FriChat.setPlannerStatus('pollStatus', form.error, true);
         return;
     }
     const button = document.getElementById('pollSubmitBtn');
@@ -413,10 +415,10 @@ async function submitPoll() {
             if (response.data && response.data.chat_id === currentChatId) addMessageToUI(response.data);
         } else {
             const detail = response.errors && response.errors[0] ? response.errors[0].msg : null;
-            setPlannerStatus('pollStatus', detail || response.message || 'Could not create the poll', true);
+            FriChat.setPlannerStatus('pollStatus', detail || response.message || 'Could not create the poll', true);
         }
     } catch (error) {
-        setPlannerStatus('pollStatus', 'Could not create the poll', true);
+        FriChat.setPlannerStatus('pollStatus', 'Could not create the poll', true);
     } finally {
         button.disabled = false;
     }
@@ -439,8 +441,8 @@ function initializePolls() {
         const custom = document.getElementById('pollClosesAt');
         custom.hidden = e.target.value !== 'custom';
         if (!custom.hidden) {
-            custom.min = toDateTimeLocalValue(new Date());
-            if (!custom.value) custom.value = toDateTimeLocalValue(new Date(Date.now() + 24 * 60 * 60 * 1000));
+            custom.min = FriChat.toDateTimeLocalValue(new Date());
+            if (!custom.value) custom.value = FriChat.toDateTimeLocalValue(new Date(Date.now() + 24 * 60 * 60 * 1000));
         }
     });
 
@@ -489,3 +491,10 @@ function initializePolls() {
         }
     });
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    renderPollHtml,
+    initializePolls
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

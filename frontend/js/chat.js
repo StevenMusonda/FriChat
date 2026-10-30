@@ -3,6 +3,10 @@
  * Handles chat operations and UI updates
  */
 
+// The feature scripts (formatter.js ... disappearing.js) each run in their own scope and share
+// only what other files need on this namespace; it exists even if none of them loaded
+globalThis.FriChat = globalThis.FriChat || {};
+
 let currentChatId = null;
 let allChats = [];
 let selectedUsers = [];
@@ -15,6 +19,21 @@ try {
     archivedExpanded = localStorage.getItem(CONFIG.STORAGE_KEYS.ARCHIVED_EXPANDED) === '1';
 } catch (e) {
     // Storage unavailable: start collapsed
+}
+
+/**
+ * Call an optional feature function (window.FriChat) for the chat list: a feature script that is
+ * missing or throws gives the fallback instead of an empty sidebar
+ */
+function chatListFeature(name, fallback, ...args) {
+    const fn = FriChat[name];
+    if (typeof fn !== 'function') return fallback;
+    try {
+        return fn(...args);
+    } catch (error) {
+        console.error(`Chat list: ${name} failed`, error);
+        return fallback;
+    }
 }
 
 const MUTED_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"></path><path d="M18.63 13A17.89 17.89 0 0 1 18 8"></path><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"></path><path d="M18 8a6 6 0 0 0-9.33-5"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
@@ -102,7 +121,7 @@ function renderChatList(chats) {
         let displayName = chat.chat_name;
         let displayInitial = chat.chat_name ? chat.chat_name.charAt(0).toUpperCase() : 'C';
         // Photo and custom status as the server lets this user see them (privacy settings)
-        let avatarSrc = chat.chat_type === 'group' && typeof groupAvatarSrc === 'function' ? groupAvatarSrc(chat.avatar_url) : null;
+        let avatarSrc = chat.chat_type === 'group' ? chatListFeature('groupAvatarSrc', null, chat.avatar_url) : null;
         let statusLabel = '';
         
         if (chat.chat_type === 'direct') {
@@ -120,8 +139,8 @@ function renderChatList(chats) {
             if (otherUser) {
                 displayName = otherUser.fullName || otherUser.fullName || otherUser.username;
                 displayInitial = displayName.charAt(0).toUpperCase();
-                if (typeof userAvatarSrc === 'function') avatarSrc = userAvatarSrc(otherUser.avatarUrl);
-                if (typeof customStatusLabel === 'function') statusLabel = customStatusLabel(otherUser.customStatus);
+                avatarSrc = chatListFeature('userAvatarSrc', avatarSrc, otherUser.avatarUrl);
+                statusLabel = chatListFeature('customStatusLabel', statusLabel, otherUser.customStatus);
             }
         }
         
@@ -162,6 +181,11 @@ function renderChatList(chats) {
                 lastMessageText = `📎 ${fileName || 'File'}`;
             } else if (messageType === 'poll') {
                 lastMessageText = `📊 ${content || 'Poll'}`;
+            } else if (messageType === 'voice') {
+                lastMessageText = '🎤 Voice message';
+            } else if (messageType === 'system') {
+                // "You turned on disappearing messages..." (disappearing.js; escaped below like any preview)
+                lastMessageText = chatListFeature('describeSystemMessage', 'Chat settings were changed', { content, sender_id: lastMessage.senderId || lastMessage.sender_id || lastMessage.senderid, full_name: lastMessage.full_name || null, username: lastMessage.senderName || lastMessage.username || lastMessage.sendername });
             } else {
                 lastMessageText = '📎 Attachment';
             }
@@ -170,7 +194,7 @@ function renderChatList(chats) {
         }
         
         // Unsent text saved for this chat (composer.js); not shown for the chat being typed in
-        const draft = chat.id !== currentChatId ? getDraftPreview(chat.id) : '';
+        const draft = chat.id !== currentChatId ? chatListFeature('getDraftPreview', '', chat.id) : '';
 
         // Get unread count (grey when muted)
         const unreadCount = chat.unread_count || 0;
@@ -179,7 +203,7 @@ function renderChatList(chats) {
         return `
             <div class="chat-item ${chat.id === currentChatId ? 'active' : ''} ${chat.is_muted ? 'muted' : ''}" data-chat-id="${chat.id}">
                 <div class="chat-item-avatar">
-                    ${typeof avatarInnerHtml === 'function' ? avatarInnerHtml(displayInitial, avatarSrc) : escapeHtml(displayInitial)}
+                    ${chatListFeature('avatarInnerHtml', escapeHtml(displayInitial), displayInitial, avatarSrc)}
                 </div>
                 <div class="chat-item-content">
                     <div class="chat-item-header">
@@ -187,6 +211,7 @@ function renderChatList(chats) {
                             <span class="chat-item-name">${escapeHtml(displayName)}</span>
                             ${statusLabel ? `<span class="chat-item-custom-status" title="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>` : ''}
                             ${chat.is_muted ? `<span class="chat-item-muted" title="Muted" aria-label="Muted">${MUTED_ICON_SVG}</span>` : ''}
+                            ${chatListFeature('renderChatListDisappearingIcon', '', chat)}
                         </span>
                         <span class="chat-item-time">${lastMessageTime}</span>
                     </div>
@@ -208,15 +233,15 @@ function renderChatList(chats) {
 
     // Incoming message requests sit in their own section above the list (profile.js);
     // archived chats live in their own collapsible section under the main list
-    const isRequest = (chat) => typeof isIncomingRequest === 'function' && isIncomingRequest(chat);
+    const isRequest = (chat) => chatListFeature('isIncomingRequest', false, chat);
     const requestChats = chats.filter(isRequest);
     const activeChats = chats.filter(chat => !chat.archived_at && !isRequest(chat));
     const archivedChats = chats.filter(chat => chat.archived_at && !isRequest(chat));
 
     let html = '';
     if (requestChats.length > 0) {
-        const expanded = isRequestsExpanded();
-        html += renderRequestsToggleHtml(requestChats.length)
+        const expanded = chatListFeature('isRequestsExpanded', false);
+        html += chatListFeature('renderRequestsToggleHtml', '', requestChats.length)
             + `<div class="archived-chat-list request-chat-list" id="requestChatList" ${expanded ? '' : 'hidden'}>${requestChats.map(renderChatItem).join('')}</div>`;
     }
 
@@ -249,7 +274,7 @@ function renderChatList(chats) {
         });
     });
 
-    if (typeof bindRequestsToggle === 'function') bindRequestsToggle();
+    chatListFeature('bindRequestsToggle');
 
     const archivedToggle = document.getElementById('archivedToggle');
     if (archivedToggle) {
@@ -414,13 +439,15 @@ function toggleChatOptionsMenu(event) {
               + (chat.mentions_only ? `<div class="chat-options-note">${chat.is_muted ? 'Muted, but @mentions still notify you' : 'Other messages don\'t notify you'}</div>` : '')
             : '')
         + '<div class="chat-options-separator" role="separator"></div>'
+        + item('disappearing:open', escapeHtml(typeof FriChat.disappearingMenuLabel === 'function' ? FriChat.disappearingMenuLabel() : 'Disappearing messages'))
+        + '<div class="chat-options-separator" role="separator"></div>'
         + (chat.archived_at ? item('archive:off', 'Unarchive chat') : item('archive:on', 'Archive chat'));
 
     // Direct chats: block or unblock the other person (security.js keeps the blocked list)
     const otherUser = chat.chat_type === 'direct' ? getDirectChatOtherUser(chat) : null;
     if (otherUser) {
         menu.innerHTML += '<div class="chat-options-separator" role="separator"></div>'
-            + (isUserBlocked(otherUser.userId) ? item('block:off', 'Unblock user') : item('block:on', 'Block user'));
+            + (FriChat.isUserBlocked(otherUser.userId) ? item('block:off', 'Unblock user') : item('block:on', 'Block user'));
     }
 
     menu.addEventListener('click', (e) => {
@@ -432,9 +459,11 @@ function toggleChatOptionsMenu(event) {
         if (kind === 'mute') {
             setChatMute(chat.id, value);
         } else if (kind === 'block') {
-            setUserBlocked(otherUser.userId, value === 'on', otherUser.fullName || otherUser.username);
+            FriChat.setUserBlocked(otherUser.userId, value === 'on', otherUser.fullName || otherUser.username);
         } else if (kind === 'mentions') {
             setChatMentionsOnly(chat.id, value === 'on');
+        } else if (kind === 'disappearing') {
+            FriChat.openDisappearingModal();
         } else {
             setChatArchived(chat.id, value === 'on');
         }
@@ -554,7 +583,7 @@ async function setChatArchived(chatId, archived) {
 async function openChat(chatId, options = {}) {
     // Unsent text stays with the chat being left (composer.js); read before an edit is cancelled
     const leavingChatId = currentChatId;
-    saveCurrentDraft();
+    FriChat.saveCurrentDraft();
 
     // Reply/edit/selection belong to the chat being left (messageActions.js)
     resetMessageActionState();
@@ -563,16 +592,19 @@ async function openChat(chatId, options = {}) {
 
     // Files waiting in the tray belong to the chat being left; bring back this chat's draft
     if (leavingChatId !== chatId) {
-        resetUploadTray();
-        restoreDraft(chatId);
+        FriChat.resetUploadTray();
+        FriChat.restoreDraft(chatId);
     }
     currentChatMembers = [];
     // Composer lock, header avatar and join-request badge belong to the chat being left (groups.js)
-    resetGroupState();
+    FriChat.resetGroupState();
     // Message request bar (profile.js)
-    if (typeof resetMessageRequestState === 'function') resetMessageRequestState();
+    if (typeof FriChat.resetMessageRequestState === 'function') FriChat.resetMessageRequestState();
     // "N scheduled messages in this chat" bar (planner.js)
-    if (typeof resetPlannerChatState === 'function') resetPlannerChatState();
+    if (typeof FriChat.resetPlannerChatState === 'function') FriChat.resetPlannerChatState();
+    // Voice note playing or being recorded, disappearing-messages clock (voice.js, disappearing.js)
+    if (typeof FriChat.resetVoiceState === 'function') FriChat.resetVoiceState();
+    if (typeof FriChat.resetDisappearingState === 'function') FriChat.resetDisappearingState();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();
@@ -646,7 +678,7 @@ async function loadChatDetails(chatId) {
                     displayName = otherUser.full_name || otherUser.username;
                     displayInitial = displayName.charAt(0).toUpperCase();
                     // Only what the other person shares (privacy settings); empty when hidden
-                    displayStatus = typeof directChatStatusText === 'function' ? directChatStatusText(otherUser) : (otherUser.status || '');
+                    displayStatus = typeof FriChat.directChatStatusText === 'function' ? FriChat.directChatStatusText(otherUser) : (otherUser.status || '');
                 }
             }
             
@@ -657,10 +689,13 @@ async function loadChatDetails(chatId) {
             document.getElementById('chatStatus').textContent = displayStatus;
 
             // Group avatar, announcement-only composer and join-request badge (groups.js)
-            applyChatDetails(chat);
+            FriChat.applyChatDetails(chat);
 
             // Message request bar (profile.js)
-            if (typeof applyMessageRequestState === 'function') applyMessageRequestState(chat);
+            if (typeof FriChat.applyMessageRequestState === 'function') FriChat.applyMessageRequestState(chat);
+
+            // Disappearing messages timer: header clock, who may change it (disappearing.js)
+            if (typeof FriChat.applyDisappearingDetails === 'function') FriChat.applyDisappearingDetails(chat);
         }
     } catch (error) {
         console.error('Load chat details error:', error);
@@ -872,11 +907,11 @@ function renderUserSearchResults(users) {
     userList.innerHTML = users.map(user => {
         const initial = (user.full_name || user.username).charAt(0).toUpperCase();
         const isSelected = selectedUsers.some(u => u.id === user.id);
-        const avatarSrc = typeof userAvatarSrc === 'function' ? userAvatarSrc(user.avatar_url) : null;
+        const avatarSrc = typeof FriChat.userAvatarSrc === 'function' ? FriChat.userAvatarSrc(user.avatar_url) : null;
         
         return `
             <div class="user-item ${isSelected ? 'selected' : ''}" data-user-id="${user.id}">
-                <div class="user-item-avatar">${typeof avatarInnerHtml === 'function' ? avatarInnerHtml(initial, avatarSrc) : escapeHtml(initial)}</div>
+                <div class="user-item-avatar">${typeof FriChat.avatarInnerHtml === 'function' ? FriChat.avatarInnerHtml(initial, avatarSrc) : escapeHtml(initial)}</div>
                 <div class="user-item-info">
                     <div class="user-item-name">${escapeHtml(user.full_name || user.username)}</div>
                     <div class="user-item-username">@${escapeHtml(user.username)}</div>

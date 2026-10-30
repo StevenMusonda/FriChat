@@ -2,6 +2,7 @@
 -- Compatible with PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS voice_note_plays CASCADE;
 DROP TABLE IF EXISTS message_requests CASCADE;
 DROP TABLE IF EXISTS privacy_settings CASCADE;
 DROP TABLE IF EXISTS message_reminders CASCADE;
@@ -43,7 +44,7 @@ DROP TYPE IF EXISTS message_status CASCADE;
 CREATE TYPE user_status AS ENUM ('online', 'offline', 'away');
 CREATE TYPE chat_type AS ENUM ('direct', 'group');
 CREATE TYPE member_role AS ENUM ('admin', 'member');
-CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'file', 'poll');
+CREATE TYPE message_type AS ENUM ('text', 'image', 'video', 'file', 'poll', 'voice', 'system');
 CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read');
 
 -- Users table
@@ -113,6 +114,7 @@ CREATE TABLE chats (
     avatar_url VARCHAR(255) NULL, -- path under uploads/
     approve_new_members BOOLEAN NOT NULL DEFAULT FALSE, -- invite-link joins wait for an admin
     announcement_only BOOLEAN NOT NULL DEFAULT FALSE, -- only admins can send messages
+    disappearing_seconds INTEGER NULL, -- disappearing messages timer: NULL/0 = off, else 86400 | 604800 | 7776000
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -149,7 +151,9 @@ CREATE TABLE files (
     upload_path VARCHAR(500) NOT NULL,
     uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    attached_at TIMESTAMP NULL -- NULL = uploaded, not attached to a message yet
+    attached_at TIMESTAMP NULL, -- NULL = uploaded, not attached to a message yet
+    duration_ms INTEGER NULL, -- voice notes: measured by the recording browser
+    waveform VARCHAR(400) NULL -- voice notes: comma-separated levels 0-100
 );
 
 CREATE INDEX idx_uploaded_by ON files(uploaded_by);
@@ -184,6 +188,7 @@ CREATE TABLE messages (
     deleted_for_everyone BOOLEAN DEFAULT FALSE,
     link_preview_id INTEGER NULL REFERENCES link_previews(id) ON DELETE SET NULL, -- preview card under the message
     link_preview_dismissed BOOLEAN NOT NULL DEFAULT FALSE, -- the sender removed the preview
+    expires_at TIMESTAMP NULL, -- disappearing messages: the scheduler deletes it (and its file) then
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- message search: word prefixes, no stemming (to_tsquery('simple', 'term:*'))
@@ -200,6 +205,8 @@ CREATE INDEX idx_msg_chat_id_id ON messages(chat_id, id);
 -- Message search and the shared media panel
 CREATE INDEX idx_messages_search ON messages USING GIN (search_vector);
 CREATE INDEX idx_msg_chat_type_id ON messages(chat_id, message_type, id);
+-- Disappearing messages sweep
+CREATE INDEX idx_messages_expires_at ON messages(expires_at);
 
 -- Message reactions table
 CREATE TABLE message_reactions (
@@ -462,6 +469,14 @@ CREATE TABLE message_requests (
 );
 
 CREATE INDEX idx_message_requests_recipient ON message_requests(recipient_id, status);
+
+-- Who has played a voice note (the sender sees "played")
+CREATE TABLE voice_note_plays (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, user_id)
+);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

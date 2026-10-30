@@ -12,6 +12,7 @@ const { notifyNewMessage } = require('./push');
 const { saveMentions } = require('./mentions');
 const { attachLinkPreview } = require('./linkPreview');
 const { getMessageById } = require('./messageQueries');
+const { chatExpiresAtSql } = require('./timeSql');
 
 /**
  * @param {Object} io - Socket.IO server (may be null in scripts)
@@ -22,9 +23,10 @@ const { getMessageById } = require('./messageQueries');
  * @returns {Promise<Object|null>} the message as clients receive it
  */
 async function deliverNewMessage(io, { chatId, senderId, messageType = 'text', content = null, replyToMessageId = null, afterInsert, decorate }) {
+    // expires_at follows the chat's disappearing-messages timer at the moment it's actually sent
     const messageId = await insertAndGetId(
-        'INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?)',
-        [chatId, senderId, messageType, content, replyToMessageId, 'sent']
+        `INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
+        [chatId, senderId, messageType, content, replyToMessageId, 'sent', chatId]
     );
 
     if (afterInsert) {

@@ -45,6 +45,17 @@ function minusSecondsSql(seconds) {
 }
 
 /**
+ * SQL value for a new message's expires_at: now + the chat's disappearing-messages timer, or NULL
+ * when the timer is off. Takes one bound parameter, the chat id. Every insert into messages uses it,
+ * so a message can never be stored without the expiry its chat had when it was sent.
+ */
+function chatExpiresAtSql() {
+    return dbType === 'postgresql'
+        ? "(SELECT CASE WHEN dc.disappearing_seconds > 0 THEN CURRENT_TIMESTAMP + (dc.disappearing_seconds * INTERVAL '1 second') ELSE NULL END FROM chats dc WHERE dc.id = ?)"
+        : '(SELECT CASE WHEN dc.disappearing_seconds > 0 THEN CURRENT_TIMESTAMP + INTERVAL dc.disappearing_seconds SECOND ELSE NULL END FROM chats dc WHERE dc.id = ?)';
+}
+
+/**
  * "seconds until" from SQL -> UTC ISO string (null when there's no time)
  */
 function isoFromSecondsUntil(seconds, now = Date.now()) {
@@ -80,6 +91,7 @@ module.exports = {
     plusSecondsSql,
     secondsUntilSql,
     minusSecondsSql,
+    chatExpiresAtSql,
     isoFromSecondsUntil,
     isIsoWithOffset,
     secondsFromNow

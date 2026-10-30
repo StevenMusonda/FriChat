@@ -335,7 +335,7 @@ for (const dbType of ['mysql', 'postgresql']) {
                     return params.map(user_id => ({ id: user_id, user_id, endpoint: `https://push.example/${user_id}`, p256dh: 'k', auth: 'a' }));
                 }
                 if (/^SELECT gm.user_id, COUNT\(m.id\) AS unread/.test(sql)) return [];
-                if (/^SELECT chat_type, chat_name FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team' }];
+                if (/^SELECT chat_type, chat_name, disappearing_seconds FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team' }];
                 // Phase 6 block checks: nobody is blocked in these tests
                 // Phase 9 tables: no rows = default privacy settings, no message requests
                 if (/privacy_settings|message_requests/.test(sql)) return [];

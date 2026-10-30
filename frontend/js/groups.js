@@ -5,6 +5,8 @@
  * Everything user-written is put into the page with textContent, never innerHTML.
  */
 
+(function (FriChat) {
+
 // GET /api/chats/:id for the open chat (role, can_post, settings, members with tags)
 let currentChatDetails = null;
 // Chat whose group panel is showing
@@ -57,7 +59,7 @@ function groupAvatarSrc(avatarUrl) {
 
 function avatarNode(name, avatarUrl, className) {
     const wrap = h('div', { className });
-    const src = groupAvatarSrc(avatarUrl) || (typeof userAvatarSrc === 'function' ? userAvatarSrc(avatarUrl) : null);
+    const src = groupAvatarSrc(avatarUrl) || (typeof FriChat.userAvatarSrc === 'function' ? FriChat.userAvatarSrc(avatarUrl) : null);
     if (src) {
         wrap.appendChild(h('img', { attrs: { src, alt: '' } }));
     } else {
@@ -104,9 +106,9 @@ function updateChatHeaderAvatar() {
 
     let src = isCurrentGroup() ? groupAvatarSrc(currentChatDetails.avatar_url) : null;
     // Direct chats: the other person's photo, if they share it (profile.js)
-    if (!src && typeof currentDirectPartner === 'function' && typeof userAvatarSrc === 'function') {
-        const partner = currentDirectPartner();
-        src = partner ? userAvatarSrc(partner.avatar_url) : null;
+    if (!src && typeof FriChat.currentDirectPartner === 'function' && typeof FriChat.userAvatarSrc === 'function') {
+        const partner = FriChat.currentDirectPartner();
+        src = partner ? FriChat.userAvatarSrc(partner.avatar_url) : null;
     }
     initial.hidden = !!src;
     if (src) avatar.appendChild(h('img', { attrs: { src, alt: '' } }));
@@ -189,7 +191,7 @@ async function openGroupInfo(chatId) {
     if (groupInfoOpenFor !== chatId) lastCreatedInvite = null;
     groupInfoOpenFor = chatId;
     // Fresh tabs each time the panel opens; refreshes while it's open keep them (media.js)
-    resetSharedMediaSection();
+    FriChat.resetSharedMediaSection();
     if (title) title.textContent = 'Group info';
     content.replaceChildren(h('p', { className: 'group-info-loading', text: 'Loading…' }));
     modal.style.display = 'flex';
@@ -252,7 +254,7 @@ function renderGroupInfo(chat, invites, requests, bans = []) {
         isAdmin ? renderInviteSection(chat, invites) : null,
         isAdmin && (chat.approve_new_members || requests.length > 0) ? renderRequestsSection(chat, requests) : null,
         renderMembersSection(chat, isAdmin),
-        renderSharedMediaSection(chat.id),
+        FriChat.renderSharedMediaSection(chat.id),
         isAdmin && bans.length > 0 ? renderBansSection(chat, bans) : null,
         renderLeaveSection(chat)
     ].filter(Boolean));
@@ -636,7 +638,7 @@ function renderMembersSection(chat, isAdmin) {
             tagChip
         );
         // Custom status and presence, only when the member shares them (privacy settings)
-        const statusText = typeof directChatStatusText === 'function' ? directChatStatusText(member) : '';
+        const statusText = typeof FriChat.directChatStatusText === 'function' ? FriChat.directChatStatusText(member) : '';
         const info = h('div', { className: 'member-info profile-link', attrs: { 'data-profile-user-id': member.id, role: 'button', tabindex: 0, title: `View ${displayNameOf(member)}'s profile` } },
             nameRow,
             h('div', { className: 'member-username', text: `@${member.username}` }),
@@ -674,7 +676,7 @@ function toggleMemberActions(chat, member, item, isAdmin, toggle) {
     }
 
     const name = displayNameOf(member);
-    const blocked = typeof isUserBlocked === 'function' && isUserBlocked(member.id);
+    const blocked = typeof FriChat.isUserBlocked === 'function' && FriChat.isUserBlocked(member.id);
     const row = h('div', { className: 'member-actions group-actions-row', attrs: { role: 'group', 'aria-label': `Options for ${name}` } },
         isAdmin
             ? h('button', { className: 'btn btn-secondary btn-small', text: member.role === 'admin' ? 'Remove admin' : 'Make admin', attrs: { type: 'button' }, on: { click: (e) => setMemberRole(chat.id, member, member.role === 'admin' ? 'member' : 'admin', e.target) } })
@@ -685,7 +687,7 @@ function toggleMemberActions(chat, member, item, isAdmin, toggle) {
         isAdmin
             ? h('button', { className: 'btn btn-danger btn-small', text: 'Remove and ban', attrs: { type: 'button' }, on: { click: (e) => removeGroupMember(chat.id, member, true, e.target) } })
             : null,
-        h('button', { className: 'btn btn-secondary btn-small', text: blocked ? 'Unblock' : 'Block', attrs: { type: 'button' }, on: { click: () => setUserBlocked(member.id, !blocked, name) } })
+        h('button', { className: 'btn btn-secondary btn-small', text: blocked ? 'Unblock' : 'Block', attrs: { type: 'button' }, on: { click: () => FriChat.setUserBlocked(member.id, !blocked, name) } })
     );
     item.appendChild(row);
     toggle.setAttribute('aria-expanded', 'true');
@@ -979,3 +981,22 @@ function initializeGroups() {
 }
 
 window.openGroupInfo = openGroupInfo;
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    groupAvatarSrc,
+    resetGroupState,
+    applyChatDetails,
+    renderMemberTagHtml,
+    canPostInCurrentChat,
+    openGroupInfo,
+    groupInfoModalOpen,
+    refreshGroupInfo,
+    h,
+    closeGroupInfo,
+    updateChatHeaderAvatar,
+    initializeGroups
+});
+Object.defineProperty(FriChat, 'groupInfoOpenFor', { get: () => groupInfoOpenFor, enumerable: true });
+Object.defineProperty(FriChat, 'currentChatDetails', { get: () => currentChatDetails, enumerable: true });
+})(globalThis.FriChat = globalThis.FriChat || {});

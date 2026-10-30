@@ -24,9 +24,12 @@ const VISIBLE_MESSAGE_JOINS = `
     JOIN group_members gm ON gm.chat_id = m.chat_id AND gm.user_id = ?
     LEFT JOIN deleted_messages dm ON dm.message_id = m.id AND dm.user_id = ?`;
 
+// Chat notices aren't searchable; expired messages are gone even before the scheduler deletes them
 const VISIBLE_MESSAGE_CONDITIONS = `
     dm.id IS NULL
-    AND (m.deleted_for_everyone IS NULL OR m.deleted_for_everyone = FALSE)`;
+    AND (m.deleted_for_everyone IS NULL OR m.deleted_for_everyone = FALSE)
+    AND m.message_type <> 'system'
+    AND (m.expires_at IS NULL OR m.expires_at > CURRENT_TIMESTAMP)`;
 
 async function isChatMember(chatId, userId) {
     const membership = await queryOne(

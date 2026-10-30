@@ -17,6 +17,8 @@
  * Keep the URL rule in step with extractFirstUrl() in backend/utils/linkPreview.js.
  */
 
+(function (FriChat) {
+
 const FORMAT_URL_PATTERN = /^https?:\/\/[^\s<>"'`]+/i;
 const FORMAT_MENTION_PATTERN = /^@([A-Za-z0-9_]{3,50})(?![A-Za-z0-9_])/;
 const FORMAT_FENCE_PATTERN = /```(?:([A-Za-z0-9_+.#-]{1,20})\n)?([\s\S]*?)```/g;
@@ -221,3 +223,10 @@ function formatMessageText(text, options = {}) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { formatMessageText, safeHttpUrl };
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    safeHttpUrl,
+    formatMessageText
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

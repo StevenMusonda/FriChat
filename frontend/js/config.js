@@ -48,6 +48,7 @@ const CONFIG = {
         ARCHIVE_CHAT: (chatId) => `/chats/${chatId}/archive`,
         MENTIONS_ONLY: (chatId) => `/chats/${chatId}/mentions-only`,
         SHARED_MEDIA: (chatId) => `/chats/${chatId}/media`,
+        DISAPPEARING: (chatId) => `/chats/${chatId}/disappearing`,
 
         // Groups
         GROUP_SETTINGS: (chatId) => `/chats/${chatId}/settings`,
@@ -111,6 +112,20 @@ const CONFIG = {
 
     // Files waiting in the composer's upload tray at once (each is its own upload request)
     MAX_TRAY_FILES: 10,
+
+    // Voice notes (the server enforces the same limits: backend/config/messages.js)
+    VOICE_MAX_SECONDS: 300,
+    VOICE_WAVEFORM_BARS: 48,
+    // Pressing the mic longer than this records while held; a shorter click starts a recording you send with a button
+    VOICE_HOLD_MS: 300,
+
+    // Disappearing messages timers in seconds (backend/config/messages.js DISAPPEARING_DURATIONS)
+    DISAPPEARING_OPTIONS: [
+        { seconds: 0, label: 'Off' },
+        { seconds: 24 * 60 * 60, label: '24 hours' },
+        { seconds: 7 * 24 * 60 * 60, label: '7 days' },
+        { seconds: 90 * 24 * 60 * 60, label: '90 days' }
+    ],
 
     // Search results and shared media items per request
     SEARCH_PAGE_SIZE: 20,

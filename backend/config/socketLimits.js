@@ -32,7 +32,7 @@ module.exports = {
             perUser: { capacity: 20, refillPerSecond: 3 }
         },
         receipt: {
-            events: ['message_status'],
+            events: ['message_status', 'voice_played'],
             perSocket: { capacity: 30, refillPerSecond: 5 },
             perUser: { capacity: 60, refillPerSecond: 10 },
             silent: true

@@ -5,10 +5,13 @@
  * File names and draft text are put into the page with textContent, never innerHTML.
  */
 
-// Files in the tray: { id, file, previewUrl, status: 'queued' | 'uploading' | 'error', progress, xhr, error }
+(function (FriChat) {
+
+// Files in the tray: { id, file, previewUrl, status: 'queued' | 'uploading' | 'error', progress, xhr, error, fields? }
+// fields: extra form fields sent with the file (a voice note's duration and waveform, voice.js)
 let pendingUploads = [];
 let nextPendingUploadId = 1;
-// { maxFileSize, allowedTypes } from GET /messages/upload-limits (the server enforces them either way)
+// { maxFileSize, maxAudioFileSize, allowedTypes } from GET /messages/upload-limits (the server enforces them either way)
 let uploadLimits = null;
 let draftSaveTimer = null;
 
@@ -141,8 +144,10 @@ function checkUploadFile(file, limits) {
     if (!limits.allowedTypes.includes(file.type)) {
         return `${file.name}: this file type can't be sent`;
     }
-    if (file.size > limits.maxFileSize) {
-        return `${file.name} is larger than ${formatFileSize(limits.maxFileSize)}`;
+    // Audio (voice notes) has its own, smaller cap
+    const maxSize = file.type.startsWith('audio/') && limits.maxAudioFileSize ? limits.maxAudioFileSize : limits.maxFileSize;
+    if (file.size > maxSize) {
+        return `${file.name} is larger than ${formatFileSize(maxSize)}`;
     }
     return null;
 }
@@ -158,7 +163,7 @@ async function addFilesToTray(fileList) {
     const files = Array.from(fileList || []);
     if (files.length === 0 || !currentChatId) return;
 
-    if (!canPostInCurrentChat()) {
+    if (!FriChat.canPostInCurrentChat()) {
         showNotification('You can\'t send files in this chat', 'error');
         return;
     }
@@ -194,6 +199,23 @@ async function addFilesToTray(fileList) {
 
     renderUploadTray();
     document.getElementById('messageInput').focus();
+}
+
+/**
+ * A voice note whose upload failed: kept in the tray (with its duration and waveform) so Send retries it
+ */
+function addVoiceNoteToTray(file, fields, error) {
+    pendingUploads.push({
+        id: nextPendingUploadId++,
+        file,
+        previewUrl: null,
+        status: 'error',
+        progress: 0,
+        xhr: null,
+        error: error || 'Failed',
+        fields
+    });
+    renderUploadTray();
 }
 
 /**
@@ -235,6 +257,9 @@ function uploadWithProgress(chatId, item, replyToMessageId, onProgress) {
         formData.append('file', item.file);
         formData.append('chatId', chatId);
         if (replyToMessageId) formData.append('replyToMessageId', replyToMessageId);
+        for (const [name, value] of Object.entries(item.fields || {})) {
+            if (value !== null && value !== undefined && value !== '') formData.append(name, value);
+        }
 
         const xhr = new XMLHttpRequest();
         item.xhr = xhr;
@@ -326,27 +351,27 @@ function renderUploadTray() {
     tray.replaceChildren(...pendingUploads.map(item => {
         let thumb;
         if (item.previewUrl && item.file.type.startsWith('image/')) {
-            thumb = h('img', { attrs: { src: item.previewUrl, alt: '' } });
+            thumb = FriChat.h('img', { attrs: { src: item.previewUrl, alt: '' } });
         } else if (item.previewUrl) {
-            thumb = h('video', { attrs: { src: item.previewUrl, muted: true, preload: 'metadata' } });
+            thumb = FriChat.h('video', { attrs: { src: item.previewUrl, muted: true, preload: 'metadata' } });
         } else {
             const ext = (item.file.name.split('.').pop() || 'file').slice(0, 4).toUpperCase();
-            thumb = h('span', { className: 'upload-item-ext', text: ext });
+            thumb = FriChat.h('span', { className: 'upload-item-ext', text: ext });
         }
 
         const cancelLabel = item.status === 'uploading' ? `Cancel uploading ${item.file.name}` : `Remove ${item.file.name}`;
-        return h('div', {
+        return FriChat.h('div', {
             className: `upload-item ${item.status}`,
             attrs: { 'data-upload-id': item.id, role: 'listitem' }
         },
-            h('div', { className: 'upload-item-thumb' }, thumb),
-            h('div', { className: 'upload-item-info' },
-                h('span', { className: 'upload-item-name', text: item.file.name, attrs: { title: item.file.name } }),
-                h('span', { className: 'upload-item-status', text: uploadStatusText(item) }),
-                h('span', { className: 'upload-item-progress', attrs: { 'aria-hidden': 'true' } },
-                    h('span', { className: 'upload-item-bar', attrs: { style: `width: ${Math.round(item.progress * 100)}%` } }))
+            FriChat.h('div', { className: 'upload-item-thumb' }, thumb),
+            FriChat.h('div', { className: 'upload-item-info' },
+                FriChat.h('span', { className: 'upload-item-name', text: item.file.name, attrs: { title: item.file.name } }),
+                FriChat.h('span', { className: 'upload-item-status', text: uploadStatusText(item) }),
+                FriChat.h('span', { className: 'upload-item-progress', attrs: { 'aria-hidden': 'true' } },
+                    FriChat.h('span', { className: 'upload-item-bar', attrs: { style: `width: ${Math.round(item.progress * 100)}%` } }))
             ),
-            h('button', {
+            FriChat.h('button', {
                 className: 'icon-btn upload-item-remove',
                 attrs: { type: 'button', title: item.status === 'uploading' ? 'Cancel upload' : 'Remove', 'aria-label': cancelLabel },
                 on: { click: () => removeFromTray(item.id) }
@@ -436,7 +461,7 @@ function initializeComposer() {
     activeChat.addEventListener('dragover', (e) => {
         if (!hasFiles(e)) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = canPostInCurrentChat() ? 'copy' : 'none';
+        e.dataTransfer.dropEffect = FriChat.canPostInCurrentChat() ? 'copy' : 'none';
     });
     activeChat.addEventListener('dragleave', (e) => {
         if (!hasFiles(e)) return;
@@ -462,3 +487,21 @@ function initializeComposer() {
     // Keep the tray above the reply bar if the window (and the bar's wrapping) changes
     window.addEventListener('resize', positionUploadTray);
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    getDraftPreview,
+    saveCurrentDraft,
+    resetUploadTray,
+    restoreDraft,
+    isSendShortcut,
+    hasPendingUploads,
+    clearDraft,
+    sendPendingUploads,
+    positionUploadTray,
+    loadUploadLimits,
+    uploadWithProgress,
+    addVoiceNoteToTray,
+    initializeComposer
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

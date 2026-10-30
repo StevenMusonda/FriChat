@@ -1519,4 +1519,162 @@ Use three accounts: A, B (shares a chat with A) and C (shares nothing with A).
 
 ---
 
+## Phase 10: Voice notes and disappearing messages
+
+Record and play voice notes, and let a chat's new messages delete themselves after a while.
+
+### What it does
+
+- **Voice notes.** The mic button sits next to Send.
+  - **Hold to record:** release to send, or slide left (or press Esc) to cancel.
+  - **Click to record:** a recording bar opens with a timer, live level bars, **Cancel** (trash) and **Send**.
+  - The browser records with `MediaRecorder` in the first format it supports: webm/opus (Chrome, Edge, Firefox), mp4/AAC (Safari) or ogg/opus (older Firefox). The limit is **5 minutes**: at 5:00 the note is sent automatically.
+  - **Microphone problems** get a clear message: permission blocked, no microphone, microphone in use, no secure context (https or localhost), or a browser without `MediaRecorder`.
+  - **Upload** goes through the normal pipeline (`POST /api/messages/upload` with the chat id), with the duration and a 48-bar waveform measured while recording. If the upload fails, the note lands in the upload tray and **Send** retries it.
+  - **The player** shows play/pause, the waveform as a seek bar (a real range input, so keyboard, touch and screen readers can seek), the time, and **1× / 1.5× / 2×** speed (remembered per browser). Only one voice note plays at a time.
+  - **Played state:** the first time someone else plays your note, the server records it and your mic icon turns blue. Like read receipts, a listener with read receipts off is never reported as having played it, and you don't see plays while your own receipts are off. Notes you haven't played yet show a dot.
+- **Disappearing messages:** chat menu (⋮) → **Disappearing messages**, or the clock in the header.
+  - The timers are **Off, 24 hours, 7 days or 90 days**. Either person can change it in a direct chat (not while blocked or in an unaccepted request). In a group, only admins can.
+  - Every change posts a **notice in the chat**, e.g. "Bob turned on disappearing messages. New messages will disappear 7 days after they're sent." The notice itself never disappears, and it can't be replied to, reacted to, starred or forwarded.
+  - Messages sent **after** the change get an `expires_at`, computed inside the INSERT from the chat's timer on the database clock. This covers every send path: socket, REST, file upload, forward, scheduled messages and polls. Earlier messages keep what they had. Forwarded copies follow the **target** chat's timer.
+  - **The scheduler** (every `SCHEDULER_TICK_SECONDS`) deletes expired messages from the database, so their reactions, stars, mentions, pins, polls, reminders and plays go too (cascades). It then deletes their `files` rows and the files on disk, unless a forwarded copy still uses that file. Open clients remove the messages live (`messages_expired`).
+  - Until the sweep runs, expired messages are already left out of message pages, search and the chat list. Clients also hide them locally the moment their time is up.
+  - A clock shows next to the chat's name in the chat list and in the header, and a small clock in the footer of each message that will disappear (hover for when).
+  - The dialog says plainly that **people can still copy, screenshot, forward or save** messages before they disappear.
+- **Push notifications** for a chat with disappearing messages on, or for a message that will disappear, say only **"New message"**: no text and no poll question. Reminder pushes for such a message hide its text too. Timer-change notices send no push.
+
+### Setup
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_voice_notes_and_disappearing.sql
+# PostgreSQL (safe to run more than once; use psql -f, which autocommits the ALTER TYPE)
+psql -U postgres -d frichat -f database/add_voice_notes_and_disappearing_postgresql.sql
+```
+
+The migration adds:
+- `voice` and `system` to the `message_type` enum.
+- `messages.expires_at` (indexed), `chats.disappearing_seconds`, and `files.duration_ms` and `files.waveform`.
+- The table `voice_note_plays`.
+
+Nothing existing changes: every chat starts with the timer off. Fresh installs get the same from `schema.sql` / `schema_postgresql.sql`.
+
+**Run the migration before starting the new server.** Without it, message pages and the scheduler fail on the missing `expires_at` column.
+
+**New env variables** (optional, already in `backend/.env.example`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ALLOWED_AUDIO_TYPES` | `audio/webm,audio/ogg,audio/mp4,audio/mpeg,audio/aac` | Audio types the upload accepts. Codec parameters (`;codecs=opus`) are ignored. |
+| `MAX_AUDIO_FILE_SIZE` | `10485760` (10 MB) | Largest audio upload. It is never above `MAX_FILE_SIZE`. A 5-minute note is about 1–2 MB as webm/opus, up to ~5 MB as Safari's AAC. |
+
+No new npm packages. Audio is stored under `uploads/audio/`.
+
+### New endpoints
+
+| Method | Path | Notes |
+|---|---|---|
+| PUT | `/api/chats/:chatId/disappearing` | **Body:** `{ seconds: 0 \| 86400 \| 604800 \| 7776000 }`. **Who:** members of a direct chat, admins of a group. **Errors:** `400` for another value, `403` for a non-member, a non-admin (`ADMIN_ONLY`), a block or an unaccepted request. Posts the notice and returns `{ chatId, seconds, changed }`; the same value again returns `changed: false` and posts nothing. **Rate limit:** 30/min (group actions). |
+
+**Changed:**
+- `POST /api/messages/upload` takes the optional fields `voiceDurationMs` (1 – 303000) and `voiceWaveform` (up to 64 comma-separated levels 0–100). It accepts the audio types above, with their own size cap. A refused upload no longer leaves its file on disk.
+- `GET /api/messages/upload-limits` also returns `maxAudioFileSize` and `audioTypes`.
+- Messages now carry:
+  - `expires_at` (UTC ISO or `null`).
+  - On voice notes: `duration_ms` and `waveform` (an array). Also `voice_played` on your own notes and `played_by_me` on other people's.
+- `GET /api/chats` and `GET /api/chats/:chatId` carry `disappearing_seconds`. The second one also carries `can_change_disappearing`.
+- `message_type` can be `voice` or `system`. `POST /api/messages` accepts `messageType: 'voice'` with a `fileId`.
+
+### New Socket.IO events
+
+| Direction | Event | Payload / notes |
+|---|---|---|
+| client → server | `voice_played` | `{ messageId }`. You must be a member of the message's chat, and it must be someone else's voice note. Recorded once. Rate limited (`receipt` group). |
+| server → `user_<senderId>` | `voice_note_played` | `{ messageId, chatId, userId }`. Sent only on the first play, when both people share read receipts and there is no block. |
+| server → `chat_<id>` | `chat_disappearing_updated` | `{ chatId, seconds, changedBy }`. Sent before the notice's `new_message`. |
+| server → `chat_<id>` | `messages_expired` | `{ chatId, messageIds }`. Sent after the scheduler deleted them. |
+
+`CACHE_VERSION` is now `frichat-shell-v12` (new `js/voice.js` and `js/disappearing.js`).
+
+### Manual test checklist
+
+Use two accounts, A and B, in a direct chat. Add a group where A is admin and B is a member. Test in **Chrome, Firefox and Safari** (desktop and/or iPhone). The microphone needs `http://localhost` or https.
+
+1. [ ] Run the migration and restart. The composer shows a mic button. A **clicks** it, and the browser asks for the microphone. **Block** it: you see "Microphone access is blocked…". Allow it in the site settings and try again.
+2. [ ] A clicks the mic, speaks for ~10 s, and presses **Send**. The timer counted up and the level bars moved. B sees a voice note with a waveform, a duration of about 0:10 and an unplayed dot.
+3. [ ] A **holds** the mic, speaks, and releases: the note is sent. Hold again, slide left past the hint (it turns red) and release: nothing is sent. Hold and press **Esc**: cancelled.
+4. [ ] B plays it: play/pause works, dragging on the waveform seeks, and **1×** cycles through 1.5× and 2×. B starts a second note while the first plays: the first stops. A's mic icon on that note turns blue live, and still after a reload.
+5. [ ] B turns **read receipts off** (Settings → Privacy) and plays another note from A. A's icon stays grey.
+6. [ ] Record in **Safari** and play it in Chrome and Firefox. Record in Chrome/Firefox and play it in Safari. Check the duration and that seeking works.
+7. [ ] Record for 5 minutes (or set `CONFIG.VOICE_MAX_SECONDS` lower in DevTools). The note is sent automatically at the limit.
+8. [ ] In the **group**, B opens ⋮ → **Disappearing messages**: the options are disabled, with "Only group admins can change this." A sets **24 hours** and saves. Both see the notice and a clock in the header and the chat list. The dialog shows the copy/screenshot warning.
+9. [ ] In the **direct chat**, B sets **7 days**. A sends a text, a photo and a voice note: each footer shows a small clock, and hovering it shows when. Messages from before the change don't have one.
+10. [ ] **Expiry.** In the database, set the new messages' `expires_at` to the past:
+    - MySQL: `UPDATE messages SET expires_at = NOW() - INTERVAL 1 SECOND WHERE chat_id = <id> AND expires_at IS NOT NULL;`
+    - PostgreSQL: `... = CURRENT_TIMESTAMP - INTERVAL '1 second' ...`
+
+    Within `SCHEDULER_TICK_SECONDS` (15 s) they disappear for both A and B without a reload. The rows are gone from `messages`, their `files` rows are gone, and the photo and the audio file are gone from `backend/uploads/images` and `backend/uploads/audio`. The notice and the older messages stay.
+11. [ ] **Forwarded copy.** Forward a disappearing photo to a chat with the timer off, then let the original expire. The copy and its file stay.
+12. [ ] **Push.** Close B's tab with push enabled and have A send "secret" in the disappearing chat. The notification says "New message", not "secret". With the timer **Off**, it shows the text again.
+13. [ ] A sets the timer to **Off**. The notice says it was turned off, the clocks go away, and new messages don't expire.
+14. [ ] A **360 px** wide window, in both themes: the composer fits (attach, poll, text box, emoji, schedule, mic, send), and the recording bar, the voice player and the dialog don't scroll sideways.
+
+### Tests
+
+`cd backend && npm test`: **699 tests**, 63 more than before, all passing.
+- **`test/phase10.test.js`** (50 tests) runs on both fake drivers. It covers:
+  - **Timer rules:** valid values only, refusing non-members, group non-admins and blocked direct chats. An allowed change writes the notice (without `expires_at`) and emits `chat_disappearing_updated` before `new_message`. The same value again is a no-op, and 0 is stored as NULL.
+  - **The sweep:**
+    - It deletes rows, file rows and **the files on disk**, while a file that a forwarded copy still uses stays.
+    - It never unlinks a path outside the uploads folder.
+    - It emits `messages_expired` per chat.
+    - The scheduler runs it.
+  - **Inserts:** every message INSERT in the server carries `expires_at`. The SQL fragment has the right shape for each engine. Pages, search and the chat list skip expired rows.
+  - **Shaping:** `expires_at` is an ISO time, and waveforms are parsed.
+  - **Voice plays:** non-members, wrong ids and non-voice messages are refused. A play counts only once. Read receipts are respected both ways, and nothing is recorded across a block.
+  - **Push:** previews hide text for disappearing chats and messages, voice notes get a label, system notices send no push (checked with real VAPID keys), and reminder pushes hide the text.
+  - **Uploads:** the audio allowlist, codec parameters being stripped, the audio cap staying ≤ `MAX_FILE_SIZE`, audio becoming `voice`, the waveform and duration rules, and refused uploads being removed from disk. Plus the route and socket-event wiring.
+- **`test/phase10Frontend.test.js`** (13 tests) loads the real `voice.js` and `disappearing.js`. It covers:
+  - The recorder format choice for Chrome/Firefox, Safari and older Firefox, and the uploaded type.
+  - Waveform compression, time formatting and the microphone error texts.
+  - Player markup that holds only numbers (an injected id or level can't add HTML).
+  - Notices with escaped names.
+  - Expired messages leaving the thread, with quotes turning into "Original message deleted".
+  - The page wiring.
+- **Existing fakes** learned the new SQL shapes: the reply check reads `message_type`, the reaction lookup skips notices, the push preview reads `disappearing_seconds`, and the delivery INSERT has `expires_at`. No assertions changed.
+- **Live check on the local PostgreSQL 18**, in two throwaway databases that were dropped afterwards:
+  - **Schema:** the HEAD schema plus this migration, run **twice**, matches a fresh `schema_postgresql.sql` column for column on `messages`, `chats`, `files` and `voice_note_plays`, with the same enum.
+  - **Real backend code on that database:**
+    - Timer rules, the notice, and `expires_at` about 24 h ahead on the DB clock.
+    - Plays.
+    - The sweep, which deleted 4 messages and the voice file **from disk** while keeping the file of a forwarded copy. Reactions, stars and plays cascaded.
+    - The chat list and message page queries.
+  - **The real server over HTTP** with real sessions:
+    - The timer endpoint (401/400/403/200).
+    - Upload of `audio/webm;codecs=opus`: stored as `audio/webm` under `uploads/audio`, with duration and waveform.
+    - A bad waveform, a 15-minute duration, an 11 MB note and a non-member upload refused, with nothing left on disk.
+    - Voice notes sent with an expiry through both upload paths.
+    - Notices refused for star, forward and reply, and left out of search.
+- **Screenshots** (headless Edge, real `style.css` and chat.html markup) at 360 px in light and dark: the thread with notices and voice notes, the composer, both recording modes and the dialog. At 1100 px: the thread and composer. A wrapping placeholder at 360 px was found and fixed.
+
+### Known limitations
+
+- **Real browsers with a real microphone were not tested.** Recording and playback in Chrome, Firefox and Safari is the acceptance criterion, and it needs the checklist above (items 1–7, especially 6). The format choice and the player were tested in the sandbox, and the upload over real HTTP.
+- **Safari and webm.** Notes recorded in Chrome or Firefox are webm/opus. Current Safari plays webm/opus, but older Safari / iOS versions may not, and then the player shows "This voice note can't be played in this browser". Safari's own recordings (mp4/AAC) play everywhere. A server-side transcode (ffmpeg) would remove this; it isn't part of this phase.
+- **Chrome's webm files carry no duration or seek index.** The player uses the duration measured while recording, so time and seek bar are right. Seeking far into a long note can still be slower or less exact than in an mp4.
+- **Duration and waveform come from the recording browser.** The server checks their range and the file size but doesn't decode the audio, so a modified client could send a wrong waveform.
+- **The first hold triggers the permission prompt.** Releasing while it's open doesn't send anything: recording carries on in click mode, and you finish with Send or Cancel.
+- **What "disappear" can't reach:**
+  - Copies people made (screenshots, downloads, forwards to other chats, which follow their own chat's timer).
+  - Notifications already shown.
+  - Files the browser cached after viewing.
+  - Database backups (`database/backup_db`).
+
+  The dialog says this.
+- **Timing.** Deletion happens up to `SCHEDULER_TICK_SECONDS` after `expires_at`, up to 200 messages per tick. Until then the API and the clients already hide them.
+- **Group "played"** means at least one other member (who shares read receipts) played it.
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise the statements. The MySQL migration uses `ADD COLUMN` without `IF NOT EXISTS`, so run it once.
+
+---
+
 **Enjoy the new features! 🎉**

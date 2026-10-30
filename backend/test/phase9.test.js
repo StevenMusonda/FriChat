@@ -713,6 +713,7 @@ describe('profile photos', () => {
 
 describe('phase 9 frontend helpers', () => {
     const vm = require('vm');
+    const { runFrontendScript } = require('./helpers/frontendScripts');
     const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
     const read = (file) => fs.readFileSync(path.join(FRONTEND, file), 'utf8');
 
@@ -726,7 +727,7 @@ describe('phase 9 frontend helpers', () => {
         vm.createContext(box);
         const chat = read('js/chat.js');
         vm.runInContext(chat.slice(chat.indexOf('function escapeHtml(text)'), chat.indexOf('}', chat.indexOf(".replace(/'/g, '&#39;');")) + 1), box);
-        vm.runInContext(read('js/profile.js'), box);
+        runFrontendScript(read('js/profile.js'), box);
         return box;
     }
 

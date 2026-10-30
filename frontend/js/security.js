@@ -5,6 +5,8 @@
  * Everything from the server is put into the page with textContent, never innerHTML.
  */
 
+(function (FriChat) {
+
 // Users this user has blocked (ids), for menus and the members panel
 const blockedUserIds = new Set();
 
@@ -247,7 +249,7 @@ async function afterBlockChange() {
     await loadBlockedUsers();
     // The open chat's composer lock and the group panel's buttons depend on it
     if (typeof currentChatId !== 'undefined' && currentChatId) {
-        if (typeof groupInfoModalOpen === 'function' && groupInfoModalOpen()) refreshGroupInfo();
+        if (typeof FriChat.groupInfoModalOpen === 'function' && FriChat.groupInfoModalOpen()) FriChat.refreshGroupInfo();
         if (typeof loadChatDetails === 'function') loadChatDetails(currentChatId);
     }
 }
@@ -307,3 +309,11 @@ function initializeSecurity() {
 
 window.setUserBlocked = setUserBlocked;
 window.isUserBlocked = isUserBlocked;
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    isUserBlocked,
+    setUserBlocked,
+    initializeSecurity
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

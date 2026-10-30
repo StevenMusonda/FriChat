@@ -2,6 +2,7 @@
 -- Compatible with MySQL 5.7+ and PostgreSQL 10+
 
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS voice_note_plays;
 DROP TABLE IF EXISTS message_requests;
 DROP TABLE IF EXISTS privacy_settings;
 DROP TABLE IF EXISTS message_reminders;
@@ -101,6 +102,7 @@ CREATE TABLE chats (
     avatar_url VARCHAR(255) NULL, -- path under uploads/, e.g. 'uploads/group-avatars/<random>.webp'
     approve_new_members BOOLEAN NOT NULL DEFAULT FALSE, -- invite-link joins wait for an admin
     announcement_only BOOLEAN NOT NULL DEFAULT FALSE, -- only admins can send messages
+    disappearing_seconds INT NULL DEFAULT NULL, -- disappearing messages timer: NULL/0 = off, else 86400 | 604800 | 7776000
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -139,6 +141,8 @@ CREATE TABLE files (
     uploaded_by INT,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     attached_at TIMESTAMP NULL DEFAULT NULL, -- NULL = uploaded, not attached to a message yet
+    duration_ms INT NULL DEFAULT NULL, -- voice notes: measured by the recording browser
+    waveform VARCHAR(400) NULL DEFAULT NULL, -- voice notes: comma-separated levels 0-100
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_uploaded_by (uploaded_by)
 );
@@ -162,7 +166,7 @@ CREATE TABLE messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
     chat_id INT NOT NULL,
     sender_id INT NOT NULL,
-    message_type ENUM('text', 'image', 'video', 'file', 'poll') NOT NULL, -- 'poll': content is the question, details in polls
+    message_type ENUM('text', 'image', 'video', 'file', 'poll', 'voice', 'system') NOT NULL, -- 'poll': content is the question, details in polls; 'system': content is a notice code
     content TEXT, -- For text messages
     file_id INT, -- Reference to files table for media/file messages
     status ENUM('sent', 'delivered', 'read') DEFAULT 'sent',
@@ -174,6 +178,7 @@ CREATE TABLE messages (
     deleted_for_everyone BOOLEAN DEFAULT FALSE,
     link_preview_id INT NULL, -- preview card under the message
     link_preview_dismissed BOOLEAN NOT NULL DEFAULT FALSE, -- the sender removed the preview
+    expires_at TIMESTAMP NULL DEFAULT NULL, -- disappearing messages: the scheduler deletes it (and its file) then
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
@@ -188,6 +193,7 @@ CREATE TABLE messages (
     INDEX idx_messages_deleted_at (deleted_at),
     INDEX idx_msg_chat_id_id (chat_id, id), -- cursor pagination and unread counts
     INDEX idx_msg_chat_type_id (chat_id, message_type, id), -- shared media panel
+    INDEX idx_messages_expires_at (expires_at), -- disappearing messages sweep
     FULLTEXT INDEX ft_messages_content (content) -- message search (MATCH ... AGAINST)
 );
 
@@ -484,6 +490,16 @@ CREATE TABLE message_requests (
     FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_message_requests_recipient (recipient_id, status)
+);
+
+-- Who has played a voice note (the sender sees "played")
+CREATE TABLE voice_note_plays (
+    message_id INT NOT NULL,
+    user_id INT NOT NULL,
+    played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, user_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Create a view for easy message retrieval with user info

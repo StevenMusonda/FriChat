@@ -22,6 +22,8 @@ const storage = multer.diskStorage({
             subDir = 'images';
         } else if (file.mimetype.startsWith('video/')) {
             subDir = 'videos';
+        } else if (file.mimetype.startsWith('audio/')) {
+            subDir = 'audio';
         }
         
         const fullPath = path.join(uploadDir, subDir);
@@ -40,23 +42,56 @@ const storage = multer.diskStorage({
     }
 });
 
+// What MediaRecorder produces: webm/opus (Chrome, Firefox, Edge), mp4/AAC (Safari), ogg/opus (older Firefox)
+const DEFAULT_AUDIO_TYPES = 'audio/webm,audio/ogg,audio/mp4,audio/mpeg,audio/aac';
+// A 5-minute voice note is about 1-2 MB as opus and up to ~5 MB as AAC
+const DEFAULT_MAX_AUDIO_FILE_SIZE = 10 * 1024 * 1024;
+
 /**
- * Allowed MIME types and the size cap from the environment. The composer fetches them
+ * "audio/webm;codecs=opus" -> "audio/webm": recorders label their blobs with codec parameters,
+ * the allowlist has plain types
+ */
+function baseMimeType(mimetype) {
+    return String(mimetype || '').split(';')[0].trim().toLowerCase();
+}
+
+function parseTypes(value) {
+    return value.split(',').map(baseMimeType).filter(Boolean);
+}
+
+/**
+ * Allowed MIME types and the size caps from the environment. The composer fetches them
  * (GET /api/messages/upload-limits) to refuse a file before uploading it.
+ * Audio (voice notes) has its own, smaller cap: maxAudioFileSize, never above maxFileSize.
  */
 function getUploadLimits() {
-    const allowedImages = (process.env.ALLOWED_IMAGE_TYPES || 'image/jpeg,image/png,image/gif,image/webp').split(',');
-    const allowedVideos = (process.env.ALLOWED_VIDEO_TYPES || 'video/mp4,video/webm,video/quicktime').split(',');
-    const allowedFiles = (process.env.ALLOWED_FILE_TYPES || 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip,application/x-zip-compressed').split(',');
+    const allowedImages = parseTypes(process.env.ALLOWED_IMAGE_TYPES || 'image/jpeg,image/png,image/gif,image/webp');
+    const allowedVideos = parseTypes(process.env.ALLOWED_VIDEO_TYPES || 'video/mp4,video/webm,video/quicktime');
+    const allowedFiles = parseTypes(process.env.ALLOWED_FILE_TYPES || 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip,application/x-zip-compressed');
+    const allowedAudio = parseTypes(process.env.ALLOWED_AUDIO_TYPES || DEFAULT_AUDIO_TYPES);
+
+    const maxFileSize = parseInt(process.env.MAX_FILE_SIZE) || 104857600; // 100MB default
+    const maxAudioFileSize = Math.min(parseInt(process.env.MAX_AUDIO_FILE_SIZE) || DEFAULT_MAX_AUDIO_FILE_SIZE, maxFileSize);
 
     return {
-        maxFileSize: parseInt(process.env.MAX_FILE_SIZE) || 104857600, // 100MB default
-        allowedTypes: [...allowedImages, ...allowedVideos, ...allowedFiles]
+        maxFileSize,
+        maxAudioFileSize,
+        audioTypes: allowedAudio,
+        allowedTypes: [...allowedImages, ...allowedVideos, ...allowedFiles, ...allowedAudio]
     };
+}
+
+/**
+ * Size cap for one stored file (multer only knows one cap, so audio is checked after the upload)
+ */
+function maxSizeFor(mimetype, limits = getUploadLimits()) {
+    return baseMimeType(mimetype).startsWith('audio/') ? limits.maxAudioFileSize : limits.maxFileSize;
 }
 
 // File filter for validation
 const fileFilter = (req, file, cb) => {
+    // Stored and served under the plain type, whatever parameters the browser added
+    file.mimetype = baseMimeType(file.mimetype);
     if (getUploadLimits().allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
@@ -98,5 +133,7 @@ const handleUploadError = (err, req, res, next) => {
 module.exports = {
     upload,
     handleUploadError,
-    getUploadLimits
+    getUploadLimits,
+    maxSizeFor,
+    baseMimeType
 };

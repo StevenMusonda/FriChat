@@ -26,6 +26,7 @@ const {
     validateMemberRole,
     validateChatUserParams,
     validateSharedMediaQuery,
+    validateDisappearingTimer,
     checkValidation
 } = require('../utils/validation');
 
@@ -107,6 +108,9 @@ router.post('/:chatId/read', chatController.markRead);
 router.put('/:chatId/mute', chatController.updateMute);
 router.put('/:chatId/archive', chatController.updateArchive);
 router.put('/:chatId/mentions-only', chatSettingsLimiter, validateMentionsOnly, checkValidation, chatController.updateMentionsOnly);
+
+// Disappearing messages timer for new messages (either person in a direct chat, admins in a group)
+router.put('/:chatId/disappearing', groupActionLimiter, validateDisappearingTimer, checkValidation, chatController.setDisappearingTimer);
 
 // Message requests (only the recipient): accept, delete, or block the sender
 router.post('/:chatId/request/accept', groupActionLimiter, validateChatIdParam, checkValidation, requestController.acceptRequest);

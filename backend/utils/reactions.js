@@ -24,11 +24,12 @@ function isValidEmoji(emoji) {
  * The message's chat, or null when it doesn't exist or the user isn't a member of its chat
  */
 async function getMessageChatForMember(messageId, userId) {
+    // Chat notices (timer changes) can't be reacted to; to the reaction rules they don't exist
     const message = await queryOne(`
         SELECT m.id, m.chat_id
         FROM messages m
         JOIN group_members gm ON m.chat_id = gm.chat_id
-        WHERE m.id = ? AND gm.user_id = ?
+        WHERE m.id = ? AND gm.user_id = ? AND m.message_type <> 'system'
     `, [messageId, userId]);
     return message ? message.chat_id : null;
 }

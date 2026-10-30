@@ -20,6 +20,7 @@ const { checkUnverifiedContact } = require('../utils/emailVerification');
 const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong } = require('../utils/blocks');
 const privacy = require('../utils/privacy');
 const messageRequests = require('../utils/messageRequests');
+const disappearing = require('../utils/disappearing');
 
 // Names each participant field for utils/privacy.js
 const LIST_PARTICIPANT_KEYS = { id: 'userId', avatar: 'avatarUrl', status: 'status', customStatus: 'customStatus' };
@@ -53,6 +54,7 @@ async function getUserChats(req, res) {
                 c.chat_type,
                 c.chat_name,
                 c.avatar_url,
+                c.disappearing_seconds,
                 c.created_at,
                 c.updated_at,
                 gm.last_read_message_id,
@@ -149,6 +151,7 @@ async function getUserChats(req, res) {
                     SELECT m2.id
                     FROM messages m2
                     WHERE m2.chat_id = c.id
+                    AND (m2.expires_at IS NULL OR m2.expires_at > CURRENT_TIMESTAMP)
                     ORDER BY m2.created_at DESC, m2.id DESC
                     LIMIT 1
                 )
@@ -175,6 +178,7 @@ async function getUserChats(req, res) {
             chat.is_muted = !!parseInt(chat.is_muted);
             chat.unread_mention_count = parseInt(chat.unread_mention_count) || 0;
             chat.mentions_only = chat.mentions_only === true || chat.mentions_only === 1 || chat.mentions_only === '1';
+            chat.disappearing_seconds = parseInt(chat.disappearing_seconds) || 0;
             chat.participants = JSON.stringify(participantsByChat[chat.id] || []);
             chat.lastMessage = lastMessageByChat[chat.id] ? JSON.stringify(lastMessageByChat[chat.id]) : null;
             chat.message_request = messageRequests.describeRequest(pendingRequests.get(Number(chat.id)) || null, userId);
@@ -190,6 +194,30 @@ async function getUserChats(req, res) {
         res.status(500).json({
             success: false,
             message: 'Failed to retrieve chats',
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Turn disappearing messages on/off for new messages in a chat. Body: { seconds }.
+ * Direct chats: either person; groups: admins. Announced in the chat as a system message.
+ */
+async function setDisappearingTimer(req, res) {
+    try {
+        const result = await disappearing.setTimer(req.io, req.params.chatId, req.user.id, req.body.seconds);
+        if (result.error) return sendError(res, result.error);
+
+        res.json({
+            success: true,
+            message: result.seconds > 0 ? 'Disappearing messages turned on' : 'Disappearing messages turned off',
+            data: { chatId: Number(req.params.chatId), seconds: result.seconds, changed: result.changed }
+        });
+    } catch (error) {
+        console.error('Set disappearing timer error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to change disappearing messages',
             error: error.message
         });
     }
@@ -246,6 +274,9 @@ async function getChatById(req, res) {
         chat.participants = await privacy.applyUserPrivacy(userId, participants, CHAT_PARTICIPANT_KEYS);
         chat.approve_new_members = toBool(chat.approve_new_members);
         chat.announcement_only = toBool(chat.announcement_only);
+        chat.disappearing_seconds = parseInt(chat.disappearing_seconds) || 0;
+        // Disappearing messages: either person in a direct chat, admins in a group
+        chat.can_change_disappearing = !(await disappearing.checkCanChangeTimer(chatId, userId));
 
         // Your role, whether you can post, invite links on/off and (admins) pending join requests
         if (chat.chat_type === 'group') {
@@ -809,6 +840,7 @@ async function updateMentionsOnly(req, res) {
 }
 
 module.exports = {
+    setDisappearingTimer,
     updateMentionsOnly,
     getUserChats,
     getChatById,

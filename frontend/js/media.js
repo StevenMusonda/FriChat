@@ -5,6 +5,8 @@
  * "Show in chat"). Everything user-written goes in with textContent, never innerHTML.
  */
 
+(function (FriChat) {
+
 // ===== Shared media panel =====
 
 const SHARED_MEDIA_TABS = [
@@ -38,18 +40,18 @@ function renderSharedMediaSection(chatId) {
         tabs[tab.id] = { items: [], cursor: null, hasMore: false, loaded: false, loading: false };
     });
 
-    const tabButtons = SHARED_MEDIA_TABS.map(tab => h('button', {
+    const tabButtons = SHARED_MEDIA_TABS.map(tab => FriChat.h('button', {
         className: 'shared-media-tab',
         text: tab.label,
         attrs: { type: 'button', role: 'tab', id: `sharedMediaTab-${tab.id}`, 'aria-controls': 'sharedMediaPanel', 'data-tab': tab.id },
         on: { click: () => selectSharedMediaTab(tab.id) }
     }));
 
-    const element = h('section', { className: 'chat-info-section shared-media-section' },
-        h('h4', { text: 'Shared media' }),
-        h('div', { className: 'shared-media-tabs', attrs: { role: 'tablist', 'aria-label': 'Shared media' } }, tabButtons),
-        h('div', { className: 'shared-media-panel', attrs: { id: 'sharedMediaPanel', role: 'tabpanel' } }),
-        h('button', {
+    const element = FriChat.h('section', { className: 'chat-info-section shared-media-section' },
+        FriChat.h('h4', { text: 'Shared media' }),
+        FriChat.h('div', { className: 'shared-media-tabs', attrs: { role: 'tablist', 'aria-label': 'Shared media' } }, tabButtons),
+        FriChat.h('div', { className: 'shared-media-panel', attrs: { id: 'sharedMediaPanel', role: 'tabpanel' } }),
+        FriChat.h('button', {
             className: 'btn btn-secondary btn-small shared-media-more',
             text: 'Load more',
             attrs: { type: 'button', hidden: true },
@@ -118,13 +120,13 @@ function renderSharedMediaTab() {
     let content;
     if (tab.items.length === 0) {
         const text = tab.loading ? 'Loading…' : (tab.error || SHARED_MEDIA_TABS.find(t => t.id === tabId).empty);
-        content = [h('p', { className: 'shared-media-empty', text })];
+        content = [FriChat.h('p', { className: 'shared-media-empty', text })];
     } else if (tabId === 'media') {
-        content = [h('div', { className: 'shared-media-grid' }, tab.items.map(item => renderMediaTile(chatId, item)))];
+        content = [FriChat.h('div', { className: 'shared-media-grid' }, tab.items.map(item => renderMediaTile(chatId, item)))];
     } else if (tabId === 'files') {
-        content = [h('ul', { className: 'shared-media-list' }, tab.items.map(item => renderFileRow(chatId, item)))];
+        content = [FriChat.h('ul', { className: 'shared-media-list' }, tab.items.map(item => renderFileRow(chatId, item)))];
     } else {
-        content = [h('ul', { className: 'shared-media-list' }, tab.items.map(item => renderLinkRow(chatId, item)))];
+        content = [FriChat.h('ul', { className: 'shared-media-list' }, tab.items.map(item => renderLinkRow(chatId, item)))];
     }
 
     panel.replaceChildren(...content);
@@ -139,7 +141,7 @@ function sharedItemMeta(item) {
 
 function renderMediaTile(chatId, item) {
     const url = getFileUrl(item.upload_path);
-    const tile = h('button', {
+    const tile = FriChat.h('button', {
         className: 'shared-media-tile',
         attrs: {
             type: 'button',
@@ -149,31 +151,31 @@ function renderMediaTile(chatId, item) {
         on: { click: () => openLightbox(chatId, item.message_id) }
     });
     if (item.message_type === 'video') {
-        tile.appendChild(h('video', { attrs: { src: url, muted: true, preload: 'metadata' } }));
-        const play = h('span', { className: 'shared-media-play' });
+        tile.appendChild(FriChat.h('video', { attrs: { src: url, muted: true, preload: 'metadata' } }));
+        const play = FriChat.h('span', { className: 'shared-media-play' });
         play.innerHTML = PLAY_ICON_SVG;
         tile.appendChild(play);
     } else {
-        tile.appendChild(h('img', { attrs: { src: url, alt: '', loading: 'lazy' } }));
+        tile.appendChild(FriChat.h('img', { attrs: { src: url, alt: '', loading: 'lazy' } }));
     }
     return tile;
 }
 
 function renderFileRow(chatId, item) {
-    const download = h('a', {
+    const download = FriChat.h('a', {
         className: 'icon-btn shared-media-download',
         attrs: { href: getFileUrl(item.upload_path), download: item.file_name || '', target: '_blank', rel: 'noopener', title: 'Download', 'aria-label': `Download ${item.file_name || 'file'}` }
     });
     download.innerHTML = DOWNLOAD_ICON_SVG;
 
-    return h('li', { className: 'shared-media-row' },
-        h('button', {
+    return FriChat.h('li', { className: 'shared-media-row' },
+        FriChat.h('button', {
             className: 'shared-media-row-open',
             attrs: { type: 'button', title: 'Show in chat' },
             on: { click: () => showMessageInChat(chatId, item.message_id) }
         },
-            h('span', { className: 'shared-media-row-title', text: `📎 ${item.file_name || 'File'}` }),
-            h('span', { className: 'shared-media-row-meta', text: `${formatFileSize(item.file_size)} · ${sharedItemMeta(item)}` })
+            FriChat.h('span', { className: 'shared-media-row-title', text: `📎 ${item.file_name || 'File'}` }),
+            FriChat.h('span', { className: 'shared-media-row-meta', text: `${formatFileSize(item.file_size)} · ${sharedItemMeta(item)}` })
         ),
         download
     );
@@ -181,18 +183,18 @@ function renderFileRow(chatId, item) {
 
 function renderLinkRow(chatId, item) {
     const links = item.urls.map(url => {
-        const href = safeHttpUrl(url);
+        const href = FriChat.safeHttpUrl(url);
         return href
-            ? h('a', { className: 'shared-media-link', text: url, attrs: { href, target: '_blank', rel: 'noopener noreferrer nofollow ugc' } })
+            ? FriChat.h('a', { className: 'shared-media-link', text: url, attrs: { href, target: '_blank', rel: 'noopener noreferrer nofollow ugc' } })
             : null;
     });
 
-    return h('li', { className: 'shared-media-row shared-media-link-row' },
-        h('div', { className: 'shared-media-row-body' },
+    return FriChat.h('li', { className: 'shared-media-row shared-media-link-row' },
+        FriChat.h('div', { className: 'shared-media-row-body' },
             ...links,
-            h('span', { className: 'shared-media-row-meta', text: sharedItemMeta(item) })
+            FriChat.h('span', { className: 'shared-media-row-meta', text: sharedItemMeta(item) })
         ),
-        h('button', {
+        FriChat.h('button', {
             className: 'btn btn-secondary btn-small shared-media-show',
             text: 'Show in chat',
             attrs: { type: 'button' },
@@ -207,8 +209,8 @@ function renderLinkRow(chatId, item) {
 function showMessageInChat(chatId, messageId) {
     closeLightbox();
     const modal = document.getElementById('chatInfoModal');
-    if (typeof groupInfoOpenFor !== 'undefined' && groupInfoOpenFor) {
-        closeGroupInfo();
+    if (typeof FriChat.groupInfoOpenFor !== 'undefined' && FriChat.groupInfoOpenFor) {
+        FriChat.closeGroupInfo();
     } else if (modal) {
         modal.style.display = 'none';
     }
@@ -282,7 +284,7 @@ async function openLightbox(chatId, messageId) {
 }
 
 function lightboxButton(className, label, svg, onClick) {
-    const button = h('button', {
+    const button = FriChat.h('button', {
         className: `lightbox-btn ${className}`,
         attrs: { type: 'button', title: label, 'aria-label': label },
         on: { click: (e) => { e.stopPropagation(); onClick(); } }
@@ -296,7 +298,7 @@ function buildLightboxElement() {
         '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
         closeLightbox);
     const download = lightboxButton('lightbox-download', 'Download', DOWNLOAD_ICON_SVG, downloadLightboxItem);
-    const showInChat = h('button', {
+    const showInChat = FriChat.h('button', {
         className: 'lightbox-show btn btn-secondary btn-small',
         text: 'Show in chat',
         attrs: { type: 'button' },
@@ -313,19 +315,19 @@ function buildLightboxElement() {
         '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>',
         () => stepLightbox(1));
 
-    const element = h('div', {
+    const element = FriChat.h('div', {
         className: 'lightbox',
         attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Media viewer' },
         on: { click: (e) => { if (e.target === element || e.target.classList.contains('lightbox-stage')) closeLightbox(); } }
     },
-        h('div', { className: 'lightbox-toolbar' },
-            h('div', { className: 'lightbox-caption' },
-                h('span', { className: 'lightbox-sender' }),
-                h('span', { className: 'lightbox-meta' })
+        FriChat.h('div', { className: 'lightbox-toolbar' },
+            FriChat.h('div', { className: 'lightbox-caption' },
+                FriChat.h('span', { className: 'lightbox-sender' }),
+                FriChat.h('span', { className: 'lightbox-meta' })
             ),
-            h('div', { className: 'lightbox-actions' }, showInChat, download, close)
+            FriChat.h('div', { className: 'lightbox-actions' }, showInChat, download, close)
         ),
-        h('div', { className: 'lightbox-stage' }, prev, h('div', { className: 'lightbox-media', attrs: { 'aria-live': 'polite' } }), next)
+        FriChat.h('div', { className: 'lightbox-stage' }, prev, FriChat.h('div', { className: 'lightbox-media', attrs: { 'aria-live': 'polite' } }), next)
     );
 
     // Swipe left/right on touch screens
@@ -353,13 +355,13 @@ function renderLightbox() {
     if (playing) playing.pause();
 
     if (!item) {
-        mediaBox.replaceChildren(h('span', { className: 'lightbox-loading', text: 'Loading…' }));
+        mediaBox.replaceChildren(FriChat.h('span', { className: 'lightbox-loading', text: 'Loading…' }));
     } else if (item.message_type === 'video') {
-        mediaBox.replaceChildren(h('video', {
+        mediaBox.replaceChildren(FriChat.h('video', {
             attrs: { src: getFileUrl(item.upload_path), controls: true, autoplay: true, playsinline: true, 'aria-label': item.file_name || 'Video' }
         }));
     } else {
-        mediaBox.replaceChildren(h('img', { attrs: { src: getFileUrl(item.upload_path), alt: item.file_name || 'Photo' } }));
+        mediaBox.replaceChildren(FriChat.h('img', { attrs: { src: getFileUrl(item.upload_path), alt: item.file_name || 'Photo' } }));
     }
 
     element.querySelector('.lightbox-sender').textContent = item ? (item.sender_name || '') : '';
@@ -430,7 +432,7 @@ async function downloadLightboxItem() {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blobUrl = URL.createObjectURL(await response.blob());
-        const link = h('a', { attrs: { href: blobUrl, download: item.file_name || 'download' } });
+        const link = FriChat.h('a', { attrs: { href: blobUrl, download: item.file_name || 'download' } });
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -485,3 +487,13 @@ function handleLightboxKeydown(e) {
 function initializeMedia() {
     document.addEventListener('keydown', handleLightboxKeydown, true);
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    openLightbox,
+    resetSharedMediaSection,
+    renderSharedMediaSection,
+    initializeMedia
+});
+Object.defineProperty(FriChat, 'lightbox', { get: () => lightbox, enumerable: true });
+})(globalThis.FriChat = globalThis.FriChat || {});

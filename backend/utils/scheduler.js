@@ -1,6 +1,7 @@
 /**
- * Scheduler for timed jobs: auto-unpinning expired messages, auth cleanup, and (phase 8)
- * scheduled messages, reminders and polls that close at a set time.
+ * Scheduler for timed jobs: auto-unpinning expired messages, auth cleanup, (phase 8)
+ * scheduled messages, reminders and polls that close at a set time, and (phase 10) deleting
+ * disappearing messages whose time is up.
  *
  * The timed jobs keep their state in the database (scheduled_messages, message_reminders, polls),
  * so nothing is lost on a restart: the first tick after startup handles whatever came due meanwhile.
@@ -11,6 +12,7 @@ const { purgeOldSessions } = require('./sessions');
 const { processDueScheduledMessages } = require('./scheduledMessages');
 const { fireDueReminders } = require('./reminders');
 const { closeDuePolls } = require('./polls');
+const { deleteExpiredMessages } = require('./disappearing');
 const { SCHEDULER_TICK_SECONDS } = require('../config/scheduling');
 
 /**
@@ -46,7 +48,7 @@ async function removeExpiredAuthRows() {
 let timedJobsRunning = false;
 
 /**
- * Send due scheduled messages, fire due reminders and close due polls.
+ * Send due scheduled messages, fire due reminders, close due polls and delete expired messages.
  * A tick that starts while the previous one is still running is skipped (the claims in each job
  * would keep it correct anyway, this just avoids piling up work).
  */
@@ -55,7 +57,12 @@ async function runTimedJobs(io) {
     timedJobsRunning = true;
     const result = {};
     try {
-        for (const [name, job] of [['scheduled', processDueScheduledMessages], ['reminders', fireDueReminders], ['polls', closeDuePolls]]) {
+        for (const [name, job] of [
+            ['scheduled', processDueScheduledMessages],
+            ['reminders', fireDueReminders],
+            ['polls', closeDuePolls],
+            ['expired', deleteExpiredMessages]
+        ]) {
             try {
                 result[name] = await job(io);
             } catch (error) {
@@ -85,7 +92,7 @@ function startScheduler(io = null) {
     runTimedJobs(io);
 
     console.log('✓ Message pin scheduler started (runs every 5 minutes)');
-    console.log(`✓ Scheduled messages, reminders and polls checked every ${SCHEDULER_TICK_SECONDS} s`);
+    console.log(`✓ Scheduled messages, reminders, polls and disappearing messages checked every ${SCHEDULER_TICK_SECONDS} s`);
 }
 
 module.exports = { startScheduler, removeExpiredPins, removeExpiredAuthRows, runTimedJobs };

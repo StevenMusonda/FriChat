@@ -394,8 +394,8 @@ function handleTypingIndicator(data) {
 function handleUserStatusUpdate(data) {
     // Only the person it's about: their participant rows and, for a direct chat with them, the header
     // (status null = they don't share it with you; profile.js)
-    if (typeof applyPresenceUpdate === 'function') {
-        applyPresenceUpdate(data);
+    if (typeof FriChat.applyPresenceUpdate === 'function') {
+        FriChat.applyPresenceUpdate(data);
     }
 }
 
@@ -488,14 +488,14 @@ function showChatInfo() {
 
     // Groups get the full panel: profile, settings, invite links, requests, members, leave (groups.js)
     if (chat.chat_type === 'group') {
-        openGroupInfo(chat.id);
+        FriChat.openGroupInfo(chat.id);
         return;
     }
 
     // Direct chats: the other person's profile card (profile.js)
     const partner = typeof getDirectChatOtherUser === 'function' ? getDirectChatOtherUser(chat) : null;
-    if (partner && typeof openProfileCard === 'function') {
-        openProfileCard(partner.userId);
+    if (partner && typeof FriChat.openProfileCard === 'function') {
+        FriChat.openProfileCard(partner.userId);
         return;
     }
 
@@ -529,7 +529,7 @@ function showChatInfo() {
                     ${participants.length > 0 ? participants.map(p => `
                         <div class="member-item">
                             <div class="member-avatar">
-                                ${avatarInnerHtml(p.full_name || p.username, userAvatarSrc(p.avatar_url))}
+                                ${FriChat.avatarInnerHtml(p.full_name || p.username, FriChat.userAvatarSrc(p.avatar_url))}
                             </div>
                             <div class="member-info">
                                 <div class="member-name">${escapeHtml(p.full_name || p.username)}</div>
@@ -549,7 +549,7 @@ function showChatInfo() {
                 <div class="chat-info-section">
                     <div class="user-profile-large">
                         <div class="profile-avatar-large">
-                            ${avatarInnerHtml(otherUser.full_name || otherUser.username, userAvatarSrc(otherUser.avatar_url))}
+                            ${FriChat.avatarInnerHtml(otherUser.full_name || otherUser.username, FriChat.userAvatarSrc(otherUser.avatar_url))}
                         </div>
                         <h4>${escapeHtml(otherUser.full_name || otherUser.username)}</h4>
                         <p class="username">@${escapeHtml(otherUser.username)}</p>
@@ -579,8 +579,8 @@ function showChatInfo() {
     chatInfoContent.innerHTML = infoHTML;
 
     // Media, Files and Links tabs (media.js)
-    resetSharedMediaSection();
-    chatInfoContent.appendChild(renderSharedMediaSection(chat.id));
+    FriChat.resetSharedMediaSection();
+    chatInfoContent.appendChild(FriChat.renderSharedMediaSection(chat.id));
 
     chatInfoModal.style.display = 'flex';
 }
@@ -602,7 +602,7 @@ function initializeMobileBackButton() {
         if (chatSidebar) chatSidebar.classList.remove('hidden');
 
         // Keep unsent text as this chat's draft (composer.js), then clear current chat
-        saveCurrentDraft();
+        FriChat.saveCurrentDraft();
         currentChatId = null;
         refreshChatList();
     });
@@ -625,7 +625,7 @@ function initializeCloseChatButton() {
         if (chatWelcome) chatWelcome.style.display = 'flex';
         
         // Keep unsent text as this chat's draft (composer.js), then clear current chat
-        saveCurrentDraft();
+        FriChat.saveCurrentDraft();
         currentChatId = null;
 
         // No active item, and the closed chat shows its "Draft:" preview

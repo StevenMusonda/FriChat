@@ -7,6 +7,8 @@
  * this file only renders what the API sends. Everything user-written goes in with textContent.
  */
 
+(function (FriChat) {
+
 // Mirrors backend/config/profile.js (the server enforces them)
 const PROFILE_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
@@ -55,8 +57,8 @@ function userAvatarSrc(avatarUrl) {
 function fillAvatar(container, name, src) {
     if (!container) return;
     container.replaceChildren(src
-        ? h('img', { attrs: { src, alt: '', loading: 'lazy' } })
-        : h('span', { text: (name || '?').charAt(0).toUpperCase() }));
+        ? FriChat.h('img', { attrs: { src, alt: '', loading: 'lazy' } })
+        : FriChat.h('span', { text: (name || '?').charAt(0).toUpperCase() }));
 }
 
 /**
@@ -366,7 +368,7 @@ async function clearCustomStatus() {
 function renderStatusPresets() {
     const container = document.getElementById('customStatusPresets');
     if (!container) return;
-    container.replaceChildren(...STATUS_PRESETS.map(preset => h('button', {
+    container.replaceChildren(...STATUS_PRESETS.map(preset => FriChat.h('button', {
         className: 'planner-chip',
         text: `${preset.emoji} ${preset.text}`,
         attrs: { type: 'button' },
@@ -431,7 +433,7 @@ async function openProfileCard(userId) {
     if (!modal || !body) return;
 
     profileCardUserId = userId;
-    body.replaceChildren(h('p', { className: 'settings-note', text: 'Loading…' }));
+    body.replaceChildren(FriChat.h('p', { className: 'settings-note', text: 'Loading…' }));
     modal.style.display = 'flex';
     document.getElementById('closeProfileCard').focus();
 
@@ -439,47 +441,47 @@ async function openProfileCard(userId) {
         const response = await apiRequest(CONFIG.ENDPOINTS.USER_PROFILE(userId));
         if (profileCardUserId !== userId) return;
         if (!response.success) {
-            body.replaceChildren(h('p', { className: 'settings-status error', text: response.message || 'Could not load this profile' }));
+            body.replaceChildren(FriChat.h('p', { className: 'settings-status error', text: response.message || 'Could not load this profile' }));
             return;
         }
         renderProfileCard(response.data);
     } catch (error) {
-        body.replaceChildren(h('p', { className: 'settings-status error', text: 'Could not load this profile' }));
+        body.replaceChildren(FriChat.h('p', { className: 'settings-status error', text: 'Could not load this profile' }));
     }
 }
 
 function renderProfileCard(profile) {
     const body = document.getElementById('profileCardBody');
     const name = profile.fullName || profile.username;
-    const avatar = h('div', { className: 'profile-card-avatar' });
+    const avatar = FriChat.h('div', { className: 'profile-card-avatar' });
     fillAvatar(avatar, name, userAvatarSrc(profile.avatarUrl));
 
     const custom = customStatusLabel(profile.customStatus);
     const presence = presenceLabel(profile.status, profile.lastSeen);
 
-    const actions = h('div', { className: 'profile-card-actions' });
+    const actions = FriChat.h('div', { className: 'profile-card-actions' });
     if (profile.isSelf) {
-        actions.appendChild(h('button', { className: 'btn btn-primary btn-small', text: 'Edit profile', attrs: { type: 'button' }, on: { click: () => { closeProfileCard(); openSettingsTab('profile'); } } }));
+        actions.appendChild(FriChat.h('button', { className: 'btn btn-primary btn-small', text: 'Edit profile', attrs: { type: 'button' }, on: { click: () => { closeProfileCard(); openSettingsTab('profile'); } } }));
     } else {
-        actions.appendChild(h('button', { className: 'btn btn-primary btn-small', text: 'Message', attrs: { type: 'button' }, on: { click: () => messageUser(profile.id) } }));
-        actions.appendChild(h('button', {
+        actions.appendChild(FriChat.h('button', { className: 'btn btn-primary btn-small', text: 'Message', attrs: { type: 'button' }, on: { click: () => messageUser(profile.id) } }));
+        actions.appendChild(FriChat.h('button', {
             className: profile.blockedByMe ? 'btn btn-secondary btn-small' : 'btn btn-danger btn-small',
             text: profile.blockedByMe ? 'Unblock' : 'Block',
             attrs: { type: 'button' },
-            on: { click: async () => { await setUserBlocked(profile.id, !profile.blockedByMe, name); openProfileCard(profile.id); } }
+            on: { click: async () => { await FriChat.setUserBlocked(profile.id, !profile.blockedByMe, name); openProfileCard(profile.id); } }
         }));
     }
 
     body.replaceChildren(
-        h('div', { className: 'profile-card' },
+        FriChat.h('div', { className: 'profile-card' },
             avatar,
-            h('h4', { className: 'profile-card-name', text: name, attrs: { id: 'profileCardName' } }),
-            h('div', { className: 'profile-card-username', text: `@${profile.username}` }),
-            custom ? h('div', { className: 'profile-card-custom-status', text: custom }) : null,
-            presence ? h('div', { className: 'profile-card-presence', text: presence }) : null,
-            profile.bio ? h('div', { className: 'profile-card-section' },
-                h('div', { className: 'profile-card-label', text: 'Bio' }),
-                h('p', { className: 'profile-card-bio', text: profile.bio })
+            FriChat.h('h4', { className: 'profile-card-name', text: name, attrs: { id: 'profileCardName' } }),
+            FriChat.h('div', { className: 'profile-card-username', text: `@${profile.username}` }),
+            custom ? FriChat.h('div', { className: 'profile-card-custom-status', text: custom }) : null,
+            presence ? FriChat.h('div', { className: 'profile-card-presence', text: presence }) : null,
+            profile.bio ? FriChat.h('div', { className: 'profile-card-section' },
+                FriChat.h('div', { className: 'profile-card-label', text: 'Bio' }),
+                FriChat.h('p', { className: 'profile-card-bio', text: profile.bio })
             ) : null,
             actions
         )
@@ -530,8 +532,8 @@ function applyUserProfileUpdate(data) {
         if (changed) chat.participants = JSON.stringify(participants);
     }
 
-    if (currentChatDetails && Array.isArray(currentChatDetails.participants)) {
-        for (const p of currentChatDetails.participants) {
+    if (FriChat.currentChatDetails && Array.isArray(FriChat.currentChatDetails.participants)) {
+        for (const p of FriChat.currentChatDetails.participants) {
             if (Number(p.id) !== Number(data.id)) continue;
             p.full_name = data.fullName;
             p.avatar_url = data.avatarUrl;
@@ -539,7 +541,7 @@ function applyUserProfileUpdate(data) {
             if (data.status !== undefined) p.status = data.status;
         }
         refreshDirectChatHeader();
-        updateChatHeaderAvatar();
+        FriChat.updateChatHeaderAvatar();
     }
     refreshChatList();
 
@@ -558,8 +560,8 @@ function applyPresenceUpdate(data) {
         person.status = data.status;
         chat.participants = JSON.stringify(participants);
     }
-    if (currentChatDetails && Array.isArray(currentChatDetails.participants)) {
-        const person = currentChatDetails.participants.find(p => Number(p.id) === Number(data.userId));
+    if (FriChat.currentChatDetails && Array.isArray(FriChat.currentChatDetails.participants)) {
+        const person = FriChat.currentChatDetails.participants.find(p => Number(p.id) === Number(data.userId));
         if (person) {
             person.status = data.status;
             if (data.status !== 'online' && data.status) person.last_seen = new Date().toISOString();
@@ -573,9 +575,9 @@ function applyPresenceUpdate(data) {
  * The other person of the open direct chat (from GET /api/chats/:id), or null
  */
 function currentDirectPartner() {
-    if (!currentChatDetails || currentChatDetails.id !== currentChatId || currentChatDetails.chat_type !== 'direct') return null;
+    if (!FriChat.currentChatDetails || FriChat.currentChatDetails.id !== currentChatId || FriChat.currentChatDetails.chat_type !== 'direct') return null;
     const me = getCurrentUser().userId;
-    return (currentChatDetails.participants || []).find(p => Number(p.id) !== Number(me)) || null;
+    return (FriChat.currentChatDetails.participants || []).find(p => Number(p.id) !== Number(me)) || null;
 }
 
 function refreshDirectChatHeader() {
@@ -779,3 +781,22 @@ if (typeof window !== 'undefined') {
     window.openProfileCard = openProfileCard;
     window.openSettingsTab = openSettingsTab;
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    bindRequestsToggle,
+    avatarInnerHtml,
+    userAvatarSrc,
+    customStatusLabel,
+    isIncomingRequest,
+    isRequestsExpanded,
+    renderRequestsToggleHtml,
+    resetMessageRequestState,
+    applyMessageRequestState,
+    directChatStatusText,
+    applyPresenceUpdate,
+    openProfileCard,
+    currentDirectPartner,
+    initializeProfile
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

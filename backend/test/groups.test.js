@@ -270,7 +270,7 @@ function createWorld(dbType) {
             world.members.push({ id, chat_id: Number(params[0]), user_id: Number(params[1]), role: params[2], joined_at: id, member_tag: null });
             return inserted(id);
         }
-        if (/^SELECT m.id, m.chat_id FROM messages m JOIN group_members gm ON m.chat_id = gm.chat_id WHERE m.id = \? AND gm.user_id = \?$/.test(sql)) {
+        if (/^SELECT m.id, m.chat_id FROM messages m JOIN group_members gm ON m.chat_id = gm.chat_id WHERE m.id = \? AND gm.user_id = \? AND m\.message_type <> 'system'$/.test(sql)) {
             const chatId = (world.messages || {})[params[0]];
             return chatId && member(chatId, params[1]) ? [{ id: Number(params[0]), chat_id: chatId }] : [];
         }

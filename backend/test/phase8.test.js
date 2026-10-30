@@ -181,7 +181,7 @@ function createWorld(dbType) {
         }
 
         // --- messages (the normal delivery path)
-        if (/^INSERT INTO messages \(chat_id, sender_id, message_type, content, reply_to_message_id, status\)/.test(base)) {
+        if (/^INSERT INTO messages \(chat_id, sender_id, message_type, content, reply_to_message_id, status, expires_at\)/.test(base)) {
             const [chatId, senderId, type, content, replyTo] = params;
             const id = world.nextId.message++;
             world.messages.set(id, { id, chat_id: chatId, sender_id: senderId, message_type: type, content, reply_to_message_id: replyTo, deleted: false });
@@ -195,9 +195,9 @@ function createWorld(dbType) {
             const message = world.messages.get(Number(params[0]));
             return message ? [{ ...message, username: world.users[message.sender_id], deleted_for_everyone: 0 }] : [];
         }
-        if (/^SELECT id, deleted_for_everyone FROM messages WHERE id = \? AND chat_id = \?/.test(base)) {
+        if (/^SELECT id, message_type, deleted_for_everyone FROM messages WHERE id = \? AND chat_id = \?/.test(base)) {
             const message = world.messages.get(Number(params[0]));
-            return message && message.chat_id === Number(params[1]) ? [{ id: message.id, deleted_for_everyone: message.deleted ? 1 : 0 }] : [];
+            return message && message.chat_id === Number(params[1]) ? [{ id: message.id, message_type: message.message_type, deleted_for_everyone: message.deleted ? 1 : 0 }] : [];
         }
         if (/^SELECT last_read_message_id FROM group_members/.test(base)) return [{ last_read_message_id: 0 }];
         if (/^SELECT id FROM messages WHERE id = \? AND chat_id = \?/.test(base)) {

@@ -5,6 +5,8 @@
  * actually mentioned (utils/mentions.js); this only helps typing the name.
  */
 
+(function (FriChat) {
+
 const MAX_MENTION_SUGGESTIONS = 6;
 
 // { start, items, active } while the list is open
@@ -177,3 +179,9 @@ function initializeMentionAutocomplete() {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { findMentionQuery, matchMentionMembers };
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    initializeMentionAutocomplete
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

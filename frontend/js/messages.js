@@ -402,6 +402,11 @@ function renderMessagesHtml(messages) {
  * HTML for one message ('' when it was deleted for the current user only)
  */
 function renderMessageHtml(message) {
+    // Chat notices (disappearing messages turned on/off) are a centred line, not a bubble (disappearing.js)
+    if (message.message_type === 'system') {
+        return typeof FriChat.renderSystemMessageHtml === 'function' ? FriChat.renderSystemMessageHtml(message) : '';
+    }
+
     const currentUser = getCurrentUser();
     const isSent = message.sender_id === currentUser.userId;
     const senderInitial = escapeHtml((message.full_name || message.username).charAt(0).toUpperCase());
@@ -437,7 +442,7 @@ function renderMessageHtml(message) {
             <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}">
                 <div class="message-avatar">${senderInitial}</div>
                 <div class="message-content">
-                    ${!isSent ? `<div class="message-sender profile-link" ${senderProfileAttrs}>${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
+                    ${!isSent ? `<div class="message-sender profile-link" ${senderProfileAttrs}>${escapeHtml(message.full_name || message.username)}${typeof FriChat.renderMemberTagHtml === 'function' ? FriChat.renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
                     <div class="message-bubble">
                         <div class="message-deleted">🚫 This message was deleted</div>
                     </div>
@@ -468,7 +473,7 @@ function renderMessageHtml(message) {
             </div>
             <div class="message-avatar profile-link" ${senderProfileAttrs}>${senderInitial}</div>
             <div class="message-content">
-                ${!isSent ? `<div class="message-sender profile-link" ${senderProfileAttrs}>${escapeHtml(message.full_name || message.username)}${typeof renderMemberTagHtml === 'function' ? renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
+                ${!isSent ? `<div class="message-sender profile-link" ${senderProfileAttrs}>${escapeHtml(message.full_name || message.username)}${typeof FriChat.renderMemberTagHtml === 'function' ? FriChat.renderMemberTagHtml(message.sender_id) : ''}</div>` : ''}
                 <div class="message-bubble">
                     ${message.is_forwarded ? `<div class="message-forwarded">${FORWARD_ICON_SVG}<span>Forwarded</span></div>` : ''}
                     ${renderReplyQuote(message.reply_to)}
@@ -478,6 +483,7 @@ function renderMessageHtml(message) {
                 <div class="message-footer">
                     ${message.is_starred ? `<span class="message-starred" title="Starred" aria-label="Starred"><svg class="message-star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></span>` : ''}
                     ${message.edited_at ? `<span class="message-edited" title="Edited ${escapeHtml(new Date(message.edited_at).toLocaleString())}">edited</span>` : ''}
+                    ${typeof FriChat.renderExpiryBadgeHtml === 'function' ? FriChat.renderExpiryBadgeHtml(message) : ''}
                     <span class="message-time">${formatTime(message.created_at)}</span>
                     ${isSent ? `<span class="message-status">${getStatusIcon(message.status)}</span>` : ''}
                     <button class="icon-btn message-react-btn" onclick="event.stopPropagation(); showEmojiPicker(${message.id})">
@@ -511,9 +517,9 @@ function renderLinkPreview(message) {
     const preview = message.link_preview;
     if (!preview) return '';
 
-    const href = safeHttpUrl(preview.url);
+    const href = FriChat.safeHttpUrl(preview.url);
     if (!href || (!preview.title && !preview.description)) return '';
-    const image = preview.image_url ? safeHttpUrl(preview.image_url) : null;
+    const image = preview.image_url ? FriChat.safeHttpUrl(preview.image_url) : null;
     const isSent = message.sender_id === getCurrentUser().userId;
 
     return `
@@ -621,7 +627,7 @@ function initializeMessageContentActions() {
         if (media) {
             e.preventDefault();
             e.stopPropagation();
-            openLightbox(currentChatId, parseInt(media.dataset.lightbox));
+            FriChat.openLightbox(currentChatId, parseInt(media.dataset.lightbox));
         }
     });
 
@@ -629,7 +635,7 @@ function initializeMessageContentActions() {
     document.getElementById('messagesContainer').addEventListener('keydown', (e) => {
         if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('img[data-lightbox]')) {
             e.preventDefault();
-            openLightbox(currentChatId, parseInt(e.target.dataset.lightbox));
+            FriChat.openLightbox(currentChatId, parseInt(e.target.dataset.lightbox));
         }
     });
 }
@@ -648,6 +654,10 @@ function getMessagePreviewText(messageType, text, fileName) {
             return `📎 ${fileName || 'File'}`;
         case 'poll':
             return `📊 ${text || 'Poll'}`;
+        case 'voice':
+            return '🎤 Voice message';
+        case 'system':
+            return '⏱ Disappearing messages changed';
         default:
             return text || '';
     }
@@ -696,6 +706,7 @@ function getFileUrl(uploadPath) {
         .replace(/uploads([^/])/i, 'uploads/$1')
         .replace(/images([^/])/i, 'images/$1')
         .replace(/videos([^/])/i, 'videos/$1')
+        .replace(/audio([^/])/i, 'audio/$1')
         .replace(/files([^/])/i, 'files/$1');
     
     const finalUrl = `${baseUrl}/${cleanPath}`;
@@ -711,7 +722,7 @@ function renderMessageContent(message) {
     switch (message.message_type) {
         case 'text':
             // Whitelist formatter (formatter.js): the text is escaped, only fixed tags are added
-            return `<div class="message-text">${formatMessageText(message.content, {
+            return `<div class="message-text">${FriChat.formatMessageText(message.content, {
                 mentions: message.mentions,
                 currentUserId: getCurrentUser().userId
             })}</div>${renderLinkPreview(message)}`;
@@ -775,9 +786,15 @@ function renderMessageContent(message) {
         
         case 'poll':
             // Card with options, counts and voters (polls.js); every text in it is escaped
-            return typeof renderPollHtml === 'function'
-                ? renderPollHtml(message)
+            return typeof FriChat.renderPollHtml === 'function'
+                ? FriChat.renderPollHtml(message)
                 : `<div class="message-text">📊 ${escapeHtml(message.content || 'Poll')}</div>`;
+
+        case 'voice':
+            // Player with waveform, seek, speed (voice.js); numbers only, no user text
+            return typeof FriChat.renderVoiceNoteHtml === 'function'
+                ? FriChat.renderVoiceNoteHtml(message)
+                : `<div class="message-text">🎤 Voice message</div>`;
 
         default:
             return `<div class="message-text">Unsupported message type</div>`;
@@ -1009,7 +1026,7 @@ function initializeMessageInput() {
     // Ctrl/Cmd+Enter always sends. The @mention list handles Enter first and prevents the default.
     messageInput.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || e.defaultPrevented || e.isComposing || e.altKey) return;
-        if (isSendShortcut(e)) {
+        if (FriChat.isSendShortcut(e)) {
             e.preventDefault();
             sendMessage();
         }
@@ -1057,14 +1074,14 @@ async function sendMessage() {
     const messageInput = document.getElementById('messageInput');
     const content = messageInput.value.trim();
     // Files waiting in the upload tray (composer.js) go out with the text
-    const hasTrayFiles = !isEditingMessage() && hasPendingUploads();
+    const hasTrayFiles = !isEditingMessage() && FriChat.hasPendingUploads();
 
     if ((!content && !hasTrayFiles) || !currentChatId) {
         return;
     }
 
     // Announcement-only group and not an admin (groups.js); the server refuses it too
-    if (typeof canPostInCurrentChat === 'function' && !canPostInCurrentChat()) {
+    if (typeof FriChat.canPostInCurrentChat === 'function' && !FriChat.canPostInCurrentChat()) {
         showNotification('Only admins can send messages in this group', 'error');
         return;
     }
@@ -1081,11 +1098,11 @@ async function sendMessage() {
     messageInput.value = '';
     autoResizeComposer();
     clearComposerContext();
-    clearDraft(currentChatId);
+    FriChat.clearDraft(currentChatId);
 
     // Files first (the reply goes on the first one), then the text
     if (hasTrayFiles) {
-        sendPendingUploads(currentChatId, replyToMessageId, content);
+        FriChat.sendPendingUploads(currentChatId, replyToMessageId, content);
         return;
     }
 

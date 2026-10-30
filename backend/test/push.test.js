@@ -115,7 +115,7 @@ for (const dbType of ['mysql', 'postgresql']) {
                     return SUBSCRIPTIONS.filter(s => params.includes(s.user_id)).map(s => ({ ...s }));
                 }
                 if (/^SELECT gm.user_id, COUNT\(m.id\) AS unread/.test(sql)) return [{ user_id: 2, unread: '4' }];
-                if (/^SELECT chat_type, chat_name FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team & Co' }];
+                if (/^SELECT chat_type, chat_name, disappearing_seconds FROM chats WHERE id = /.test(sql)) return [{ chat_type: 'group', chat_name: 'Team & Co' }];
                 if (/^DELETE FROM push_subscriptions WHERE id = /.test(sql)) return dbType === 'mysql' ? { affectedRows: 1 } : [];
                 throw new Error(`Unexpected query: ${sql}`);
             });

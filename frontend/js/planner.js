@@ -9,6 +9,8 @@
  * Everything user-written is put on the page with textContent (never innerHTML).
  */
 
+(function (FriChat) {
+
 // The user's pending/failed scheduled messages and pending/fired reminders (kept in step by socket events)
 let scheduledItems = [];
 let reminderItems = [];
@@ -159,7 +161,7 @@ function firstError(response, fallback) {
 
 function openScheduleModal() {
     if (!currentChatId) return;
-    if (typeof canPostInCurrentChat === 'function' && !canPostInCurrentChat()) {
+    if (typeof FriChat.canPostInCurrentChat === 'function' && !FriChat.canPostInCurrentChat()) {
         showNotification('Only admins can send messages in this group', 'error');
         return;
     }
@@ -172,7 +174,7 @@ function openScheduleModal() {
         showNotification('Type the message you want to schedule first', 'error');
         return;
     }
-    if (hasPendingUploads()) {
+    if (FriChat.hasPendingUploads()) {
         showNotification('Attachments can\'t be scheduled. Send or remove them first.', 'error');
         return;
     }
@@ -222,7 +224,7 @@ async function submitSchedule() {
         messageInput.value = '';
         autoResizeComposer();
         clearComposerContext();
-        clearDraft(chatId);
+        FriChat.clearDraft(chatId);
         showNotification(`Scheduled for ${formatPlannerTime(response.data.sendAt)}`);
     } catch (error) {
         setPlannerStatus('scheduleStatus', 'Could not schedule the message', true);
@@ -632,3 +634,16 @@ function initializePlanner() {
     onPlannerEvent(handlePlannerEvent);
     loadPlannerItems();
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    resetPlannerChatState,
+    formatPlannerTime,
+    plannerEl,
+    setPlannerStatus,
+    parseDateTimeLocal,
+    toDateTimeLocalValue,
+    openReminderModal,
+    initializePlanner
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

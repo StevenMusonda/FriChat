@@ -40,8 +40,11 @@ const { createSocketRateLimiter, limitSocketEvents } = require('./utils/socketRa
 const pollRules = require('./utils/polls');
 const { emitPresence, typingIndicatorsEnabled } = require('./utils/privacy');
 const { isAwaitingAcceptance } = require('./utils/messageRequests');
+const { chatExpiresAtSql } = require('./utils/timeSql');
+const { markVoicePlayed } = require('./utils/voiceNotes');
 
-const MESSAGE_TYPES = ['text', 'image', 'video', 'file'];
+// What clients may ask for; a file's real type comes from its upload record ('voice' = audio)
+const MESSAGE_TYPES = ['text', 'image', 'video', 'file', 'voice'];
 
 // Initialize Express app
 const app = express();
@@ -339,9 +342,10 @@ io.on('connection', (socket) => {
             // Insert message
             let messageId;
             try {
+                // expires_at follows the chat's disappearing-messages timer
                 messageId = await insertAndGetId(
-                    'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [chatId, senderId, messageType, content, fileId, replyToMessageId, 'sent']
+                    `INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
+                    [chatId, senderId, messageType, content, fileId, replyToMessageId, 'sent', chatId]
                 );
             } catch (error) {
                 if (fileId) await releaseUploadedFile(fileId);
@@ -461,6 +465,21 @@ io.on('connection', (socket) => {
         } catch (error) {
             console.error('Poll vote error:', error);
             socket.emit('error', { event: 'poll_vote', message: 'Failed to save your vote' });
+        }
+    });
+
+    /**
+     * A voice note was played. markVoicePlayed checks membership and the message type, and tells the
+     * sender (voice_note_played) only the first time and only when both share read receipts.
+     */
+    onLimited('voice_played', async (data) => {
+        try {
+            const result = await markVoicePlayed(io, data && data.messageId, socket.userId);
+            if (result.error) {
+                socket.emit('error', { event: 'voice_played', message: result.error });
+            }
+        } catch (error) {
+            console.error('Voice played error:', error);
         }
     });
 

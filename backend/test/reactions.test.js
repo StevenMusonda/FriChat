@@ -35,7 +35,7 @@ function createWorld(dbType) {
     world.handler = (rawSql, params) => {
         const sql = rawSql.replace(/\$\d+/g, '?');
 
-        if (/^SELECT m\.id, m\.chat_id FROM messages m JOIN group_members gm ON m\.chat_id = gm\.chat_id WHERE m\.id = \? AND gm\.user_id = \?$/.test(sql)) {
+        if (/^SELECT m\.id, m\.chat_id FROM messages m JOIN group_members gm ON m\.chat_id = gm\.chat_id WHERE m\.id = \? AND gm\.user_id = \? AND m\.message_type <> 'system'$/.test(sql)) {
             const [messageId, userId] = params;
             const chatId = world.messages[messageId];
             return chatId && world.members[chatId].has(userId) ? [{ id: messageId, chat_id: chatId }] : [];

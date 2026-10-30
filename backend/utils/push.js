@@ -14,8 +14,13 @@ const PUSH_TTL = 60 * 60;
 const MEDIA_PREVIEWS = {
     image: '📷 Photo',
     video: '🎥 Video',
-    file: '📎 File'
+    file: '📎 File',
+    voice: '🎤 Voice message'
 };
+
+// Body for chats with disappearing messages on: no text (or poll question) on a lock screen,
+// where it would outlive the message
+const DISAPPEARING_PREVIEW = 'New message';
 
 let vapidConfigured = null;
 
@@ -110,9 +115,11 @@ function decodeEntities(text) {
 }
 
 /**
- * Short notification body; media gets generic text so file names never leak to the lock screen
+ * Short notification body; media gets generic text so file names never leak to the lock screen.
+ * A disappearing message (expires_at set, or { disappearing: true }) never shows its text.
  */
-function buildPreview(message) {
+function buildPreview(message, { disappearing = false } = {}) {
+    if (disappearing || message.expires_at) return DISAPPEARING_PREVIEW;
     if (MEDIA_PREVIEWS[message.message_type]) return MEDIA_PREVIEWS[message.message_type];
     if (message.message_type === 'poll') {
         const question = String(message.content || '').replace(/\s+/g, ' ').trim();
@@ -243,6 +250,8 @@ async function notifyNewMessage(io, message) {
     const result = { sent: 0, removed: 0, failed: 0 };
     try {
         if (!message || !isPushConfigured()) return result;
+        // Chat notices (e.g. a disappearing-messages change) don't notify
+        if (message.message_type === 'system') return result;
 
         const recipients = await findRecipients(io, message);
         if (recipients.length === 0) return result;
@@ -256,12 +265,13 @@ async function notifyNewMessage(io, message) {
         const subscribedUsers = [...new Set(subscriptions.map(s => s.user_id))];
         const [unreadTotals, chatRows] = await Promise.all([
             getUnreadTotals(subscribedUsers),
-            executeQuery('SELECT chat_type, chat_name FROM chats WHERE id = ?', [message.chat_id])
+            executeQuery('SELECT chat_type, chat_name, disappearing_seconds FROM chats WHERE id = ?', [message.chat_id])
         ]);
 
         const chat = chatRows[0] || {};
         const senderName = decodeEntities(String(message.full_name || message.username || 'Someone'));
-        const preview = buildPreview(message);
+        // Timer on now, or this message will disappear: the push carries no message text
+        const preview = buildPreview(message, { disappearing: (parseInt(chat.disappearing_seconds) || 0) > 0 });
         const isGroup = chat.chat_type === 'group' && chat.chat_name;
 
         const mentioned = new Set((message.mentions || []).map(m => Number(m.user_id)));
@@ -382,6 +392,7 @@ async function notifyUser(io, userId, payload) {
 }
 
 module.exports = {
+    DISAPPEARING_PREVIEW,
     notifyJoinDecision,
     notifyUser,
     decodeEntities,

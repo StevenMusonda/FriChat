@@ -4,7 +4,15 @@
 
 const { body, param, query, validationResult } = require('express-validator');
 const { isValidTimezone } = require('./notificationSettings');
-const { MAX_MESSAGE_LENGTH, MAX_FORWARD_MESSAGES, MAX_FORWARD_CHATS } = require('../config/messages');
+const {
+    MAX_MESSAGE_LENGTH,
+    MAX_FORWARD_MESSAGES,
+    MAX_FORWARD_CHATS,
+    VOICE_MAX_SECONDS,
+    VOICE_DURATION_GRACE_MS,
+    VOICE_WAVEFORM_MAX_BARS,
+    DISAPPEARING_DURATIONS
+} = require('../config/messages');
 const { isValidEmoji } = require('./reactions');
 const { stripControlChars } = require('./messageText');
 const { TOKEN_PATTERN } = require('./invites');
@@ -108,7 +116,7 @@ const validateMessage = [
         .withMessage('Valid chat ID is required'),
     
     body('messageType')
-        .isIn(['text', 'image', 'video', 'file'])
+        .isIn(['text', 'image', 'video', 'file', 'voice'])
         .withMessage('Invalid message type'),
     
     body('content')
@@ -146,7 +154,48 @@ const validateUploadReply = [
         .optional({ values: 'falsy' })
         .isInt({ min: 1 })
         .withMessage('Invalid reply target')
+        .toInt(),
+
+    // Voice notes: length and level bars measured while recording (only kept for audio files)
+    body('voiceDurationMs')
+        .optional({ values: 'falsy' })
+        .isInt({ min: 1, max: VOICE_MAX_SECONDS * 1000 + VOICE_DURATION_GRACE_MS })
+        .withMessage(`Voice notes can be up to ${VOICE_MAX_SECONDS / 60} minutes long`)
+        .toInt(),
+
+    body('voiceWaveform')
+        .optional({ values: 'falsy' })
+        .isString()
+        .custom(isWaveform)
+        .withMessage(`Waveform must be up to ${VOICE_WAVEFORM_MAX_BARS} comma-separated levels from 0 to 100`)
+];
+
+/**
+ * "12,40,100,0": 1..VOICE_WAVEFORM_MAX_BARS whole numbers from 0 to 100
+ */
+function isWaveform(value) {
+    if (typeof value !== 'string' || value.length > VOICE_WAVEFORM_MAX_BARS * 4) return false;
+    const levels = value.split(',');
+    return levels.length >= 1 && levels.length <= VOICE_WAVEFORM_MAX_BARS
+        && levels.every(level => /^\d{1,3}$/.test(level) && Number(level) <= 100);
+}
+
+/**
+ * PUT /api/chats/:chatId/disappearing - { seconds: 0 | 86400 | 604800 | 7776000 }
+ */
+const validateDisappearingTimer = [
+    param('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat ID')
+        .toInt(),
+
+    body('seconds')
+        .isInt()
+        .withMessage('seconds must be a number')
+        .bail()
         .toInt()
+        .isIn(DISAPPEARING_DURATIONS)
+        .withMessage('Pick off, 24 hours, 7 days or 90 days')
 ];
 
 const messageIdParamRule = param('messageId')
@@ -873,6 +922,16 @@ const checkValidation = (req, res, next) => {
 };
 
 /**
+ * checkValidation for multipart uploads: a refused upload doesn't leave its file on disk
+ */
+const checkUploadValidation = (req, res, next) => {
+    if (!validationResult(req).isEmpty() && req.file && req.file.path) {
+        require('fs').unlink(req.file.path, () => {});
+    }
+    return checkValidation(req, res, next);
+};
+
+/**
  * Validation rules for PATCH /api/messages/:messageId/status
  */
 const validateMessageStatus = [
@@ -980,6 +1039,9 @@ module.exports = {
     validateResetPassword,
     validateMessage,
     validateUploadReply,
+    validateDisappearingTimer,
+    checkUploadValidation,
+    isWaveform,
     validateMessageIdParam,
     validateReaction,
     validateReactionRemoval,

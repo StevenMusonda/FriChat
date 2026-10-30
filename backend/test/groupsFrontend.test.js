@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { runFrontendScript } = require('./helpers/frontendScripts');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
 const read = (file) => fs.readFileSync(path.join(FRONTEND, file), 'utf8');
@@ -39,7 +40,7 @@ function loadFrontend() {
     vm.runInContext(read('js/auth.js'), sandbox);
     vm.runInContext(read('js/chat.js'), sandbox);
     vm.runInContext(read('vendor/qrcode-generator/qrcode.js'), sandbox);
-    vm.runInContext(read('js/groups.js'), sandbox);
+    runFrontendScript(read('js/groups.js'), sandbox);
     sandbox.getCurrentUser = () => ({ userId: 1 });
     return { sandbox, session, run: (code) => vm.runInContext(code, sandbox) };
 }

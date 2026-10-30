@@ -8,6 +8,7 @@
  * forwarding later reuses that row, which is fine because the forwarder can see it.
  */
 
+const fs = require('fs');
 const path = require('path');
 const { executeQuery, queryOne } = require('../config/database');
 
@@ -60,6 +61,7 @@ function messageTypeForMime(mimeType) {
     if (typeof mimeType === 'string') {
         if (mimeType.startsWith('image/')) return 'image';
         if (mimeType.startsWith('video/')) return 'video';
+        if (mimeType.startsWith('audio/')) return 'voice';
     }
     return 'file';
 }
@@ -117,7 +119,53 @@ async function releaseUploadedFile(fileId) {
     }
 }
 
+/**
+ * Delete files rows that no message points to any more, and their files on disk.
+ * A forwarded copy reuses the original's file row, so a file stays while any copy is left.
+ * @param {number[]} fileIds - files whose messages were just deleted
+ * @returns {Promise<number>} files removed
+ */
+async function deleteOrphanedFiles(fileIds) {
+    const ids = [...new Set((fileIds || []).map(Number).filter(id => Number.isInteger(id) && id > 0))];
+    if (ids.length === 0) return 0;
+
+    const placeholders = ids.map(() => '?').join(', ');
+    const orphans = await executeQuery(`
+        SELECT f.id, f.upload_path
+        FROM files f
+        WHERE f.id IN (${placeholders})
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.file_id = f.id)
+    `, ids);
+    if (orphans.length === 0) return 0;
+
+    const orphanIds = orphans.map(row => Number(row.id));
+    // Checked again in the DELETE, in case a message picked one of them up meanwhile
+    await executeQuery(`
+        DELETE FROM files
+        WHERE id IN (${orphanIds.map(() => '?').join(', ')})
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.file_id = files.id)
+    `, orphanIds);
+
+    let removed = 0;
+    for (const row of orphans) {
+        const fullPath = resolveUploadPath(row.upload_path);
+        if (!fullPath) continue; // never touch anything outside the uploads folder
+        try {
+            await fs.promises.unlink(fullPath);
+            removed++;
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                removed++; // already gone
+            } else {
+                console.error(`Could not delete uploaded file ${row.id}:`, error.message);
+            }
+        }
+    }
+    return removed;
+}
+
 module.exports = {
+    deleteOrphanedFiles,
     UPLOAD_DIR,
     isInsideDir,
     resolveUploadPath,

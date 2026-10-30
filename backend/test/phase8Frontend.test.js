@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { runFrontendScript } = require('./helpers/frontendScripts');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
 const read = (file) => fs.readFileSync(path.join(FRONTEND, file), 'utf8');
@@ -29,8 +30,8 @@ function loadFrontend() {
     const chat = read('js/chat.js');
     const escapeSource = chat.slice(chat.indexOf('function escapeHtml(text)'), chat.indexOf('}', chat.indexOf(".replace(/'/g, '&#39;');")) + 1);
     vm.runInContext(escapeSource, sandbox);
-    vm.runInContext(read('js/planner.js'), sandbox);
-    vm.runInContext(read('js/polls.js'), sandbox);
+    runFrontendScript(read('js/planner.js'), sandbox);
+    runFrontendScript(read('js/polls.js'), sandbox);
     return sandbox;
 }
 

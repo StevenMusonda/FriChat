@@ -85,9 +85,9 @@ function createWorld(dbType) {
         }
 
         // Reply target check
-        if (/^SELECT id, deleted_for_everyone FROM messages WHERE id = \? AND chat_id = \?/.test(sql)) {
+        if (/^SELECT id, message_type, deleted_for_everyone FROM messages WHERE id = \? AND chat_id = \?/.test(sql)) {
             const m = world.messages[params[0]];
-            return m && m.chat_id === Number(params[1]) ? [{ id: m.id, deleted_for_everyone: bool(m.deleted_for_everyone) }] : [];
+            return m && m.chat_id === Number(params[1]) ? [{ id: m.id, message_type: m.message_type || 'text', deleted_for_everyone: bool(m.deleted_for_everyone) }] : [];
         }
 
         // Edit lookup
@@ -128,9 +128,9 @@ function createWorld(dbType) {
         }
 
         // Stars
-        if (/^SELECT m.id, m.chat_id, m.deleted_for_everyone FROM messages m JOIN group_members gm/.test(sql)) {
+        if (/^SELECT m.id, m.chat_id, m.message_type, m.deleted_for_everyone FROM messages m JOIN group_members gm/.test(sql)) {
             const m = world.messages[params[1]];
-            return m && isMember(m.chat_id) ? [{ id: m.id, chat_id: m.chat_id, deleted_for_everyone: bool(m.deleted_for_everyone) }] : [];
+            return m && isMember(m.chat_id) ? [{ id: m.id, chat_id: m.chat_id, message_type: m.message_type || 'text', deleted_for_everyone: bool(m.deleted_for_everyone) }] : [];
         }
         if (/^INSERT INTO starred_messages/.test(sql)) {
             world.starSql = sql;

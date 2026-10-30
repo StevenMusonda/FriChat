@@ -22,6 +22,7 @@ let groupEventHandlers = [];
 let accountEventHandlers = [];
 let rateLimitHandlers = [];
 let plannerEventHandlers = [];
+let lifecycleEventHandlers = [];
 
 // Group profile/settings, members, leaving and join requests (handled in groups.js)
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
@@ -30,6 +31,8 @@ const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'j
 const ACCOUNT_EVENTS = ['email_verified', 'block_updated', 'user_profile_updated', 'privacy_settings_updated', 'message_request_updated'];
 // Polls, scheduled messages and reminders (polls.js, planner.js)
 const PLANNER_EVENTS = ['poll_updated', 'scheduled_message_updated', 'reminder_due', 'reminder_updated'];
+// Voice notes played, disappearing messages timer changed, expired messages removed (voice.js, disappearing.js)
+const LIFECYCLE_EVENTS = ['voice_note_played', 'chat_disappearing_updated', 'messages_expired'];
 
 // Handshake refusals the server sends (server.js io.use)
 const EXPIRED_TOKEN_ERRORS = ['Invalid or expired token', 'Access token required'];
@@ -207,6 +210,12 @@ function initializeWebSocket() {
         });
     });
 
+    LIFECYCLE_EVENTS.forEach((event) => {
+        socket.on(event, (data) => {
+            lifecycleEventHandlers.forEach(handler => handler(event, data || {}));
+        });
+    });
+
     // A request this socket made was refused (e.g. send_message: not a member, bad reply target)
     socket.on('error', (data) => {
         console.error('Socket error:', data);
@@ -259,6 +268,15 @@ function sendMessageViaSocket(chatId, messageType, content, fileId = null, reply
 function votePollViaSocket(pollId, optionIds) {
     if (!socket || !socket.connected) return false;
     socket.emit('poll_vote', { pollId, optionIds });
+    return true;
+}
+
+/**
+ * This user played someone's voice note (the server tells the sender, if both share read receipts)
+ */
+function markVoicePlayedViaSocket(messageId) {
+    if (!socket || !socket.connected) return false;
+    socket.emit('voice_played', { messageId });
     return true;
 }
 
@@ -474,6 +492,13 @@ function onPlannerEvent(handler) {
 }
 
 /**
+ * Register handler(event, data) for the events in LIFECYCLE_EVENTS
+ */
+function onLifecycleEvent(handler) {
+    lifecycleEventHandlers.push(handler);
+}
+
+/**
  * Register handler({ event, retryAfterMs, disconnected }) for rate-limited events
  */
 function onRateLimited(handler) {
@@ -503,5 +528,6 @@ function disconnectWebSocket() {
         messageDeletedHandlers = [];
         socketErrorHandlers = [];
         plannerEventHandlers = [];
+        lifecycleEventHandlers = [];
     }
 }

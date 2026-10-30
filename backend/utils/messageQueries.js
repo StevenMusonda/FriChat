@@ -6,6 +6,7 @@
 const { queryOne, dbType } = require('../config/database');
 const { EDIT_WINDOW_MINUTES, REPLY_SNIPPET_LENGTH } = require('../config/messages');
 const { attachMentions } = require('./mentions');
+const { secondsUntilSql, isoFromSecondsUntil } = require('./timeSql');
 
 // Select list for `FROM messages m ${MESSAGE_JOINS}`
 // No sender avatar: messages are broadcast to the whole chat room, so they can't be filtered per
@@ -24,6 +25,8 @@ const MESSAGE_COLUMNS = `
     f.file_size,
     f.mime_type,
     f.upload_path,
+    f.duration_ms,
+    f.waveform,
     m.status,
     m.created_at,
     m.edited_at,
@@ -40,7 +43,8 @@ const MESSAGE_COLUMNS = `
     lp.title as link_preview_title,
     lp.description as link_preview_description,
     lp.image_url as link_preview_image_url,
-    lp.site_name as link_preview_site_name`;
+    lp.site_name as link_preview_site_name,
+    ${secondsUntilSql('m.expires_at')} as expires_in`;
 
 const MESSAGE_JOINS = `
     JOIN users u ON m.sender_id = u.id
@@ -53,6 +57,15 @@ const MESSAGE_JOINS = `
 // MySQL returns 0/1 (sometimes as strings), PostgreSQL true/false
 function toBool(value) {
     return value === true || value === 1 || value === '1';
+}
+
+/**
+ * "0,40,100" -> [0, 40, 100]; null when missing or not a list of levels
+ */
+function parseWaveform(value) {
+    if (typeof value !== 'string' || value === '') return null;
+    const levels = value.split(',').map(Number);
+    return levels.every(level => Number.isInteger(level) && level >= 0 && level <= 100) ? levels : null;
 }
 
 /**
@@ -100,6 +113,18 @@ function shapeMessage(row) {
         delete row[key];
     }
 
+    // Disappearing messages: when it will be deleted (UTC ISO, computed on the database clock)
+    if ('expires_in' in row) {
+        row.expires_at = isoFromSecondsUntil(row.expires_in);
+        delete row.expires_in;
+    }
+
+    // Voice notes: length and level bars from the recording (other files carry neither)
+    if ('duration_ms' in row) {
+        row.duration_ms = row.duration_ms === null || row.duration_ms === undefined ? null : Number(row.duration_ms);
+        row.waveform = parseWaveform(row.waveform);
+    }
+
     row.is_forwarded = toBool(row.is_forwarded);
     if ('is_starred' in row) row.is_starred = toBool(row.is_starred);
     return row;
@@ -127,11 +152,12 @@ async function getMessageById(messageId) {
  */
 async function checkReplyTarget(chatId, replyToMessageId) {
     const target = await queryOne(
-        'SELECT id, deleted_for_everyone FROM messages WHERE id = ? AND chat_id = ?',
+        'SELECT id, message_type, deleted_for_everyone FROM messages WHERE id = ? AND chat_id = ?',
         [replyToMessageId, chatId]
     );
     if (!target) return 'The message you replied to is not in this chat';
     if (toBool(target.deleted_for_everyone)) return 'You cannot reply to a deleted message';
+    if (target.message_type === 'system') return 'You cannot reply to a chat notice';
     return null;
 }
 
@@ -149,6 +175,7 @@ module.exports = {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
     toBool,
+    parseWaveform,
     shapeMessage,
     getMessageById,
     checkReplyTarget,

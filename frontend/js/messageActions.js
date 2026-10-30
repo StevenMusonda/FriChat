@@ -78,7 +78,7 @@ function showMessageActions(messageId, event) {
                 Forward
             </div>
         ` : ''}
-        <div class="message-action-item" onclick="openReminderModal(${messageId})">
+        <div class="message-action-item" onclick="FriChat.openReminderModal(${messageId})">
             ${REMIND_ICON_SVG}
             Remind me
         </div>
@@ -468,7 +468,7 @@ function renderComposerContext() {
         bar.hidden = true;
         document.getElementById('messageInput').placeholder = 'Type a message...';
         if (composerContext && !message) composerContext = null;
-        positionUploadTray();
+        FriChat.positionUploadTray();
         return;
     }
 
@@ -483,7 +483,7 @@ function renderComposerContext() {
     document.getElementById('messageInput').placeholder = editing ? 'Edit your message...' : 'Type a reply...';
     bar.hidden = false;
     // The upload tray (composer.js) sits above this bar
-    positionUploadTray();
+    FriChat.positionUploadTray();
 }
 
 /**

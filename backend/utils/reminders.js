@@ -20,6 +20,7 @@ const SELECT_REMINDER = `
            ${secondsUntilSql('r.remind_at')} AS remind_in,
            ${secondsUntilSql('r.fired_at')} AS fired_in,
            m.message_type, m.content, m.deleted_for_everyone, m.sender_id,
+           CASE WHEN m.expires_at IS NULL THEN 0 ELSE 1 END AS disappearing,
            u.username AS sender_username, u.full_name AS sender_full_name,
            f.original_name AS file_name,
            gm.id AS membership_id
@@ -49,7 +50,8 @@ function shapeReminder(row, now = Date.now()) {
             senderName: row.sender_full_name || row.sender_username,
             messageType: row.message_type,
             content: row.message_type === 'text' || row.message_type === 'poll' ? row.content : null,
-            fileName: row.file_name || null
+            fileName: row.file_name || null,
+            disappearing: !!parseInt(row.disappearing)
         } : null
     };
 }
@@ -138,7 +140,8 @@ async function deleteReminder(io, userId, id) {
  */
 function reminderBody(reminder) {
     const message = reminder.message;
-    const preview = buildPreview({ message_type: message.messageType, content: message.content });
+    // A disappearing message's text stays off the lock screen (push.js)
+    const preview = buildPreview({ message_type: message.messageType, content: message.content }, { disappearing: message.disappearing });
     // Profile names are still entity-escaped on write (see push.js); notifications are plain text
     return `${decodeEntities(String(message.senderName || 'Someone'))}: ${preview}`;
 }

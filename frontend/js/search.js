@@ -5,6 +5,8 @@
  * never innerHTML) and open the chat at the message.
  */
 
+(function (FriChat) {
+
 let searchState = {
     scope: 'all',   // 'chat' | 'all'
     chatId: null,   // chat searched when scope is 'chat'
@@ -71,9 +73,9 @@ function fillSenderOptions() {
     const me = getCurrentUser();
     const people = new Map();
 
-    if (searchState.scope === 'chat' && typeof currentChatDetails !== 'undefined' && currentChatDetails
-        && currentChatDetails.id === searchState.chatId) {
-        for (const p of currentChatDetails.participants || []) {
+    if (searchState.scope === 'chat' && typeof FriChat.currentChatDetails !== 'undefined' && FriChat.currentChatDetails
+        && FriChat.currentChatDetails.id === searchState.chatId) {
+        for (const p of FriChat.currentChatDetails.participants || []) {
             people.set(Number(p.id), p.full_name || p.username);
         }
     } else {
@@ -91,12 +93,12 @@ function fillSenderOptions() {
         }
     }
 
-    const options = [h('option', { text: 'Anyone', attrs: { value: '' } })];
-    if (me) options.push(h('option', { text: 'You', attrs: { value: me.userId } }));
+    const options = [FriChat.h('option', { text: 'Anyone', attrs: { value: '' } })];
+    if (me) options.push(FriChat.h('option', { text: 'You', attrs: { value: me.userId } }));
     [...people.entries()]
         .filter(([id]) => !me || id !== Number(me.userId))
         .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
-        .forEach(([id, name]) => options.push(h('option', { text: name || 'Unknown', attrs: { value: id } })));
+        .forEach(([id, name]) => options.push(FriChat.h('option', { text: name || 'Unknown', attrs: { value: id } })));
 
     sender.replaceChildren(...options);
     sender.value = [...sender.options].some(o => o.value === previous) ? previous : '';
@@ -198,12 +200,12 @@ async function runSearch(reset) {
  * Snippet text with [start, end) ranges wrapped in <mark>
  */
 function highlightedSnippet(snippet) {
-    const span = h('span', { className: 'search-result-snippet' });
+    const span = FriChat.h('span', { className: 'search-result-snippet' });
     let position = 0;
     for (const [start, end] of snippet.highlights || []) {
         if (start < position || end <= start) continue;
         span.appendChild(document.createTextNode(snippet.text.slice(position, start)));
-        span.appendChild(h('mark', { text: snippet.text.slice(start, end) }));
+        span.appendChild(FriChat.h('mark', { text: snippet.text.slice(start, end) }));
         position = end;
     }
     span.appendChild(document.createTextNode(snippet.text.slice(position)));
@@ -217,9 +219,9 @@ function renderSearchResult(result) {
 
     const body = result.snippet
         ? highlightedSnippet(result.snippet)
-        : h('span', { className: 'search-result-snippet', text: getMessagePreviewText(result.message_type, '', result.file_name) });
+        : FriChat.h('span', { className: 'search-result-snippet', text: getMessagePreviewText(result.message_type, '', result.file_name) });
 
-    return h('button', {
+    return FriChat.h('button', {
         className: 'search-result',
         attrs: { type: 'button' },
         on: { click: () => {
@@ -227,12 +229,12 @@ function renderSearchResult(result) {
             jumpToMessage(result.chat_id, result.id);
         } }
     },
-        h('span', { className: 'search-result-header' },
-            searchState.scope === 'all' ? h('span', { className: 'search-result-chat', text: result.chat_display_name }) : null,
-            h('span', { className: 'search-result-time', text: date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) })
+        FriChat.h('span', { className: 'search-result-header' },
+            searchState.scope === 'all' ? FriChat.h('span', { className: 'search-result-chat', text: result.chat_display_name }) : null,
+            FriChat.h('span', { className: 'search-result-time', text: date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) })
         ),
-        h('span', { className: 'search-result-text' },
-            h('strong', { text: `${sender}: ` }),
+        FriChat.h('span', { className: 'search-result-text' },
+            FriChat.h('strong', { text: `${sender}: ` }),
             body
         )
     );
@@ -279,7 +281,7 @@ function initializeSearch() {
 
     // Escape closes the panel; Ctrl/Cmd+Shift+F opens it for the open chat
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && el.modal.style.display === 'flex' && !lightbox) {
+        if (e.key === 'Escape' && el.modal.style.display === 'flex' && !FriChat.lightbox) {
             closeSearchPanel();
         } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
             e.preventDefault();
@@ -287,3 +289,9 @@ function initializeSearch() {
         }
     });
 }
+
+// What the other scripts and chat.html use (window.FriChat); everything else stays inside this file
+Object.assign(FriChat, {
+    initializeSearch
+});
+})(globalThis.FriChat = globalThis.FriChat || {});

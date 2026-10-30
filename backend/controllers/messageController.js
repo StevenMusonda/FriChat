@@ -6,6 +6,7 @@
 const { executeQuery, queryOne, insertAndGetId } = require('../config/database');
 const { cleanMessageText } = require('../utils/messageText');
 const path = require('path');
+const fs = require('fs');
 const { recordNewMessage, updateMessageStatus: setMessageStatus } = require('../utils/chatState');
 const { notifyNewMessage } = require('../utils/push');
 const { saveMentions, replaceMentions, attachMentions } = require('../utils/mentions');
@@ -16,8 +17,10 @@ const { checkCanPost, postingError } = require('../utils/groups');
 const { checkDirectChatBlock } = require('../utils/blocks');
 const { checkRequestReply } = require('../utils/messageRequests');
 const { readReceiptsEnabled, maskReadStatus } = require('../utils/privacy');
-const { getUploadLimits: getUploadLimitSettings } = require('../middleware/upload');
+const { getUploadLimits: getUploadLimitSettings, maxSizeFor } = require('../middleware/upload');
 const { attachPolls } = require('../utils/polls');
+const { attachVoicePlays } = require('../utils/voiceNotes');
+const { chatExpiresAtSql } = require('../utils/timeSql');
 const {
     MESSAGE_COLUMNS,
     MESSAGE_JOINS,
@@ -60,6 +63,7 @@ async function fetchMessageRows(userId, chatId, cursorSql, cursorValue, order, l
         WHERE m.chat_id = ?
         ${cursorSql ? `AND ${cursorSql}` : ''}
         AND (dm.id IS NULL OR m.deleted_for_everyone = TRUE)
+        AND (m.expires_at IS NULL OR m.expires_at > CURRENT_TIMESTAMP)
         ORDER BY m.id ${order === 'ASC' ? 'ASC' : 'DESC'}
         LIMIT ${parseInt(limit) + 1}
     `, params);
@@ -138,6 +142,9 @@ async function getMessages(req, res) {
 
         // Options, counts and this user's votes for poll messages
         await attachPolls(messages, userId);
+
+        // Voice notes: played by someone (own notes) / by this user (other people's)
+        await attachVoicePlays(messages, userId);
 
         // Reactions for the whole page in one query
         if (messages.length > 0) {
@@ -258,9 +265,10 @@ async function sendMessage(req, res) {
         // Insert message
         let messageId;
         try {
+            // expires_at follows the chat's disappearing-messages timer
             messageId = await insertAndGetId(
-                'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [chatId, userId, messageType, cleaned.text, fileId, replyToMessageId, 'sent']
+                `INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
+                [chatId, userId, messageType, cleaned.text, fileId, replyToMessageId, 'sent', chatId]
             );
         } catch (error) {
             if (fileId) await releaseUploadedFile(fileId);
@@ -326,9 +334,24 @@ async function uploadFile(req, res) {
         const replyToMessageId = req.body.replyToMessageId || null;
         const userId = req.user.id;
 
+        // multer only knows one size cap; audio (voice notes) has its own, smaller one
+        const maxSize = maxSizeFor(req.file.mimetype);
+        if (req.file.size > maxSize) {
+            discardStoredUpload(req.file);
+            return res.status(400).json({
+                success: false,
+                message: `Voice notes and audio files can be up to ${Math.round(maxSize / (1024 * 1024))} MB`
+            });
+        }
+
+        // Length and waveform the recorder measured (validated); only audio keeps them
+        const isAudio = req.file.mimetype.startsWith('audio/');
+        const durationMs = isAudio && req.body.voiceDurationMs ? req.body.voiceDurationMs : null;
+        const waveform = isAudio && req.body.voiceWaveform ? req.body.voiceWaveform : null;
+
         if (!chatId) {
             const fileId = await insertAndGetId(
-                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, duration_ms, waveform) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     req.file.originalname,
                     req.file.filename,
@@ -336,7 +359,9 @@ async function uploadFile(req, res) {
                     req.file.size,
                     req.file.mimetype,
                     req.file.path,
-                    userId
+                    userId,
+                    durationMs,
+                    waveform
                 ]
             );
 
@@ -347,7 +372,8 @@ async function uploadFile(req, res) {
                     fileId,
                     messageType: messageTypeForMime(req.file.mimetype),
                     originalName: req.file.originalname,
-                    fileSize: req.file.size
+                    fileSize: req.file.size,
+                    durationMs
                 }
             });
         }
@@ -355,6 +381,7 @@ async function uploadFile(req, res) {
         // Member of the chat, and an admin if the group is announcement-only
         const postError = await checkCanPost(chatId, userId);
         if (postError) {
+            discardStoredUpload(req.file);
             return res.status(postError.status).json({
                 success: false,
                 message: postError.message,
@@ -365,6 +392,7 @@ async function uploadFile(req, res) {
         if (replyToMessageId) {
             const replyError = await checkReplyTarget(chatId, replyToMessageId);
             if (replyError) {
+                discardStoredUpload(req.file);
                 return res.status(400).json({
                     success: false,
                     message: replyError
@@ -379,7 +407,7 @@ async function uploadFile(req, res) {
         let fileId;
         if (process.env.DB_TYPE === 'postgresql') {
             const fileResult = await executeQuery(
-                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) RETURNING id',
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, duration_ms, waveform, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) RETURNING id',
                 [
                     req.file.originalname,
                     req.file.filename,
@@ -387,13 +415,15 @@ async function uploadFile(req, res) {
                     req.file.size,
                     req.file.mimetype,
                     req.file.path,
-                    userId
+                    userId,
+                    durationMs,
+                    waveform
                 ]
             );
             fileId = fileResult[0]?.id;
         } else {
             const fileResult = await executeQuery(
-                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+                'INSERT INTO files (original_name, stored_name, file_type, file_size, mime_type, upload_path, uploaded_by, duration_ms, waveform, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
                 [
                     req.file.originalname,
                     req.file.filename,
@@ -401,24 +431,26 @@ async function uploadFile(req, res) {
                     req.file.size,
                     req.file.mimetype,
                     req.file.path,
-                    userId
+                    userId,
+                    durationMs,
+                    waveform
                 ]
             );
             fileId = fileResult.insertId;
         }
 
-        // Create message with file reference
+        // Create message with file reference (expires_at follows the chat's disappearing-messages timer)
         let messageId;
         if (process.env.DB_TYPE === 'postgresql') {
             const messageResult = await executeQuery(
-                'INSERT INTO messages (chat_id, sender_id, message_type, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
-                [chatId, userId, messageType, fileId, replyToMessageId, 'sent']
+                `INSERT INTO messages (chat_id, sender_id, message_type, file_id, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()}) RETURNING id`,
+                [chatId, userId, messageType, fileId, replyToMessageId, 'sent', chatId]
             );
             messageId = messageResult[0]?.id;
         } else {
             const messageResult = await executeQuery(
-                'INSERT INTO messages (chat_id, sender_id, message_type, file_id, reply_to_message_id, status) VALUES (?, ?, ?, ?, ?, ?)',
-                [chatId, userId, messageType, fileId, replyToMessageId, 'sent']
+                `INSERT INTO messages (chat_id, sender_id, message_type, file_id, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
+                [chatId, userId, messageType, fileId, replyToMessageId, 'sent', chatId]
             );
             messageId = messageResult.insertId;
         }
@@ -454,6 +486,17 @@ async function uploadFile(req, res) {
             success: false,
             message: 'Failed to upload file',
             error: error.message
+        });
+    }
+}
+
+/**
+ * Remove a file multer stored for an upload that was then refused
+ */
+function discardStoredUpload(file) {
+    if (file && file.path) {
+        fs.unlink(file.path, (error) => {
+            if (error && error.code !== 'ENOENT') console.error('Discard upload error:', error.message);
         });
     }
 }
@@ -598,8 +641,8 @@ async function deleteMessage(req, res) {
         const currentTime = new Date();
         const timeDiff = (currentTime - messageTime) / 1000; // in seconds
 
-        // If within 60 seconds, delete for everyone
-        if (timeDiff <= 60) {
+        // If within 60 seconds, delete for everyone (a chat notice, e.g. a timer change, stays for the others)
+        if (timeDiff <= 60 && message.message_type !== 'system') {
             await executeQuery(
                 'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?, deleted_for_everyone = TRUE WHERE id = ?',
                 [userId, messageId]
@@ -1033,6 +1076,14 @@ async function forwardMessages(req, res) {
             });
         }
 
+        // Chat notices (timer changes) describe their own chat
+        if (sources.some(m => m.message_type === 'system')) {
+            return res.status(400).json({
+                success: false,
+                message: 'Chat notices cannot be forwarded'
+            });
+        }
+
         // A file message whose file row is gone (or points outside the uploads folder) has nothing to forward
         if (sources.some(m => (m.message_type !== 'text' || m.file_id) && (!m.file_row_id || !resolveUploadPath(m.file_upload_path)))) {
             return res.status(400).json({
@@ -1103,9 +1154,10 @@ async function forwardMessages(req, res) {
         for (const chatId of chatIds) {
             let lastId = null;
             for (const source of sources) {
+                // A copy follows the target chat's disappearing-messages timer, not the original's
                 lastId = await insertAndGetId(
-                    'INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, is_forwarded, status) VALUES (?, ?, ?, ?, ?, TRUE, ?)',
-                    [chatId, userId, source.message_type, source.content, source.file_id, 'sent']
+                    `INSERT INTO messages (chat_id, sender_id, message_type, content, file_id, is_forwarded, status, expires_at) VALUES (?, ?, ?, ?, ?, TRUE, ?, ${chatExpiresAtSql()})`,
+                    [chatId, userId, source.message_type, source.content, source.file_id, 'sent', chatId]
                 );
 
                 const message = await getMessageById(lastId);
@@ -1163,7 +1215,7 @@ async function starMessage(req, res) {
         const userId = req.user.id;
 
         const message = await queryOne(`
-            SELECT m.id, m.chat_id, m.deleted_for_everyone
+            SELECT m.id, m.chat_id, m.message_type, m.deleted_for_everyone
             FROM messages m
             JOIN group_members gm ON gm.chat_id = m.chat_id AND gm.user_id = ?
             WHERE m.id = ?
@@ -1180,6 +1232,13 @@ async function starMessage(req, res) {
             return res.status(400).json({
                 success: false,
                 message: 'Deleted messages cannot be starred'
+            });
+        }
+
+        if (message.message_type === 'system') {
+            return res.status(400).json({
+                success: false,
+                message: 'Chat notices cannot be starred'
             });
         }
 
