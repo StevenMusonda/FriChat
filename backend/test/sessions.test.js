@@ -12,7 +12,7 @@ const http = require('http');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { setupFakeDb, stubModule } = require('./helpers/fakeDb');
+const { setupFakeDb, stubModule, listenForFetch } = require('./helpers/fakeDb');
 
 const ALICE = 1;
 const BOB = 2;
@@ -57,7 +57,7 @@ function createWorld(dbType) {
             world.users[id] = { id, username: params[0], email: params[1], password_hash: params[2], full_name: params[3], avatar_url: null, status: 'offline', email_verified_at: null };
             return inserted(id);
         }
-        if (/^SELECT id, username, email, full_name, avatar_url, email_verified_at FROM users WHERE id = \?$/.test(sql)) {
+        if (/^SELECT id, username, email, full_name, avatar_url, email_verified_at, is_admin, suspended_at FROM users WHERE id = \?$/.test(sql)) {
             const u = world.users[params[0]];
             return u ? [userRow(u)] : [];
         }
@@ -158,7 +158,7 @@ function createWorld(dbType) {
             return Object.values(world.sessions).filter(s => s.user_id === Number(params[0]) && !s.revoked_at && !s.expired)
                 .sort((a, b) => b.last_active_at - a.last_active_at).map(s => ({ ...s }));
         }
-        if (/^SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = \? AND s.user_id = \? AND s.revoked_at IS NULL$/.test(sql)) {
+        if (/^SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = \? AND s.user_id = \? AND s.revoked_at IS NULL AND u.suspended_at IS NULL$/.test(sql)) {
             const s = world.sessions[params[0]];
             return s && s.user_id === Number(params[1]) && !s.revoked_at ? [userRow(world.users[s.user_id])] : [];
         }
@@ -214,7 +214,7 @@ async function startApp(dbType) {
         return { ...target, except: (...a) => target.except(...a), emit: (event, data) => { emitted.push({ room, event, data }); return target.emit(event, data); } };
     };
 
-    const server = http.createServer(app).listen(0);
+    const server = await listenForFetch(app);
     const base = `http://127.0.0.1:${server.address().port}/api`;
 
     async function request(method, urlPath, { body, cookie, token, refreshHeader = true, userAgent } = {}) {

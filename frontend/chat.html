@@ -643,6 +643,12 @@
 
                 <!-- Devices and sign-in (security.js) -->
                 <div class="settings-panel" role="tabpanel" id="settingsPanelDevices" aria-labelledby="settingsTabDevices" data-settings-panel="devices" hidden>
+                    <!-- Shown to admins only (moderation.js); the console's API checks the flag itself -->
+                    <section class="settings-section" id="adminConsoleSection" aria-labelledby="settingsAdminHeading" hidden>
+                        <h4 id="settingsAdminHeading">Administration</h4>
+                        <a class="btn btn-secondary btn-small" href="admin.html">Open admin console</a>
+                    </section>
+
                     <section class="settings-section" aria-labelledby="settingsDevicesHeading">
                         <h4 id="settingsDevicesHeading">Devices</h4>
                         <ul class="device-list" id="deviceList" aria-live="polite"></ul>
@@ -1262,6 +1268,7 @@
     <script src="js/calls.js"></script>
     <script src="js/events.js"></script>
     <script src="js/lists.js"></script>
+    <script src="js/moderation.js"></script>
 
     <script>
         // Start one feature: if it throws (or its script didn't load, so FriChat.initializeX is missing),
@@ -1418,6 +1425,9 @@
 
             // 1:1 voice and video calls: header buttons, incoming modal, call screen, Calls panel
             startFeature('Calls', () => FriChat.initializeCalls());
+
+            // Report dialog, warnings from admins, console link
+            startFeature('Moderation', () => FriChat.initializeModeration());
 
             // Events (cards, answers, My events, birthday banner) and shared lists
             startFeature('Events', () => FriChat.initializeEvents());

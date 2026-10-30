@@ -5,6 +5,7 @@
  */
 
 const { verifyAccessToken, findSessionUser, touchSession, normalizeIp } = require('../utils/sessions');
+const { toBool } = require('../utils/messageQueries');
 
 function bearerToken(req) {
     const authHeader = req.headers['authorization'];
@@ -77,7 +78,19 @@ async function optionalAuth(req, res, next) {
     }
 }
 
+/**
+ * Admin console routes, after authenticateToken. The flag is read from the database on each
+ * request (findSessionUser); nothing the client sends can set it.
+ */
+function requireAdmin(req, res, next) {
+    if (!req.user || !toBool(req.user.is_admin)) {
+        return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+    next();
+}
+
 module.exports = {
     authenticateToken,
-    optionalAuth
+    optionalAuth,
+    requireAdmin
 };

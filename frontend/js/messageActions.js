@@ -20,6 +20,7 @@ const REPLY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const EDIT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
 const STAR_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>';
 const REMIND_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"></circle><polyline points="12 9 12 13 14 15"></polyline><line x1="5" y1="3" x2="2" y2="6"></line><line x1="19" y1="3" x2="22" y2="6"></line></svg>';
+const REPORT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>';
 const SELECT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>';
 
 /**
@@ -33,6 +34,16 @@ function canEditMessage(message) {
 
     const age = Date.now() - new Date(message.created_at).getTime();
     return age < CONFIG.MESSAGE_EDIT_WINDOW_MINUTES * 60 * 1000;
+}
+
+/**
+ * Open the Report dialog for someone else's message
+ */
+function reportMessage(messageId) {
+    document.querySelectorAll('.message-action-dropdown').forEach(d => d.remove());
+    const message = currentMessages.find(m => m.id === messageId);
+    if (!message) return;
+    FriChat.openReportModal({ messageId, userId: message.sender_id, name: message.full_name || message.username });
 }
 
 /**
@@ -97,6 +108,12 @@ function showMessageActions(messageId, event) {
             </svg>
             Pin message
         </div>
+        ${!isSent && message.message_type !== 'system' ? `
+            <div class="message-action-item danger" onclick="reportMessage(${messageId})">
+                ${REPORT_ICON_SVG}
+                Report
+            </div>
+        ` : ''}
         ${isSent ? `
             <div class="message-action-item danger" onclick="deleteMessage(${messageId}, ${canDeleteForEveryone})">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

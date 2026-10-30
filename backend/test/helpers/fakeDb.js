@@ -6,6 +6,7 @@
  * SELECT / RETURNING, or (MySQL only) an { insertId } header for a plain INSERT.
  */
 
+const http = require('http');
 const path = require('path');
 
 const BACKEND_DIR = path.join(__dirname, '..', '..');
@@ -99,4 +100,21 @@ function fakeIo() {
     };
 }
 
-module.exports = { setupFakeDb, fakeRes, fakeIo, stubModule };
+// Ports fetch() refuses to connect to. An OS-picked port can be one of them (on Windows the range
+// can start at 1024), which fails a test now and then with "fetch failed: bad port".
+const FETCH_BLOCKED_PORTS = new Set([1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566,
+    6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+
+/**
+ * An http server for app on a random port that fetch() can reach
+ */
+async function listenForFetch(app) {
+    for (;;) {
+        const server = http.createServer(app);
+        await new Promise(resolve => server.listen(0, resolve));
+        if (!FETCH_BLOCKED_PORTS.has(server.address().port)) return server;
+        await new Promise(resolve => server.close(resolve));
+    }
+}
+
+module.exports = { setupFakeDb, fakeRes, fakeIo, stubModule, listenForFetch };

@@ -91,7 +91,8 @@ function storeUserData(data) {
         email: data.email,
         fullName: data.fullName,
         avatarUrl: data.avatarUrl,
-        emailVerified: !!data.emailVerified
+        emailVerified: !!data.emailVerified,
+        isAdmin: !!data.isAdmin // only shows the console link; the server checks every admin call
     }));
 }
 

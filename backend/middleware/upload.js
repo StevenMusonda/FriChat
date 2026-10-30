@@ -4,6 +4,7 @@
  */
 
 const multer = require('multer');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
@@ -13,32 +14,20 @@ if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Configure storage
+// Files wait in a hidden folder under a random name with no extension (dotfiles are never served).
+// utils/uploadSecurity.js checks them and moves them to their final folder; nothing from the
+// client's file name reaches the disk.
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        // Create subdirectories based on file type
-        let subDir = 'files';
-        if (file.mimetype.startsWith('image/')) {
-            subDir = 'images';
-        } else if (file.mimetype.startsWith('video/')) {
-            subDir = 'videos';
-        } else if (file.mimetype.startsWith('audio/')) {
-            subDir = 'audio';
-        }
-        
-        const fullPath = path.join(uploadDir, subDir);
+        const fullPath = path.join(uploadDir, '.incoming');
         if (!fs.existsSync(fullPath)) {
             fs.mkdirSync(fullPath, { recursive: true });
         }
-        
+
         cb(null, fullPath);
     },
     filename: function (req, file, cb) {
-        // Generate unique filename
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname);
-        const name = path.basename(file.originalname, ext);
-        cb(null, name + '-' + uniqueSuffix + ext);
+        cb(null, crypto.randomBytes(16).toString('hex'));
     }
 });
 
@@ -88,8 +77,18 @@ function maxSizeFor(mimetype, limits = getUploadLimits()) {
     return baseMimeType(mimetype).startsWith('audio/') ? limits.maxAudioFileSize : limits.maxFileSize;
 }
 
+/**
+ * Browsers send file names as UTF-8 and busboy decodes them as latin1, so "été" arrives as "Ã©tÃ©".
+ * Names that aren't valid UTF-8 stay as they came.
+ */
+function decodeFileName(name) {
+    const decoded = Buffer.from(String(name), 'latin1').toString('utf8');
+    return decoded.includes('\uFFFD') ? name : decoded;
+}
+
 // File filter for validation
 const fileFilter = (req, file, cb) => {
+    file.originalname = decodeFileName(file.originalname);
     // Stored and served under the plain type, whatever parameters the browser added
     file.mimetype = baseMimeType(file.mimetype);
     if (getUploadLimits().allowedTypes.includes(file.mimetype)) {
@@ -135,5 +134,6 @@ module.exports = {
     handleUploadError,
     getUploadLimits,
     maxSizeFor,
-    baseMimeType
+    baseMimeType,
+    decodeFileName
 };

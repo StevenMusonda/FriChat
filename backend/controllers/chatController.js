@@ -16,6 +16,7 @@ const {
 const { getMembership, leaveGroup, removeUserFromChatRoom, emitMembersUpdated, isBanned, banUser } = require('../utils/groups');
 const { getGroupDetailsForMember } = require('./groupController');
 const { toBool } = require('../utils/messageQueries');
+const auditLog = require('../utils/auditLog');
 const { checkUnverifiedContact } = require('../utils/emailVerification');
 const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong } = require('../utils/blocks');
 const privacy = require('../utils/privacy');
@@ -207,6 +208,13 @@ async function setDisappearingTimer(req, res) {
     try {
         const result = await disappearing.setTimer(req.io, req.params.chatId, req.user.id, req.body.seconds);
         if (result.error) return sendError(res, result.error);
+        if (result.changed) {
+            await auditLog.recordRequest(req, 'group_settings_changed', {
+                targetType: 'chat',
+                targetId: Number(req.params.chatId),
+                metadata: { fields: ['disappearingSeconds'], seconds: result.seconds }
+            });
+        }
 
         res.json({
             success: true,
@@ -575,6 +583,11 @@ async function removeMember(req, res) {
             if (ban) {
                 await banUser(chatId, removeUserId, currentUserId);
             }
+            await auditLog.recordRequest(req, 'member_removed', {
+                targetType: 'chat',
+                targetId: Number(chatId),
+                metadata: { userId: Number(removeUserId), banned: !!ban }
+            });
         }
 
         // Their open tabs stop receiving the chat's live events

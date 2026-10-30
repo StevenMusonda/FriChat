@@ -13,6 +13,7 @@ const invites = require('../utils/invites');
 const { saveGroupAvatar, deleteGroupAvatar } = require('../utils/groupAvatar');
 const { requireVerifiedEmail } = require('../utils/emailVerification');
 const { notifyJoinDecision } = require('../utils/push');
+const auditLog = require('../utils/auditLog');
 
 function sendError(res, error) {
     return res.status(error.status).json({ success: false, message: error.message, code: error.code });
@@ -62,6 +63,11 @@ async function updateGroupSettings(req, res) {
 
         await executeQuery(`UPDATE chats SET ${sets.join(', ')} WHERE id = ?`, [...params, chatId]);
         const profile = await groups.emitGroupUpdated(req.io, chatId);
+        await auditLog.recordRequest(req, 'group_settings_changed', {
+            targetType: 'chat',
+            targetId: Number(chatId),
+            metadata: { fields: ['chatName', 'description', 'approveNewMembers', 'announcementOnly'].filter(field => req.body[field] !== undefined) }
+        });
 
         res.json({ success: true, data: profile });
     } catch (error) {
@@ -139,6 +145,11 @@ async function createInvite(req, res) {
         if (notVerified) return sendError(res, notVerified);
 
         const { token, invite } = await invites.createInvite(chatId, req.user.id, req.body.expiresIn || 'never', req.body.maxUses || null);
+        await auditLog.recordRequest(req, 'invite_created', {
+            targetType: 'chat',
+            targetId: Number(chatId),
+            metadata: { inviteId: invite.id, expiresIn: req.body.expiresIn || 'never', maxUses: req.body.maxUses || null }
+        });
 
         res.status(201).json({
             success: true,

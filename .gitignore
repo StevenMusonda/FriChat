@@ -41,3 +41,6 @@ build/
 # Testing
 coverage/
 .nyc_output/
+
+# Private moderation files (quarantine, report evidence): never served
+backend/private/

@@ -7483,3 +7483,250 @@ body.in-call {
         height: 36px;
     }
 }
+
+/* ===== Reports and warnings (phase 13) ===== */
+.report-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    color: var(--text-primary);
+}
+
+.report-hint {
+    color: var(--text-tertiary);
+    font-size: 0.875rem;
+}
+
+.report-reasons {
+    border: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.report-reasons legend {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.report-reason,
+.report-block {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+    cursor: pointer;
+}
+
+.report-note-label {
+    display: block;
+    font-weight: 600;
+}
+
+.report-note-label textarea {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px 12px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    font: inherit;
+    font-weight: 400;
+    resize: vertical;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.report-status {
+    min-height: 1.2em;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.warning-text {
+    padding: 10px 14px;
+    border-left: 4px solid var(--warning-color);
+    background-color: var(--bg-secondary);
+    border-radius: 4px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* ===== Admin console (phase 13) ===== */
+body.admin-page {
+    display: block;
+    min-height: 100vh;
+    height: auto;
+    overflow: auto;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.admin-header h1 {
+    font-size: 1.25rem;
+}
+
+.admin-main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+.admin-denied {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.admin-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.admin-panel[hidden] {
+    display: none;
+}
+
+.admin-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.admin-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    flex: 1 1 140px;
+    min-width: 0;
+}
+
+.admin-filters input,
+.admin-filters select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font: inherit;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.admin-list,
+.admin-evidence-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 12px 14px;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+.admin-row-static {
+    cursor: default;
+}
+
+.admin-row-title {
+    font-weight: 600;
+}
+
+.admin-row-meta {
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+}
+
+.admin-row-details {
+    font-family: monospace;
+}
+
+.admin-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.admin-badge-open {
+    background-color: var(--warning-color);
+    color: #1a202c;
+}
+
+.admin-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.admin-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.admin-detail[hidden] {
+    display: none;
+}
+
+.admin-detail h2 {
+    font-size: 1.125rem;
+}
+
+.admin-detail h3 {
+    font-size: 1rem;
+    margin-top: 8px;
+}
+
+.admin-evidence {
+    padding: 8px 12px;
+    border-left: 3px solid var(--border-color);
+    overflow-wrap: anywhere;
+}
+
+.admin-evidence-reported {
+    border-left-color: var(--danger-color);
+    background-color: var(--bg-secondary);
+}
+
+.admin-evidence-text {
+    white-space: pre-wrap;
+}
+
+.admin-evidence-file {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}

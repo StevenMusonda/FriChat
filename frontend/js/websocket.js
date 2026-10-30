@@ -30,7 +30,7 @@ let planEventHandlers = [];
 const GROUP_EVENTS = ['group_updated', 'group_members_updated', 'group_left', 'join_request_created', 'join_requests_updated', 'join_request_decided'];
 // Email verified, block list changed in another tab (security.js); profiles, privacy and
 // message requests (profile.js)
-const ACCOUNT_EVENTS = ['email_verified', 'block_updated', 'user_profile_updated', 'privacy_settings_updated', 'message_request_updated'];
+const ACCOUNT_EVENTS = ['email_verified', 'block_updated', 'user_profile_updated', 'privacy_settings_updated', 'message_request_updated', 'account_warning'];
 // Polls, scheduled messages and reminders (polls.js, planner.js)
 const PLANNER_EVENTS = ['poll_updated', 'scheduled_message_updated', 'reminder_due', 'reminder_updated'];
 // Voice notes played, disappearing messages timer changed, expired messages removed (voice.js, disappearing.js)
@@ -121,7 +121,8 @@ function initializeWebSocket() {
 
     // This device was signed out (Settings > Devices elsewhere, password change, token reuse)
     socket.on('session_revoked', (data) => {
-        handleSessionEnded(data && data.reason === 'reuse' ? 'security' : 'revoked');
+        const reason = data && data.reason;
+        handleSessionEnded(reason === 'reuse' ? 'security' : reason === 'suspended' ? 'suspended' : 'revoked');
     });
 
     // An event was dropped because this socket or user sent too many

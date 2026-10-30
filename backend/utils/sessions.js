@@ -15,7 +15,7 @@ const authConfig = require('../config/auth');
 const REFRESH_TOKEN_BYTES = 32;
 const REFRESH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TOUCH_INTERVAL_MS = 60 * 1000;
-const REVOKED_REASONS = ['logout', 'user', 'password', 'reuse'];
+const REVOKED_REASONS = ['logout', 'user', 'password', 'reuse', 'admin', 'suspended'];
 
 const isPostgres = () => process.env.DB_TYPE === 'postgresql';
 
@@ -139,14 +139,15 @@ function verifyAccessToken(token) {
 }
 
 /**
- * The signed-in user for an access token's session, or null if the session was revoked
+ * The signed-in user for an access token's session, or null if the session was revoked or the
+ * account is suspended. is_admin comes from here, on every request, never from the token.
  */
 async function findSessionUser(userId, sessionId) {
     return queryOne(`
-        SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at
+        SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at, u.is_admin
         FROM sessions s
         JOIN users u ON u.id = s.user_id
-        WHERE s.id = ? AND s.user_id = ? AND s.revoked_at IS NULL
+        WHERE s.id = ? AND s.user_id = ? AND s.revoked_at IS NULL AND u.suspended_at IS NULL
     `, [sessionId, userId]);
 }
 

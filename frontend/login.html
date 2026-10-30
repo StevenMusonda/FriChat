@@ -82,7 +82,8 @@
             const SIGNED_OUT_MESSAGES = {
                 revoked: 'You were signed out of this device. Please sign in again.',
                 security: 'For your security, this sign-in was ended. Please sign in again.',
-                expired: 'Your session expired. Please sign in again.'
+                expired: 'Your session expired. Please sign in again.',
+                suspended: 'This account has been suspended.'
             };
             if (SIGNED_OUT_MESSAGES[signedOut]) {
                 errorMessage.textContent = SIGNED_OUT_MESSAGES[signedOut];

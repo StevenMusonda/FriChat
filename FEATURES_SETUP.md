@@ -1971,6 +1971,147 @@ Use accounts A and B in a group (A admin), C in a direct chat with A, and D who 
 - **Birthday banners** are for groups only (in a direct chat the birthday is on the profile card). The "wished" and "dismissed" state is remembered per browser (localStorage), not per account.
 - **Times in "My events"** are grouped by the start day in your timezone; a multi-day event shows under its first day only.
 
+## Phase 13: Abuse handling and operator tools
+
+Reporting, hardened uploads, an audit log, an admin console with suspensions, and a spam limit for new accounts.
+
+### What it does
+
+- **Report a message.** Message menu → **Report**, on other people's messages. Pick a reason (spam, harassment, inappropriate, other), add a note if you like, and tick **Also block** to block them at the same time. The person reported is never told who reported them.
+- **Report a user.** Profile card → **Report**. It needs a chat you share; from inside a chat, the last 10 messages of that chat are saved with the report.
+- **Evidence survives deletion.** Filing a report copies the reported message and the 10 messages around it (5 each side, topped up from the other side near the start or end of a chat) into `report_evidence`, along with a copy of the reported message's attachment, up to `REPORT_EVIDENCE_MAX_BYTES`. The copies aren't linked to `messages`, so delete for everyone, disappearing messages, a deleted chat or a deleted account leave them in place. Only what the reporter could see is copied: not messages they deleted for themselves, deleted for everyone, or already expired.
+- **Uploads are checked by their bytes.** Each message upload waits in a hidden folder under a random name. Its real type comes from its magic bytes (`file-type`), never its name or the browser's label. Images are decoded and re-encoded by sharp, which removes EXIF/GPS and anything hidden in or after the pixels; animated GIF and WebP stay animated. Stored names are random, and the extension comes from the real type.
+- **`/uploads` can't run anything.** Every response has `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; img-src 'self'; media-src 'self'; sandbox`. Only images, video and audio display in the browser. Anything else, including any older `.html` or `.svg` already on disk, is sent as `application/octet-stream` with `Content-Disposition: attachment`, under the name it was uploaded with.
+- **Virus scanning (optional).** With `CLAMAV_ENABLED=true`, uploads go to clamd before they're stored. An infected file moves to the quarantine folder (no URL), gets a row in `quarantined_files` and an audit entry, and the uploader sees "blocked by the virus scanner". With the scanner down, uploads are refused unless `CLAMAV_FAIL_OPEN=true`.
+- **Audit log.** The append-only `audit_log` table records actor, target, IP and time for sign-ins (success, failure, blocked by suspension), password changes and resets, revoked sessions, group settings, removed members, new invite links, reports, quarantined uploads and every admin action. The code only inserts and reads: there is no update or delete path, and a test fails if one appears. Passwords, tokens, notes and message text are never logged.
+- **Admin console.** `admin.html`, linked from Settings → Devices for admins. **Reports:** read the report and evidence, then dismiss, warn, suspend the user or delete the message. **Users:** search, suspend, unsuspend, force logout. **Audit log:** filter by event, actor, target, IP and dates, or search.
+- **Admin flag.** `users.is_admin` is only set by `backend/scripts/set-admin.js` or directly in the database. It's read from the database on every request, never from the token or anything the client sends.
+- **Suspensions.** A suspended account can't sign in, every session is revoked, and its sockets are told why and disconnected. Its push subscriptions are removed and its pending scheduled messages are cancelled. Admins can't be suspended; remove the flag first.
+- **Warnings.** The user gets a notice they must acknowledge, immediately if online, otherwise the next time they open the app.
+- **Spam limit.** Accounts younger than `SPAM_NEW_ACCOUNT_HOURS` can send `SPAM_NON_CONTACT_MESSAGES_PER_HOUR` messages an hour to people who haven't accepted their message request. It covers every send path (REST, socket, uploads into a chat, polls, events, scheduled messages, forwards). Once the request is accepted, the limit no longer applies to that chat.
+
+### Setup
+
+**Run the migration before you start the new server.** Every signed-in request reads the new `users` columns, so without it all signed-in requests fail.
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_abuse_handling.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_abuse_handling_postgresql.sql
+```
+
+Install the new package and make yourself an admin:
+
+```bash
+cd backend
+npm install
+npm run admin:set -- yourusername            # add --revoke to remove the flag
+```
+
+`file-type` needs **Node 22 or newer**. Sharp is now required for photo messages: without it, photos are refused (503).
+
+**New environment variables** (all optional, also in `.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CLAMAV_ENABLED` | `false` | Scan uploads with clamd |
+| `CLAMAV_HOST` / `CLAMAV_PORT` | `127.0.0.1` / `3310` | clamd over TCP |
+| `CLAMAV_SOCKET` | none | clamd over a Unix socket instead |
+| `CLAMAV_TIMEOUT_MS` | `30000` | Give up on the scanner after this long |
+| `CLAMAV_FAIL_OPEN` | `false` | `true` lets uploads through unscanned when clamd is down |
+| `QUARANTINE_PATH` | `./private/quarantine` | Infected files. Must be outside `UPLOAD_PATH` |
+| `REPORT_EVIDENCE_PATH` | `./private/report-evidence` | Evidence copies. Must be outside `UPLOAD_PATH` |
+| `REPORT_EVIDENCE_MAX_BYTES` | 25 MB | Larger attachments keep their details only, not the file |
+| `SPAM_NEW_ACCOUNT_HOURS` | `72` | What counts as a new account (0 = limit off) |
+| `SPAM_NON_CONTACT_MESSAGES_PER_HOUR` | `20` | Hourly allowance (0 = limit off) |
+
+**ClamAV notes.** clamd's own `StreamMaxLength` defaults to 25 MB, so raise it in `clamd.conf` to at least `MAX_FILE_SIZE` (for example `StreamMaxLength 100M`), otherwise larger uploads are refused while scanning is on. `ALLOWED_*_TYPES` can't add types with no magic bytes: plain text, HTML and SVG are always refused.
+
+### API
+
+Reports (signed in; filing is limited to 10 an hour per user):
+
+| Method | Path | Body / notes |
+|---|---|---|
+| `POST` | `/api/reports` | `{ targetType: 'message'\|'user', messageId?, userId?, chatId?, reason, note?, block? }`. 201, or 200 with the first report if yours is still open |
+| `GET` | `/api/reports/warnings` | Your unacknowledged warnings |
+| `POST` | `/api/reports/warnings/:warningId/acknowledge` | |
+
+Admin (signed in + `is_admin`; anything else under `/api/admin` is 403; 120 requests a minute):
+
+| Method | Path | Body / notes |
+|---|---|---|
+| `GET` | `/api/admin/config` | Filter lists for the console |
+| `GET` | `/api/admin/reports` | `?status=open\|actioned\|dismissed&before=<id>` |
+| `GET` | `/api/admin/reports/:reportId` | With evidence. Viewing is audited |
+| `GET` | `/api/admin/reports/:reportId/evidence/:evidenceId/file` | Download of the stored attachment |
+| `POST` | `/api/admin/reports/:reportId/dismiss` | |
+| `POST` | `/api/admin/reports/:reportId/warn` | `{ message }` |
+| `POST` | `/api/admin/reports/:reportId/suspend` | `{ reason? }` |
+| `POST` | `/api/admin/reports/:reportId/delete-message` | Deletes for everyone, with its file unless a forwarded copy uses it |
+| `GET` | `/api/admin/users` | `?q=&status=active\|suspended&before=<id>` |
+| `POST` | `/api/admin/users/:userId/suspend` | `{ reason? }` |
+| `POST` | `/api/admin/users/:userId/unsuspend` | |
+| `POST` | `/api/admin/users/:userId/logout` | Ends every session; they can sign in again |
+| `GET` | `/api/admin/audit` | `?event=&actorId=&targetType=&targetId=&ip=&q=&from=YYYY-MM-DD&to=YYYY-MM-DD&before=<id>` |
+
+`POST /api/auth/login` answers 403 with code `ACCOUNT_SUSPENDED` once the password is correct, so a stranger can't discover a suspension. Login and refresh responses include `isAdmin`, which only decides whether the console link shows. Sends over the spam limit answer 429 with code `SPAM_LIMIT` (on the socket, an `error` event with the same code). Refused uploads answer 400 (wrong type), 422 (infected) or 503 (scanner down, or sharp missing).
+
+### Socket events
+
+No new client-to-server events.
+
+| Direction | Event | Payload |
+|---|---|---|
+| server → `user_<id>` | `account_warning` | `{ id, message }` |
+| server → `session_<id>` | `session_revoked` | `{ reason }`, now also `'suspended'` and `'admin'`; the sockets are then disconnected |
+
+### Manual test checklist
+
+Use accounts A and B in a group, C for admin, and D, a brand-new account sharing no chat with A.
+
+1. [ ] Run the migration, `npm install`, restart. Sign-in works and the log shows no database errors.
+2. [ ] `npm run admin:set -- C`. C reloads: Settings → Devices shows **Open admin console**. A doesn't see it.
+3. [ ] **Report:** A opens the menu on one of B's messages → **Report**, picks Harassment, adds a note, ticks **Also block B**. A sees a confirmation and B can no longer message A in a direct chat. Your own messages have no Report item.
+4. [ ] **Evidence survives:** B deletes the message for everyone. In the console, C opens the report: the message and its neighbours are still there, with the reported one highlighted.
+5. [ ] **Non-admin:** as A, open `admin.html`: "You don't have access". `GET /api/admin/reports` with A's token is 403.
+6. [ ] **Delete:** C clicks **Delete message** on a report of an image: it disappears from the chat, the evidence stays, and **Download attachment** still works.
+7. [ ] **Warn:** C writes a warning and clicks **Warn**. B sees it at once and must press **I understand**; if B was offline, it shows on the next visit.
+8. [ ] **Suspend:** C suspends B. B's open tab lands on the login page with "This account has been suspended", and signing in with the right password says the same. A wrong password just says "Invalid credentials".
+9. [ ] **Users tab:** search for B, see the badge and reason, **Unsuspend**; B can sign in. **Force logout** signs B out and B can sign back in.
+10. [ ] **Audit log:** filter by `login_failed` after a wrong password; search for a username; set From and To. Each action above is listed with its actor and IP.
+11. [ ] **Uploads:** send a JPEG from a phone with location on, download it and check it has no GPS data. Rename `test.html` to `test.png` and upload it: refused. Photos, a video, a PDF and a recorded voice note still work, and a PDF downloads under its own name.
+12. [ ] **Script can't run:** put a file containing `<script>alert(1)</script>` at `backend/uploads/files/test.html` and open `http://localhost:3000/uploads/files/test.html`: it downloads and no alert appears. Delete it afterwards.
+13. [ ] **Spam limit:** as D, start a direct chat with A and send more than the limit (set `SPAM_NON_CONTACT_MESSAGES_PER_HOUR=3` to save typing): the next send is refused with a clear message. A accepts, and D can send again.
+14. [ ] **ClamAV (if installed):** set `CLAMAV_ENABLED=true`, upload the EICAR test file inside a `.zip`: refused, a file appears in `private/quarantine`, and the audit log has `upload_quarantined`. Stop clamd: uploads are refused until it's back.
+15. [ ] **Layout:** at 360 px in light and dark themes, the Report dialog, the warning notice and all three console tabs fit without sideways scrolling.
+
+### Tests
+
+`cd backend && npm test`: **903 tests**, all passing (77 new).
+- **`test/phase13.test.js`** (66 tests): on both fake drivers and through the real `server.js`: evidence contents and limits, evidence after deletion, who can report what, block with a report; 401/403 on every admin route found by walking the router; suspension, warnings, delete-message, force logout; audit filters, escaping and secrets; audit writes that can't fail an action; the spam limit. Upload hardening on real files with real `file-type`, sharp and a fake clamd that speaks INSTREAM. A source scan fails if anything but `utils/auditLog.js` touches `audit_log`, or if it updates or deletes, or if API code writes `is_admin`.
+- **`test/phase13Frontend.test.js`** (8 tests): no `innerHTML` in `moderation.js` or `admin.js`, page and service-worker wiring.
+- `test/pageScripts.test.js` loads `moderation.js`, and `admin.html` is picked up automatically. Fake databases in `test/sessions.test.js` and `test/phase9.test.js` learned the new SQL.
+- Test fix: `listenForFetch` in `test/helpers/fakeDb.js` avoids ports `fetch()` refuses, which caused random `fetch failed: bad port` failures in `sessions.test.js` and now `phase13.test.js`.
+- **Live check on the local PostgreSQL**, in throwaway databases (not the app's): the previous schema plus the migration twice and a fresh `schema_postgresql.sql` give identical columns and indexes. Then the real server and real Socket.IO clients ran 37 checks across uploads, reports, the admin API, suspension, the spam limit and the audit log, including a deleted user keeping their reports and audit rows. The real files in `uploads/` went through detection as well: every voice note, photo and avatar passed.
+
+### Known limitations
+
+- **The UI wasn't clicked through in a browser here.** Scripts load together (page-scripts test) and the server side was tested live, but the dialogs, the console, the dark theme and the 360 px layout need the checklist above.
+- **MySQL wasn't run against a live server** (none is installed here). Both fake drivers exercise every statement. The MySQL migration fails if run twice, so run it once.
+- **ClamAV wasn't run for real.** The protocol was tested against a fake clamd, including infected, clean and unreachable cases.
+- **Files already on disk aren't reprocessed.** Older photos keep their EXIF and older files keep their names; the serving headers protect them from running, and they still work.
+- **Only images are re-encoded.** Video, audio, PDF and Office files are checked by type and scanned if ClamAV is on, but their contents aren't cleaned. Non-media files are download-only.
+- **`.doc` checks the container only**: any OLE file (for example an old `.xls`) passes as `.doc`. The same goes for media in the same container family.
+- **PDFs now download** rather than open in a browser tab, as the phase asked for non-media files.
+- **Append-only is enforced in the code**, not by the database: someone with direct database access can still change rows.
+- **Suspending keeps the account's chats and messages** visible to others, and group memberships stay. Unsuspending doesn't bring back cancelled scheduled messages.
+- **The spam limit** only counts direct chats with an unaccepted request. Accounts sharing a group count as contacts, as they do for privacy settings. Two sends racing at the limit can both pass.
+- **`/uploads` still has no sign-in**: anyone with a URL can fetch a file. Random names make URLs unguessable, but older files keep their guessable names.
+- **Images are re-encoded in memory**, up to 100 megapixels each, before the chat membership check (uploads stay limited to 30 a minute per IP).
+- **Evidence and quarantine files live on local disk.** On a host with an ephemeral disk they need a persistent volume, like `uploads/`.
+
 ---
 
 **Enjoy the new features! 🎉**

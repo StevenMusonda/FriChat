@@ -54,6 +54,59 @@ function guardStaticPath(root) {
     };
 }
 
+// Only these are ever shown in the browser; everything else, whatever its name, is a download.
+// SVG is not here: it can carry script.
+const INLINE_EXTENSIONS = new Set([
+    '.jpg', '.jpeg', '.png', '.gif', '.webp',
+    '.mp4', '.webm', '.mov', '.ogg', '.oga', '.opus', '.mp3', '.m4a', '.aac'
+]);
+
+// Even if a browser did render something from /uploads, this page could run nothing
+const UPLOADS_CSP = "default-src 'none'; img-src 'self'; media-src 'self'; sandbox";
+
+function isInlineMedia(filePath) {
+    return INLINE_EXTENSIONS.has(path.extname(String(filePath)).toLowerCase());
+}
+
+/**
+ * "attachment" header with the name the file was uploaded under (RFC 6266), safe for any name:
+ * quotes and non-ASCII only appear percent-encoded
+ */
+function attachmentHeader(name) {
+    if (!name) return 'attachment';
+    const fallback = String(name).replace(/[^\x20-\x7e]|["\\]/g, '_');
+    const encoded = encodeURIComponent(String(name)).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+    return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * setHeaders for express.static on /uploads. The type of a download is forced to a generic one, so
+ * a legacy file named x.html can't come back as text/html whatever else happens.
+ */
+function setUploadHeaders(res, filePath) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', UPLOADS_CSP);
+    if (!isInlineMedia(filePath)) {
+        res.setHeader('Content-Type', 'application/octet-stream');
+        if (!res.getHeader('Content-Disposition')) res.setHeader('Content-Disposition', 'attachment');
+    }
+}
+
+/**
+ * Express middleware before express.static: downloads keep the name they were uploaded under,
+ * since stored names are random. If the lookup fails the file still downloads, under its stored name.
+ */
+async function nameDownloads(req, res, next) {
+    if (isInlineMedia(req.path)) return next();
+    try {
+        const row = await queryOne('SELECT original_name FROM files WHERE stored_name = ?', [path.posix.basename(req.path)]);
+        if (row && row.original_name) res.setHeader('Content-Disposition', attachmentHeader(row.original_name));
+    } catch (error) {
+        console.error('Download name lookup error:', error.message);
+    }
+    next();
+}
+
 /**
  * Message type for a file, from the mime type the server recorded at upload
  */
@@ -170,6 +223,10 @@ module.exports = {
     isInsideDir,
     resolveUploadPath,
     guardStaticPath,
+    setUploadHeaders,
+    nameDownloads,
+    attachmentHeader,
+    isInlineMedia,
     messageTypeForMime,
     claimUploadedFile,
     releaseUploadedFile

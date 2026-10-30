@@ -567,6 +567,12 @@ function renderProfileCard(profile) {
             attrs: { type: 'button' },
             on: { click: async () => { await FriChat.setUserBlocked(profile.id, !profile.blockedByMe, name); openProfileCard(profile.id); } }
         }));
+        actions.appendChild(FriChat.h('button', {
+            className: 'btn btn-secondary btn-small',
+            text: 'Report',
+            attrs: { type: 'button' },
+            on: { click: () => { closeProfileCard(); FriChat.openReportModal({ userId: profile.id, chatId: currentChatId, name }); } }
+        }));
     }
 
     body.replaceChildren(...[

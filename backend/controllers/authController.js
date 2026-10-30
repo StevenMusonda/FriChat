@@ -11,6 +11,8 @@ const { sendPasswordResetEmail } = require('../utils/mailer');
 const sessions = require('../utils/sessions');
 const verification = require('../utils/emailVerification');
 const { safeAvatarUrl } = require('../utils/privacy');
+const { toBool } = require('../utils/messageQueries');
+const auditLog = require('../utils/auditLog');
 
 const RESET_TOKEN_TTL_MINUTES = 60;
 
@@ -32,7 +34,8 @@ function shapeUser(user) {
         email: user.email,
         fullName: user.full_name || null,
         avatarUrl: safeAvatarUrl(user.avatar_url),
-        emailVerified: verification.isEmailVerified(user)
+        emailVerified: verification.isEmailVerified(user),
+        isAdmin: toBool(user.is_admin) // only decides whether the console link shows; admin routes check the database
     };
 }
 
@@ -121,6 +124,7 @@ async function login(req, res) {
         );
 
         if (!user) {
+            await auditLog.recordRequest(req, 'login_failed', { metadata: { unknownAccount: true } });
             return res.status(401).json({
                 success: false,
                 message: 'Invalid credentials'
@@ -131,9 +135,20 @@ async function login(req, res) {
         const isPasswordValid = await bcrypt.compare(password, user.password_hash);
 
         if (!isPasswordValid) {
+            await auditLog.recordRequest(req, 'login_failed', { targetType: 'user', targetId: user.id });
             return res.status(401).json({
                 success: false,
                 message: 'Invalid credentials'
+            });
+        }
+
+        // After the password check, so a stranger can't find out an account is suspended
+        if (user.suspended_at) {
+            await auditLog.recordRequest(req, 'login_blocked_suspended', { actorId: user.id, targetType: 'user', targetId: user.id });
+            return res.status(403).json({
+                success: false,
+                message: 'This account has been suspended.',
+                code: 'ACCOUNT_SUSPENDED'
             });
         }
 
@@ -144,6 +159,7 @@ async function login(req, res) {
         );
 
         const { accessToken, expiresIn } = await startSession(req, res, user);
+        await auditLog.recordRequest(req, 'login', { actorId: user.id, targetType: 'user', targetId: user.id });
 
         res.json({
             success: true,
@@ -181,6 +197,12 @@ async function refresh(req, res) {
 
         if (result.error === 'reused') {
             await sessions.revokeSession(req.io, result.sessionId, 'reuse');
+            await auditLog.recordRequest(req, 'session_revoked', {
+                actorId: result.userId,
+                targetType: 'session',
+                targetId: result.sessionId,
+                metadata: { reason: 'reuse' }
+            });
             console.warn(`Refresh token reuse detected - revoked session ${result.sessionId} of user ${result.userId}`);
             sessions.clearRefreshCookie(res);
             return res.status(401).json({ success: false, message: 'This sign-in was ended for your security. Please sign in again.', code: 'TOKEN_REUSED' });
@@ -192,11 +214,11 @@ async function refresh(req, res) {
         }
 
         const user = await queryOne(
-            'SELECT id, username, email, full_name, avatar_url, email_verified_at FROM users WHERE id = ?',
+            'SELECT id, username, email, full_name, avatar_url, email_verified_at, is_admin, suspended_at FROM users WHERE id = ?',
             [result.userId]
         );
-        if (!user) {
-            await sessions.revokeSession(req.io, result.sessionId, 'user');
+        if (!user || user.suspended_at) {
+            await sessions.revokeSession(req.io, result.sessionId, user ? 'suspended' : 'user');
             sessions.clearRefreshCookie(res);
             return res.status(401).json({ success: false, message: 'User not found', code: 'SESSION_EXPIRED' });
         }
@@ -275,7 +297,8 @@ async function getProfile(req, res) {
                 fullName: user.full_name,
                 avatarUrl: safeAvatarUrl(user.avatar_url),
                 status: user.status,
-                emailVerified: verification.isEmailVerified(user)
+                emailVerified: verification.isEmailVerified(user),
+                isAdmin: toBool(user.is_admin)
             }
         });
     } catch (error) {
@@ -344,6 +367,7 @@ async function changePassword(req, res) {
         await executeQuery('DELETE FROM password_resets WHERE user_id = ?', [userId]);
 
         const revoked = await sessions.revokeUserSessions(req.io, userId, 'password', req.sessionId);
+        await auditLog.recordRequest(req, 'password_changed', { targetType: 'user', targetId: userId, metadata: { revokedSessions: revoked } });
 
         res.json({
             success: true,
@@ -442,6 +466,7 @@ async function resetPassword(req, res) {
 
         // Whoever knew the old password is signed out everywhere
         await sessions.revokeUserSessions(req.io, reset.user_id, 'password');
+        await auditLog.recordRequest(req, 'password_reset', { actorId: reset.user_id, targetType: 'user', targetId: reset.user_id });
 
         res.json({
             success: true,
@@ -525,6 +550,7 @@ async function revokeSession(req, res) {
         if (!revoked) {
             return res.status(404).json({ success: false, message: 'Device not found or already signed out' });
         }
+        await auditLog.recordRequest(req, 'session_revoked', { targetType: 'session', targetId: sessionId, metadata: { reason: 'user' } });
 
         const current = sessionId === Number(req.sessionId);
         if (current) sessions.clearRefreshCookie(res);
@@ -542,6 +568,9 @@ async function revokeSession(req, res) {
 async function revokeOtherSessions(req, res) {
     try {
         const revoked = await sessions.revokeUserSessions(req.io, req.user.id, 'user', req.sessionId);
+        if (revoked > 0) {
+            await auditLog.recordRequest(req, 'session_revoked', { targetType: 'user', targetId: req.user.id, metadata: { reason: 'user', revokedSessions: revoked } });
+        }
         res.json({
             success: true,
             message: revoked > 0 ? `Signed out ${revoked} other device${revoked === 1 ? '' : 's'}` : 'No other devices were signed in',

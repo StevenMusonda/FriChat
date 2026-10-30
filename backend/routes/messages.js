@@ -9,6 +9,7 @@ const searchController = require('../controllers/searchController');
 const { authenticateToken } = require('../middleware/auth');
 const { upload, handleUploadError } = require('../middleware/upload');
 const { rateLimit } = require('../middleware/rateLimit');
+const { secureUpload } = require('../utils/uploadSecurity');
 const {
     validateMessage,
     validateUploadReply,
@@ -73,7 +74,7 @@ const uploadLimiter = rateLimit({
 // ?before= older page, ?after= newer page, ?around= a page centred on a message (jump to it)
 router.get('/chat/:chatId', validateMessagesQuery, checkValidation, messageController.getMessages);
 router.post('/', validateMessage, checkValidation, messageController.sendMessage);
-router.post('/upload', uploadLimiter, upload.single('file'), handleUploadError, validateUploadReply, checkUploadValidation, messageController.uploadFile);
+router.post('/upload', uploadLimiter, upload.single('file'), handleUploadError, validateUploadReply, checkUploadValidation, secureUpload, messageController.uploadFile);
 router.patch('/:messageId/status', messageActionLimiter, validateMessageStatus, checkValidation, messageController.updateMessageStatus);
 
 // Edit a text message (sender only, within the edit window)

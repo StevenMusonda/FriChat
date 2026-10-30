@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FriChat - Admin</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#667eea" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a202c" media="(prefers-color-scheme: dark)">
+    <link rel="icon" href="icons/favicon-32.png" type="image/png">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="admin-page">
+    <header class="admin-header">
+        <h1>FriChat admin</h1>
+        <a class="btn btn-secondary btn-small" href="chat.html">Back to chat</a>
+    </header>
+
+    <!-- Every admin call is checked by the server; this page only shows what it returns -->
+    <main class="admin-main">
+        <p class="admin-denied" id="adminDenied" hidden>You don't have access to this page.</p>
+
+        <div id="adminConsole" hidden>
+            <div class="settings-tabs" role="tablist" aria-label="Admin sections">
+                <button type="button" class="settings-tab" role="tab" id="adminTabReports" aria-controls="adminPanelReports" aria-selected="true" data-admin-tab="reports">Reports</button>
+                <button type="button" class="settings-tab" role="tab" id="adminTabUsers" aria-controls="adminPanelUsers" aria-selected="false" tabindex="-1" data-admin-tab="users">Users</button>
+                <button type="button" class="settings-tab" role="tab" id="adminTabAudit" aria-controls="adminPanelAudit" aria-selected="false" tabindex="-1" data-admin-tab="audit">Audit log</button>
+            </div>
+
+            <section class="admin-panel" role="tabpanel" id="adminPanelReports" aria-labelledby="adminTabReports" data-admin-panel="reports">
+                <form class="admin-filters" id="reportFilters">
+                    <label for="reportStatusFilter">Status
+                        <select id="reportStatusFilter">
+                            <option value="open">Open</option>
+                            <option value="actioned">Actioned</option>
+                            <option value="dismissed">Dismissed</option>
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                </form>
+                <div class="admin-list" id="reportList" aria-live="polite"></div>
+                <button type="button" class="btn btn-secondary btn-small" id="reportMore" hidden>Load more</button>
+                <div class="admin-detail" id="reportDetail" hidden></div>
+            </section>
+
+            <section class="admin-panel" role="tabpanel" id="adminPanelUsers" aria-labelledby="adminTabUsers" data-admin-panel="users" hidden>
+                <form class="admin-filters" id="userFilters">
+                    <label for="userSearch">Search
+                        <input type="search" id="userSearch" maxlength="100" placeholder="Username, email or name">
+                    </label>
+                    <label for="userStatusFilter">Status
+                        <select id="userStatusFilter">
+                            <option value="">All</option>
+                            <option value="active">Active</option>
+                            <option value="suspended">Suspended</option>
+                        </select>
+                    </label>
+                    <button type="submit" class="btn btn-secondary btn-small">Search</button>
+                </form>
+                <div class="admin-list" id="userList" aria-live="polite"></div>
+                <button type="button" class="btn btn-secondary btn-small" id="userMore" hidden>Load more</button>
+            </section>
+
+            <section class="admin-panel" role="tabpanel" id="adminPanelAudit" aria-labelledby="adminTabAudit" data-admin-panel="audit" hidden>
+                <form class="admin-filters" id="auditFilters">
+                    <label for="auditEvent">Event
+                        <select id="auditEvent"><option value="">All events</option></select>
+                    </label>
+                    <label for="auditSearch">Search
+                        <input type="search" id="auditSearch" maxlength="100" placeholder="Username or details">
+                    </label>
+                    <label for="auditActor">Actor ID
+                        <input type="number" id="auditActor" min="1">
+                    </label>
+                    <label for="auditTarget">Target ID
+                        <input type="number" id="auditTarget" min="1">
+                    </label>
+                    <label for="auditIp">IP address
+                        <input type="text" id="auditIp" maxlength="45">
+                    </label>
+                    <label for="auditFrom">From
+                        <input type="date" id="auditFrom">
+                    </label>
+                    <label for="auditTo">To
+                        <input type="date" id="auditTo">
+                    </label>
+                    <button type="submit" class="btn btn-secondary btn-small">Filter</button>
+                </form>
+                <div class="admin-list" id="auditList" aria-live="polite"></div>
+                <button type="button" class="btn btn-secondary btn-small" id="auditMore" hidden>Load more</button>
+            </section>
+        </div>
+    </main>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>

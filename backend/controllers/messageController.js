@@ -16,6 +16,7 @@ const { messageTypeForMime, resolveUploadPath, claimUploadedFile, releaseUploade
 const { checkCanPost, postingError } = require('../utils/groups');
 const { checkDirectChatBlock } = require('../utils/blocks');
 const { checkRequestReply } = require('../utils/messageRequests');
+const { checkNonContactLimit } = require('../utils/spamLimits');
 const { readReceiptsEnabled, maskReadStatus } = require('../utils/privacy');
 const { getUploadLimits: getUploadLimitSettings, maxSizeFor } = require('../middleware/upload');
 const { attachPolls } = require('../utils/polls');
@@ -361,7 +362,7 @@ async function uploadFile(req, res) {
                 [
                     req.file.originalname,
                     req.file.filename,
-                    path.extname(req.file.originalname),
+                    path.extname(req.file.filename),
                     req.file.size,
                     req.file.mimetype,
                     req.file.path,
@@ -417,7 +418,7 @@ async function uploadFile(req, res) {
                 [
                     req.file.originalname,
                     req.file.filename,
-                    path.extname(req.file.originalname),
+                    path.extname(req.file.filename),
                     req.file.size,
                     req.file.mimetype,
                     req.file.path,
@@ -433,7 +434,7 @@ async function uploadFile(req, res) {
                 [
                     req.file.originalname,
                     req.file.filename,
-                    path.extname(req.file.originalname),
+                    path.extname(req.file.filename),
                     req.file.size,
                     req.file.mimetype,
                     req.file.path,
@@ -1146,6 +1147,10 @@ async function forwardMessages(req, res) {
                     message: 'You can\'t forward to one or more of those chats',
                     code: blockError.code
                 });
+            }
+            const spamError = await checkNonContactLimit(membership.chat_id, userId);
+            if (spamError) {
+                return res.status(spamError.status).json({ success: false, message: spamError.message, code: spamError.code });
             }
         }
 

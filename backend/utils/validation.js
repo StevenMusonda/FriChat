@@ -41,6 +41,14 @@ const {
 } = require('../config/scheduling');
 const { HISTORY_MAX_PAGE_SIZE: CALL_HISTORY_MAX_PAGE_SIZE } = require('../config/calls');
 const {
+    REPORT_REASONS,
+    REPORT_STATUSES,
+    REPORT_NOTE_MAX_LENGTH,
+    WARNING_MAX_LENGTH,
+    SUSPEND_REASON_MAX_LENGTH,
+    AUDIT_EVENTS
+} = require('../config/moderation');
+const {
     EVENT_TITLE_MAX_LENGTH,
     EVENT_DESCRIPTION_MAX_LENGTH,
     EVENT_LOCATION_MAX_LENGTH,
@@ -697,6 +705,119 @@ const validateBlockUser = [
         .toInt()
 ];
 
+// --- Reports and the admin console (phase 13) ---
+
+function plainTextRule(field, max, label) {
+    return body(field)
+        .optional({ values: 'null' })
+        .isString()
+        .withMessage(`${label} must be text`)
+        .bail()
+        .customSanitizer(value => stripControlChars(value).trim())
+        .isLength({ max })
+        .withMessage(`${label} can be up to ${max} characters`);
+}
+
+function optionalIdRule(location, field, label) {
+    return location(field)
+        .optional({ values: 'falsy' })
+        .isInt({ min: 1 })
+        .withMessage(`Invalid ${label}`)
+        .toInt();
+}
+
+function beforeCursorRule() {
+    return optionalIdRule(query, 'before', 'cursor');
+}
+
+/**
+ * POST /api/reports
+ */
+const validateReport = [
+    body('targetType')
+        .isIn(['message', 'user'])
+        .withMessage("targetType must be 'message' or 'user'"),
+
+    optionalIdRule(body, 'messageId', 'message ID'),
+    optionalIdRule(body, 'userId', 'user ID'),
+    optionalIdRule(body, 'chatId', 'chat ID'),
+
+    body('targetType').custom((value, { req }) => {
+        if (value === 'message' && !req.body.messageId) throw new Error('messageId is required');
+        if (value === 'user' && !req.body.userId) throw new Error('userId is required');
+        return true;
+    }),
+
+    body('reason')
+        .isIn(REPORT_REASONS)
+        .withMessage(`reason must be one of: ${REPORT_REASONS.join(', ')}`),
+
+    plainTextRule('note', REPORT_NOTE_MAX_LENGTH, 'The note'),
+
+    body('block')
+        .optional({ values: 'null' })
+        .isBoolean({ strict: true })
+        .withMessage('block must be true or false')
+];
+
+const validateWarningIdParam = [
+    param('warningId').isInt({ min: 1 }).withMessage('Invalid warning ID').toInt()
+];
+
+const reportIdParamRule = param('reportId').isInt({ min: 1 }).withMessage('Invalid report ID').toInt();
+
+const validateReportIdParam = [reportIdParamRule];
+
+const validateEvidenceFileParams = [
+    reportIdParamRule,
+    param('evidenceId').isInt({ min: 1 }).withMessage('Invalid evidence ID').toInt()
+];
+
+const validateAdminReportsQuery = [
+    query('status').optional({ values: 'falsy' }).isIn(REPORT_STATUSES).withMessage('Invalid status'),
+    beforeCursorRule()
+];
+
+const validateAdminWarn = [
+    reportIdParamRule,
+    body('message')
+        .isString()
+        .withMessage('Write the warning')
+        .bail()
+        .customSanitizer(value => stripControlChars(value).trim())
+        .isLength({ min: 1, max: WARNING_MAX_LENGTH })
+        .withMessage(`A warning is 1-${WARNING_MAX_LENGTH} characters`)
+];
+
+const suspendReasonRule = () => plainTextRule('reason', SUSPEND_REASON_MAX_LENGTH, 'The reason');
+
+const validateAdminSuspend = [reportIdParamRule, suspendReasonRule()];
+
+const validateAdminSuspendUser = [userIdParamRule, suspendReasonRule()];
+
+const validateAdminUsersQuery = [
+    query('q').optional({ values: 'falsy' }).isString().isLength({ max: 100 }).withMessage('Search is too long'),
+    query('status').optional({ values: 'falsy' }).isIn(['active', 'suspended']).withMessage('Invalid status'),
+    beforeCursorRule()
+];
+
+function isCalendarDate(value) {
+    const date = new Date(`${value}T00:00:00Z`);
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
+}
+
+const validateAuditQuery = [
+    query('event').optional({ values: 'falsy' }).isIn(AUDIT_EVENTS).withMessage('Unknown event'),
+    optionalIdRule(query, 'actorId', 'actor ID'),
+    query('targetType').optional({ values: 'falsy' }).isIn(['user', 'chat', 'message', 'report', 'session', 'invite', 'file']).withMessage('Unknown target type'),
+    optionalIdRule(query, 'targetId', 'target ID'),
+    query('ip').optional({ values: 'falsy' }).isIP().withMessage('Invalid IP address'),
+    query('q').optional({ values: 'falsy' }).isString().isLength({ max: 100 }).withMessage('Search is too long'),
+    query('from').optional({ values: 'falsy' }).custom(isCalendarDate).withMessage('from must be YYYY-MM-DD'),
+    query('to').optional({ values: 'falsy' }).custom(isCalendarDate).withMessage('to must be YYYY-MM-DD'),
+    beforeCursorRule()
+];
+
 /**
  * Validation rules for unblocking a user
  */
@@ -1323,6 +1444,16 @@ module.exports = {
     validateSessionIdParam,
     validateBlockUser,
     validateUserIdParam,
+    validateReport,
+    validateWarningIdParam,
+    validateReportIdParam,
+    validateEvidenceFileParams,
+    validateAdminReportsQuery,
+    validateAdminWarn,
+    validateAdminSuspend,
+    validateAdminSuspendUser,
+    validateAdminUsersQuery,
+    validateAuditQuery,
     validatePushSubscription,
     validatePushUnsubscribe,
     validateNotificationSettings,

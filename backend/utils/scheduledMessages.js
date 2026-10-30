@@ -30,6 +30,7 @@ const FAILURE_REASONS = {
     NOT_A_MEMBER: 'You were no longer a member of this chat, so the message was discarded.',
     ANNOUNCEMENT_ONLY: 'Only admins can send messages in this group now, so the message was discarded.',
     BLOCKED: 'You can no longer message this person, so the message was discarded.',
+    SPAM_LIMIT: 'You reached the hourly limit for new accounts, so the message was not sent.',
     DELIVERY: 'The message could not be delivered.'
 };
 
@@ -224,6 +225,7 @@ async function markFailed(io, row, reason) {
 function failureReasonFor(postError) {
     if (postError.code === 'NOT_A_MEMBER') return FAILURE_REASONS.NOT_A_MEMBER;
     if (postError.code === 'ANNOUNCEMENT_ONLY') return FAILURE_REASONS.ANNOUNCEMENT_ONLY;
+    if (postError.code === 'SPAM_LIMIT') return FAILURE_REASONS.SPAM_LIMIT;
     return FAILURE_REASONS.BLOCKED;
 }
 

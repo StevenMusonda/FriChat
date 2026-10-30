@@ -187,6 +187,8 @@ function createWorld(dbType, privacyOverrides = {}) {
             const r = world.requests[params[0]];
             return r && r.recipient_id === Number(params[1]) && params.slice(2).includes(r.status) ? [{ chat_id: r.chat_id }] : [];
         }
+        // Phase 13 spam limit: accounts in this world are not new (see test/phase13.test.js)
+        if (/^SELECT chat_id FROM message_requests WHERE chat_id = \? AND requester_id = \?/.test(sql)) return [];
         if (/^INSERT INTO message_requests/.test(sql)) {
             world.requests[params[0]] = { chat_id: params[0], requester_id: params[1], recipient_id: params[2], status: params[3] };
             return pg ? [] : { affectedRows: 1 };

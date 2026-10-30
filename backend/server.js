@@ -24,6 +24,8 @@ const { scheduledRouter, remindersRouter } = require('./routes/schedule');
 const callRoutes = require('./routes/calls');
 const eventRoutes = require('./routes/events');
 const listRoutes = require('./routes/lists');
+const reportRoutes = require('./routes/reports');
+const adminRoutes = require('./routes/admin');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -32,7 +34,7 @@ const { markChatRead, recordNewMessage, updateMessageStatus } = require('./utils
 const { notifyNewMessage } = require('./utils/push');
 const { getMessageById, checkReplyTarget } = require('./utils/messageQueries');
 const { cleanMessageText } = require('./utils/messageText');
-const { claimUploadedFile, releaseUploadedFile, guardStaticPath } = require('./utils/uploads');
+const { claimUploadedFile, releaseUploadedFile, guardStaticPath, setUploadHeaders, nameDownloads } = require('./utils/uploads');
 const { saveMentions } = require('./utils/mentions');
 const { attachLinkPreview } = require('./utils/linkPreview');
 const reactionRules = require('./utils/reactions');
@@ -90,12 +92,18 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve uploaded files with CORS headers; never anything that resolves outside the uploads folder
+// Serve uploaded files with CORS headers; never anything that resolves outside the uploads folder.
+// Media is shown; anything else is a download (.html or .svg included), see setUploadHeaders.
 const UPLOADS_STATIC_ROOT = path.join(__dirname, 'uploads');
 app.use('/uploads', cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
     credentials: true
-}), guardStaticPath(UPLOADS_STATIC_ROOT), express.static(UPLOADS_STATIC_ROOT));
+}), guardStaticPath(UPLOADS_STATIC_ROOT), nameDownloads, express.static(UPLOADS_STATIC_ROOT, {
+    index: false,
+    redirect: false,
+    dotfiles: 'ignore',
+    setHeaders: setUploadHeaders
+}));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -111,6 +119,8 @@ app.use('/api/reminders', remindersRouter);
 app.use('/api/calls', callRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/lists', listRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

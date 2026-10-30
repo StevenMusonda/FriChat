@@ -116,6 +116,19 @@ const CONFIG = {
         LIST_ITEM: (itemId) => `/lists/items/${itemId}`,
         MY_BIRTHDAY: '/users/me/birthday',
         CHAT_BIRTHDAYS: (chatId) => `/chats/${chatId}/birthdays`,
+
+        // Reports and the admin console (phase 13)
+        REPORTS: '/reports',
+        REPORT_WARNINGS: '/reports/warnings',
+        REPORT_WARNING_ACK: (warningId) => `/reports/warnings/${warningId}/acknowledge`,
+        ADMIN_CONFIG: '/admin/config',
+        ADMIN_REPORTS: '/admin/reports',
+        ADMIN_REPORT: (reportId) => `/admin/reports/${reportId}`,
+        ADMIN_REPORT_ACTION: (reportId, action) => `/admin/reports/${reportId}/${action}`,
+        ADMIN_EVIDENCE_FILE: (reportId, evidenceId) => `/admin/reports/${reportId}/evidence/${evidenceId}/file`,
+        ADMIN_USERS: '/admin/users',
+        ADMIN_USER_ACTION: (userId, action) => `/admin/users/${userId}/${action}`,
+        ADMIN_AUDIT: '/admin/audit',
     },
     
     // Messages fetched per page when opening a chat or scrolling up
