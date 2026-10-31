@@ -791,7 +791,7 @@ The migration adds `chats.description`, `chats.avatar_url`, `chats.approve_new_m
 - New env variables (in `backend/.env.example`):
   - `ENABLE_INVITE_LINKS` (default `true`). With `false`, creating, listing, previewing and joining by link return `404` with `code: "DISABLED"`, and the panel says links are off. Revoking existing links and handling pending requests still work.
   - `GROUP_AVATAR_MAX_BYTES` (default `2097152`). The frontend checks the default 2 MB before uploading, so if you raise it, also change `GROUP_AVATAR_MAX_BYTES` in `frontend/js/groups.js`.
-- New npm package: `sharp` (`optionalDependencies`, `^0.34.5`). If it fails to install, uploads still work, but photos are stored as uploaded (type and size checks still apply, no resize, no EXIF stripping).
+- New npm package: `sharp` (`optionalDependencies`, now `^0.35.5`). If it fails to install, uploads still work, but photos are stored as uploaded (type and size checks still apply, no resize, no EXIF stripping).
 - Frontend: `frontend/vendor/qrcode-generator/qrcode.js` (MIT, Kazuhiko Arase, v2.0.4, unchanged; licence next to it) is served locally, so there is no CDN. `frontend/sw.js` `CACHE_VERSION` is now `frichat-shell-v5`, and the shell includes `join.html`, `js/groups.js`, `js/join.js` and the QR library.
 - Invite URLs use `FRONTEND_URL` (falls back to `CORS_ORIGIN`), the same as password reset links. Set it to the public address of the `frontend/` folder.
 
@@ -2241,6 +2241,30 @@ After a purge it searches every text column of every table for the person's deta
 - **Rate limits are per process**, as in earlier phases. The 2FA lock and export cooldown are in the database and hold across instances.
 - **`reset-2fa` can't disconnect live sockets** from its separate process. Those sockets stay open until they next reconnect or their tab reloads, and any REST call is refused at once.
 - **Tested on real PostgreSQL only.** On MySQL the same code ran through the fake driver, with checks on its SQL dialect, but `add_account_security.sql` has not been run on a real MySQL server.
+
+---
+
+## Dependency security update (October 2026)
+
+Fixes the three high-severity `npm audit` findings in `backend/`. There are no new features, migrations, env variables, endpoints or socket events, and no application code changed.
+
+| Package | Before | After | Why it mattered |
+| --- | --- | --- | --- |
+| `body-parser` (through Express) | 1.20.8 | 1.20.9 | One unauthenticated gzip request could crash the whole server process (GHSA-27r3-jxmh-p828). |
+| `nodemailer` | 6.10.1 | 10.3.1 | 22 advisories, including SMTP command injection and recipient-parsing bypasses. |
+| `sharp` (optional) | 0.34.5 | 0.35.5 | Inherited libvips, libheif and librsvg vulnerabilities. |
+
+**Upgrading an existing install:** run `npm install` in `backend/` and restart the server. `package-lock.json` is gitignored and Express allows older versions of `body-parser`, so `backend/package.json` sets a minimum through `overrides`. Without it, an install with an existing lockfile stays on the vulnerable version.
+
+**Breaking changes checked:** nodemailer 7-10 removed old SES support, renamed the `NoAuth` error code to `ENOAUTH`, verify TLS when fetching remote content, and need Node 20. sharp 0.35 needs Node 20.9, removed `failOnError` and `paletteBitDepth`, added `limitInputChannels` and has no install script. FriChat uses none of the removed features, and it already needs Node 22 for `file-type`.
+
+**Still reported by `npm audit`:** 2 moderate findings, `minimatch` and `nodemon`, which depends on it. Both are development-only, and `npm audit --omit=dev` is clean. Don't run `npm audit fix --force`: it would downgrade `nodemon` to 1.0.2.
+
+**Manual test checklist:**
+- [ ] `npm test` passes, including `test/dependencies.test.js`.
+- [ ] `npm audit --omit=dev` reports 0 vulnerabilities.
+- [ ] With a real SMTP server configured, a password reset email arrives with the right sender and a working link.
+- [ ] A new JPEG and PNG profile photo, group avatar and photo message all upload and display.
 
 ---
 
