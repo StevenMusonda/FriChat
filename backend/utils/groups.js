@@ -5,7 +5,7 @@
 
 const { executeQuery, queryOne } = require('../config/database');
 const { toBool } = require('./messageQueries');
-const { checkDirectChatBlock } = require('./blocks');
+const { checkDirectChatBlock, checkDirectChatPartnerDeleted } = require('./blocks');
 const { checkRequestReply } = require('./messageRequests');
 const { checkNonContactLimit } = require('./spamLimits');
 
@@ -47,7 +47,8 @@ async function checkCanPost(chatId, userId) {
     const error = postingError(membership);
     if (error) return error;
     if (membership.chat_type === 'direct') {
-        return (await checkDirectChatBlock(chatId, userId))
+        return (await checkDirectChatPartnerDeleted(chatId, userId))
+            || (await checkDirectChatBlock(chatId, userId))
             || (await checkRequestReply(chatId, userId))
             || checkNonContactLimit(chatId, userId);
     }

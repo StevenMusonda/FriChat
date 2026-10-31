@@ -5,7 +5,7 @@
  * API responses are never cached.
  */
 
-const CACHE_VERSION = 'frichat-shell-v16';
+const CACHE_VERSION = 'frichat-shell-v17';
 
 const APP_SHELL = [
     'chat.html',
@@ -43,6 +43,7 @@ const APP_SHELL = [
     'js/lists.js',
     'js/moderation.js',
     'js/security.js',
+    'js/account.js',
     'js/join.js',
     'vendor/qrcode-generator/qrcode.js',
     'icons/icon-192.png',

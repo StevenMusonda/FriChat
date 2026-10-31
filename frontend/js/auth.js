@@ -92,8 +92,24 @@ function storeUserData(data) {
         fullName: data.fullName,
         avatarUrl: data.avatarUrl,
         emailVerified: !!data.emailVerified,
-        isAdmin: !!data.isAdmin // only shows the console link; the server checks every admin call
+        isAdmin: !!data.isAdmin, // only shows the console link; the server checks every admin call
+        twoFactorEnabled: !!data.twoFactorEnabled
     }));
+}
+
+/**
+ * What a completed sign-in has to tell the user, shown by account.js once the app opens
+ */
+function rememberAccountNotice(data) {
+    let notice = null;
+    if (data.deletionCancelled) notice = 'Welcome back. Your account will not be deleted.';
+    else if (data.recoveryCodesLeft !== undefined) notice = `You signed in with a recovery code. ${data.recoveryCodesLeft} left.`;
+    if (!notice) return;
+    try {
+        sessionStorage.setItem(CONFIG.STORAGE_KEYS.ACCOUNT_NOTICE, notice);
+    } catch (e) {
+        // Storage unavailable: only a courtesy
+    }
 }
 
 /**
@@ -292,7 +308,8 @@ async function register(username, email, password, fullName = '') {
 }
 
 /**
- * Login user
+ * Login user. With 2FA on, the result has data.twoFactorRequired and data.challengeToken and nothing
+ * is signed in yet: finish with verifyTwoFactorLogin.
  */
 async function login(username, password) {
     try {
@@ -309,11 +326,37 @@ async function login(username, password) {
             sessionEnded = false;
             setAccessToken(response.data.accessToken, response.data.expiresIn);
             storeUserData(response.data);
+            rememberAccountNotice(response.data);
         }
 
         return response;
     } catch (error) {
         console.error('Login error:', error);
+        return { success: false, message: 'Login failed' };
+    }
+}
+
+/**
+ * Second step of a sign-in: a code from the authenticator app, or a recovery code
+ */
+async function verifyTwoFactorLogin(challengeToken, code) {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.LOGIN_2FA, {
+            method: 'POST',
+            skipAuth: true,
+            body: JSON.stringify({ challengeToken, code })
+        });
+
+        if (response.success && response.data.accessToken) {
+            sessionEnded = false;
+            setAccessToken(response.data.accessToken, response.data.expiresIn);
+            storeUserData(response.data);
+            rememberAccountNotice(response.data);
+        }
+
+        return response;
+    } catch (error) {
+        console.error('Two-factor login error:', error);
         return { success: false, message: 'Login failed' };
     }
 }

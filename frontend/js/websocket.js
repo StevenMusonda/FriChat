@@ -122,7 +122,8 @@ function initializeWebSocket() {
     // This device was signed out (Settings > Devices elsewhere, password change, token reuse)
     socket.on('session_revoked', (data) => {
         const reason = data && data.reason;
-        handleSessionEnded(reason === 'reuse' ? 'security' : reason === 'suspended' ? 'suspended' : 'revoked');
+        const pageReasons = { reuse: 'security', suspended: 'suspended', deletion: 'deletion' };
+        handleSessionEnded(pageReasons[reason] || 'revoked');
     });
 
     // An event was dropped because this socket or user sent too many

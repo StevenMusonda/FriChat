@@ -80,11 +80,19 @@ async function optionalAuth(req, res, next) {
 
 /**
  * Admin console routes, after authenticateToken. The flag is read from the database on each
- * request (findSessionUser); nothing the client sends can set it.
+ * request (findSessionUser); nothing the client sends can set it. An admin must also have 2FA on,
+ * and findSessionUser has already refused a session that didn't pass it.
  */
 function requireAdmin(req, res, next) {
     if (!req.user || !toBool(req.user.is_admin)) {
         return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+    if (!req.user.totp_enabled_at) {
+        return res.status(403).json({
+            success: false,
+            message: 'Turn on two-factor authentication in Settings > Security to use the admin console.',
+            code: 'TWO_FACTOR_REQUIRED'
+        });
     }
     next();
 }

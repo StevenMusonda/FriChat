@@ -6,6 +6,9 @@
 const REFRESH_COOKIE_NAME = 'frichat_refresh';
 // The cookie is only sent to the auth routes, never to chats/messages/uploads
 const REFRESH_COOKIE_PATH = '/api/auth';
+const DEVICE_COOKIE_NAME = 'frichat_device';
+// Browsers cap cookie lifetimes at 400 days
+const DEVICE_COOKIE_DAYS = 400;
 const SAME_SITE_VALUES = ['strict', 'lax', 'none'];
 
 function intFromEnv(name, fallback, min = 1) {
@@ -58,12 +61,22 @@ function refreshCookieOptions() {
     };
 }
 
+/**
+ * "This browser has been here before" cookie, for the new-device email. Same protection as the
+ * refresh cookie and the same path; it outlives any one session.
+ */
+function deviceCookieOptions() {
+    return { ...refreshCookieOptions(), maxAge: DEVICE_COOKIE_DAYS * 24 * 60 * 60 * 1000 };
+}
+
 module.exports = {
     REFRESH_COOKIE_NAME,
+    DEVICE_COOKIE_NAME,
     REFRESH_COOKIE_PATH,
     accessTokenTtl,
     refreshTokenTtlDays,
     refreshReuseGraceSeconds,
     emailVerificationTtlHours,
-    refreshCookieOptions
+    refreshCookieOptions,
+    deviceCookieOptions
 };

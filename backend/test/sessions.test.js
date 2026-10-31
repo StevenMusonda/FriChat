@@ -57,7 +57,7 @@ function createWorld(dbType) {
             world.users[id] = { id, username: params[0], email: params[1], password_hash: params[2], full_name: params[3], avatar_url: null, status: 'offline', email_verified_at: null };
             return inserted(id);
         }
-        if (/^SELECT id, username, email, full_name, avatar_url, email_verified_at, is_admin, suspended_at FROM users WHERE id = \?$/.test(sql)) {
+        if (/^SELECT id, username, email, full_name, avatar_url, email_verified_at, is_admin, suspended_at, deleted_at, totp_enabled_at FROM users WHERE id = \?$/.test(sql)) {
             const u = world.users[params[0]];
             return u ? [userRow(u)] : [];
         }
@@ -104,12 +104,12 @@ function createWorld(dbType) {
         }
 
         // --- sessions ---
-        if (/^INSERT INTO sessions \(user_id, refresh_token_hash, user_agent, device_label, ip_address, expires_at\) VALUES \(\?, \?, \?, \?, \?, /.test(sql)) {
+        if (/^INSERT INTO sessions \(user_id, refresh_token_hash, user_agent, device_label, ip_address, expires_at, mfa_verified_at\) VALUES \(\?, \?, \?, \?, \?, /.test(sql)) {
             const id = ++world.nextId;
             world.sessions[id] = { id, user_id: Number(params[0]), refresh_token_hash: params[1], user_agent: params[2], device_label: params[3], ip_address: params[4], ttl_days: params[5], revoked_at: null, revoked_reason: null, expired: false, created_at: 'c', last_active_at: id };
             return inserted(id);
         }
-        if (/^SELECT id, user_id, revoked_at, CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_expired FROM sessions WHERE refresh_token_hash = \?$/.test(sql)) {
+        if (/^SELECT id, user_id, revoked_at, mfa_verified_at, CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_expired FROM sessions WHERE refresh_token_hash = \?$/.test(sql)) {
             const s = Object.values(world.sessions).find(x => x.refresh_token_hash === params[0]);
             return s ? [{ id: s.id, user_id: s.user_id, revoked_at: s.revoked_at, is_expired: s.expired ? 1 : 0 }] : [];
         }
@@ -158,7 +158,7 @@ function createWorld(dbType) {
             return Object.values(world.sessions).filter(s => s.user_id === Number(params[0]) && !s.revoked_at && !s.expired)
                 .sort((a, b) => b.last_active_at - a.last_active_at).map(s => ({ ...s }));
         }
-        if (/^SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = \? AND s.user_id = \? AND s.revoked_at IS NULL AND u.suspended_at IS NULL$/.test(sql)) {
+        if (/^SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at, u.is_admin, u.totp_enabled_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = \? AND s.user_id = \? AND s.revoked_at IS NULL AND u.suspended_at IS NULL AND u.deleted_at IS NULL AND \(u.totp_enabled_at IS NULL OR s.mfa_verified_at IS NOT NULL\)$/.test(sql)) {
             const s = world.sessions[params[0]];
             return s && s.user_id === Number(params[1]) && !s.revoked_at ? [userRow(world.users[s.user_id])] : [];
         }
@@ -183,6 +183,7 @@ async function startApp(dbType) {
     delete process.env.COOKIE_SECURE;
     stubModule(path.join(__dirname, '..', 'utils', 'scheduler.js'), { startScheduler() {} });
     stubModule(path.join(__dirname, '..', 'utils', 'mailer.js'), {
+        sendSecurityEmail: async () => {},
         sendMail: async () => {},
         sendPasswordResetEmail: async () => {},
         sendVerificationEmail: async (to, username, url) => { world.lastVerificationUrl = url; }

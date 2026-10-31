@@ -31,6 +31,19 @@ const CONFIG = {
         SESSIONS: '/auth/sessions',
         SESSION: (sessionId) => `/auth/sessions/${sessionId}`,
         REVOKE_OTHER_SESSIONS: '/auth/sessions/revoke-others',
+        LOGIN_2FA: '/auth/login/2fa',
+        CHANGE_EMAIL: '/auth/email',
+        SECURITY_ACTIVITY: '/auth/security-activity',
+        TWO_FACTOR: '/auth/2fa',
+        TWO_FACTOR_SETUP: '/auth/2fa/setup',
+        TWO_FACTOR_CONFIRM: '/auth/2fa/confirm',
+        TWO_FACTOR_DISABLE: '/auth/2fa/disable',
+        TWO_FACTOR_RECOVERY_CODES: '/auth/2fa/recovery-codes',
+
+        // Data rights (phase 14)
+        ACCOUNT_EXPORTS: '/account/exports',
+        ACCOUNT_EXPORT_LINK: (exportId) => `/account/exports/${exportId}/link`,
+        ACCOUNT_DELETE: '/account/delete',
 
         // Blocking
         BLOCKS: '/blocks',
@@ -194,7 +207,9 @@ const CONFIG = {
         // Unsent composer text, per user and chat: draft:<userId>:<chatId>
         DRAFT_PREFIX: 'draft:',
         // Invite code to come back to after signing in (sessionStorage)
-        PENDING_INVITE: 'pendingInvite'
+        PENDING_INVITE: 'pendingInvite',
+        // Something to say once the app has opened after signing in (sessionStorage)
+        ACCOUNT_NOTICE: 'accountNotice'
     }
 };
 

@@ -59,6 +59,32 @@
                 <div id="errorMessage" class="error-message" style="display: none;"></div>
             </form>
 
+            <!-- Second step, when the account has two-factor authentication on -->
+            <form id="twoFactorForm" class="auth-form" hidden>
+                <div class="form-group">
+                    <label for="twoFactorCode" id="twoFactorLabel">Code from your authenticator app</label>
+                    <input
+                        type="text"
+                        id="twoFactorCode"
+                        name="twoFactorCode"
+                        required
+                        maxlength="32"
+                        inputmode="numeric"
+                        autocomplete="one-time-code"
+                        placeholder="6-digit code"
+                    >
+                    <button type="button" class="link-button forgot-password-link" id="twoFactorToggle">Use a recovery code instead</button>
+                </div>
+
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary" id="twoFactorBtn">Verify</button>
+                </div>
+
+                <div id="twoFactorError" class="error-message" style="display: none;" role="alert"></div>
+
+                <button type="button" class="link-button forgot-password-link" id="twoFactorBack">Back to sign in</button>
+            </form>
+
             <div class="auth-footer">
                 <p>Don't have an account? <a href="signup.html">Sign up</a></p>
             </div>
@@ -83,7 +109,8 @@
                 revoked: 'You were signed out of this device. Please sign in again.',
                 security: 'For your security, this sign-in was ended. Please sign in again.',
                 expired: 'Your session expired. Please sign in again.',
-                suspended: 'This account has been suspended.'
+                suspended: 'This account has been suspended.',
+                deletion: 'Your account will be deleted in 14 days. Sign in before then to cancel.'
             };
             if (SIGNED_OUT_MESSAGES[signedOut]) {
                 errorMessage.textContent = SIGNED_OUT_MESSAGES[signedOut];
@@ -108,7 +135,9 @@
                 try {
                     const result = await login(username, password);
                     
-                    if (result.success) {
+                    if (result.success && result.data.twoFactorRequired) {
+                        showTwoFactorStep(result.data.challengeToken);
+                    } else if (result.success) {
                         // Redirect to chat (or back to the invite link)
                         window.location.href = nextUrl || 'chat.html';
                     } else {
@@ -123,6 +152,71 @@
                     loginBtn.disabled = false;
                     loginBtn.querySelector('.btn-text').style.display = 'inline';
                     loginBtn.querySelector('.btn-loader').style.display = 'none';
+                }
+            });
+
+            // ===== Two-factor step =====
+
+            const twoFactorForm = document.getElementById('twoFactorForm');
+            const twoFactorCode = document.getElementById('twoFactorCode');
+            const twoFactorError = document.getElementById('twoFactorError');
+            const twoFactorBtn = document.getElementById('twoFactorBtn');
+            const twoFactorToggle = document.getElementById('twoFactorToggle');
+            let challengeToken = null;
+            let usingRecoveryCode = false;
+
+            function showTwoFactorError(text) {
+                twoFactorError.textContent = text;
+                twoFactorError.style.display = text ? 'block' : 'none';
+            }
+
+            function setRecoveryMode(on) {
+                usingRecoveryCode = on;
+                twoFactorCode.value = '';
+                twoFactorCode.inputMode = on ? 'text' : 'numeric';
+                twoFactorCode.placeholder = on ? 'XXXX-XXXX-XXXX-XXXX' : '6-digit code';
+                document.getElementById('twoFactorLabel').textContent = on ? 'Recovery code' : 'Code from your authenticator app';
+                twoFactorToggle.textContent = on ? 'Use your authenticator app' : 'Use a recovery code instead';
+                twoFactorCode.focus();
+            }
+
+            function showTwoFactorStep(token) {
+                challengeToken = token;
+                document.getElementById('password').value = '';
+                loginForm.hidden = true;
+                twoFactorForm.hidden = false;
+                showTwoFactorError('');
+                setRecoveryMode(false);
+            }
+
+            function backToPassword() {
+                challengeToken = null;
+                twoFactorForm.hidden = true;
+                loginForm.hidden = false;
+                document.getElementById('password').focus();
+            }
+
+            twoFactorToggle.addEventListener('click', () => setRecoveryMode(!usingRecoveryCode));
+            document.getElementById('twoFactorBack').addEventListener('click', backToPassword);
+
+            twoFactorForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                twoFactorBtn.disabled = true;
+                showTwoFactorError('');
+
+                const result = await verifyTwoFactorLogin(challengeToken, twoFactorCode.value);
+                twoFactorBtn.disabled = false;
+
+                if (result.success) {
+                    window.location.href = nextUrl || 'chat.html';
+                } else if (result.code === 'CHALLENGE_EXPIRED') {
+                    backToPassword();
+                    errorMessage.textContent = result.message;
+                    errorMessage.style.display = 'block';
+                } else {
+                    twoFactorCode.value = '';
+                    twoFactorCode.focus();
+                    showTwoFactorError((result.errors && result.errors[0] && result.errors[0].msg) || result.message || 'That code didn\'t work');
                 }
             });
         });

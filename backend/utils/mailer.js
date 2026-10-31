@@ -93,6 +93,15 @@ If you didn't create a FriChat account, you can ignore this email.`;
     await sendMail({ to, subject: 'Verify your FriChat email address', text, html });
 }
 
+/**
+ * Tell a user about something that happened to their account. Each line is a paragraph.
+ */
+async function sendSecurityEmail(to, username, subject, lines) {
+    const text = `Hi ${username},\n\n${lines.join('\n\n')}`;
+    const html = `<p>Hi ${escapeHtml(username)},</p>${lines.map(line => `<p>${escapeHtml(line)}</p>`).join('')}`;
+    await sendMail({ to, subject, text, html });
+}
+
 function escapeHtml(text) {
     return String(text)
         .replace(/&/g, '&amp;')
@@ -104,5 +113,6 @@ function escapeHtml(text) {
 module.exports = {
     sendMail,
     sendPasswordResetEmail,
-    sendVerificationEmail
+    sendVerificationEmail,
+    sendSecurityEmail
 };

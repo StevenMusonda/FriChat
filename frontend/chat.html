@@ -392,7 +392,7 @@
         </div>
     </div>
 
-    <!-- Settings: Profile, Privacy, Notifications, Devices, Appearance -->
+    <!-- Settings: Profile, Privacy, Notifications, Devices, Security, Appearance -->
     <div class="modal" id="settingsModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
         <div class="modal-content settings-modal">
             <div class="modal-header">
@@ -405,6 +405,7 @@
                     <button type="button" class="settings-tab" role="tab" id="settingsTabPrivacy" aria-controls="settingsPanelPrivacy" aria-selected="false" tabindex="-1" data-settings-tab="privacy">Privacy</button>
                     <button type="button" class="settings-tab" role="tab" id="settingsTabNotifications" aria-controls="settingsPanelNotifications" aria-selected="false" tabindex="-1" data-settings-tab="notifications">Notifications</button>
                     <button type="button" class="settings-tab" role="tab" id="settingsTabDevices" aria-controls="settingsPanelDevices" aria-selected="false" tabindex="-1" data-settings-tab="devices">Devices</button>
+                    <button type="button" class="settings-tab" role="tab" id="settingsTabSecurity" aria-controls="settingsPanelSecurity" aria-selected="false" tabindex="-1" data-settings-tab="security">Security</button>
                     <button type="button" class="settings-tab" role="tab" id="settingsTabAppearance" aria-controls="settingsPanelAppearance" aria-selected="false" tabindex="-1" data-settings-tab="appearance">Appearance</button>
                 </div>
 
@@ -502,6 +503,19 @@
                             </span>
                             <button type="button" class="btn btn-secondary btn-small" id="resendVerificationBtn" hidden>Resend link</button>
                         </div>
+                        <form class="settings-form" id="changeEmailForm" novalidate>
+                            <label for="changeEmailAddress">New email address
+                                <input type="email" id="changeEmailAddress" autocomplete="email" maxlength="100" required>
+                            </label>
+                            <label for="changeEmailPassword">Password
+                                <input type="password" id="changeEmailPassword" autocomplete="current-password" required>
+                            </label>
+                            <label for="changeEmailCode" data-needs-2fa hidden>Code from your authenticator app
+                                <input type="text" id="changeEmailCode" autocomplete="one-time-code" maxlength="32">
+                            </label>
+                            <button type="submit" class="btn btn-secondary btn-small" id="changeEmailBtn">Change email</button>
+                            <p class="settings-status" id="changeEmailStatus" role="status"></p>
+                        </form>
                     </section>
 
                 </div>
@@ -674,6 +688,56 @@
                         </form>
                     </section>
 
+                </div>
+
+                <!-- Two-factor, security activity, data export, delete account (account.js) -->
+                <div class="settings-panel" role="tabpanel" id="settingsPanelSecurity" aria-labelledby="settingsTabSecurity" data-settings-panel="security" hidden>
+                    <section class="settings-section" aria-labelledby="settingsTwoFactorHeading">
+                        <h4 id="settingsTwoFactorHeading">Two-factor authentication</h4>
+                        <div class="settings-row">
+                            <span class="settings-row-text">
+                                <span class="settings-row-title" id="twoFactorState"></span>
+                                <span class="settings-row-hint" id="twoFactorHint"></span>
+                            </span>
+                            <button type="button" class="btn btn-primary btn-small" id="twoFactorStartBtn" hidden>Set up</button>
+                        </div>
+                        <div class="settings-button-row" id="twoFactorManage" hidden>
+                            <button type="button" class="btn btn-secondary btn-small" id="twoFactorRegenerateBtn">New recovery codes</button>
+                            <button type="button" class="btn btn-secondary btn-small" id="twoFactorDisableBtn">Turn off</button>
+                        </div>
+                        <div class="two-factor-panel" id="twoFactorPanel" hidden></div>
+                        <p class="settings-status" id="twoFactorStatus" role="status"></p>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsActivityHeading">
+                        <h4 id="settingsActivityHeading">Security activity</h4>
+                        <ul class="device-list" id="securityActivityList" aria-live="polite"></ul>
+                        <button type="button" class="btn btn-secondary btn-small" id="securityActivityMore" hidden>Show more</button>
+                        <p class="settings-status" id="securityActivityStatus" role="status"></p>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsExportHeading">
+                        <h4 id="settingsExportHeading">Your data</h4>
+                        <p class="settings-row-hint">Get a copy of your profile, chats, messages, reactions and uploads as a zip. We'll email you when it's ready.</p>
+                        <ul class="device-list" id="exportList" aria-live="polite"></ul>
+                        <button type="button" class="btn btn-secondary btn-small" id="requestExportBtn">Request my data</button>
+                        <p class="settings-status" id="exportStatus" role="status"></p>
+                    </section>
+
+                    <section class="settings-section" aria-labelledby="settingsDeleteHeading">
+                        <h4 id="settingsDeleteHeading">Delete account</h4>
+                        <form class="settings-form" id="deleteAccountForm" novalidate>
+                            <p class="settings-note">You're signed out everywhere, and after 14 days your profile, photo and uploads are deleted. Sign in before then to cancel. Messages you sent stay in other people's chats, shown as "Deleted user".</p>
+                            <label for="deleteAccountPassword">Password
+                                <input type="password" id="deleteAccountPassword" autocomplete="current-password" required>
+                            </label>
+                            <label for="deleteAccountCode" data-needs-2fa hidden>Code from your authenticator app
+                                <input type="text" id="deleteAccountCode" autocomplete="one-time-code" maxlength="32">
+                            </label>
+                            <button type="submit" class="btn btn-danger btn-small" id="deleteAccountBtn">Delete my account</button>
+                            <p class="settings-status" id="deleteAccountStatus" role="status"></p>
+                        </form>
+                    </section>
                 </div>
 
                 <!-- Appearance -->
@@ -1255,6 +1319,7 @@
     <script src="js/ui.js"></script>
     <script src="js/notifications.js"></script>
     <script src="js/security.js"></script>
+    <script src="js/account.js"></script>
     <script src="vendor/qrcode-generator/qrcode.js"></script>
     <script src="js/groups.js"></script>
     <script src="js/composer.js"></script>
@@ -1428,6 +1493,7 @@
 
             // Report dialog, warnings from admins, console link
             startFeature('Moderation', () => FriChat.initializeModeration());
+            startFeature('Account', () => FriChat.initializeAccount());
 
             // Events (cards, answers, My events, birthday banner) and shared lists
             startFeature('Events', () => FriChat.initializeEvents());

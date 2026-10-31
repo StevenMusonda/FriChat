@@ -128,6 +128,34 @@ async function checkDirectChatBlock(chatId, userId) {
 }
 
 /**
+ * A direct chat whose other person deleted their account takes no new messages
+ * @returns {Promise<object|null>} error or null
+ */
+async function checkDirectChatPartnerDeleted(chatId, userId) {
+    const row = await queryOne(`
+        SELECT u.id
+        FROM group_members gm
+        JOIN users u ON u.id = gm.user_id
+        WHERE gm.chat_id = ? AND gm.user_id <> ? AND u.deleted_at IS NOT NULL
+        LIMIT 1
+    `, [chatId, userId]);
+    return row ? { status: 403, code: 'ACCOUNT_DELETED', message: 'This account has been deleted.' } : null;
+}
+
+/**
+ * Which of candidateIds are deleted accounts: a deleted person can't be added to anything
+ */
+async function findDeletedAmong(candidateIds) {
+    const ids = [...new Set(candidateIds.map(Number))].filter(Number.isInteger);
+    if (ids.length === 0) return [];
+    const rows = await executeQuery(
+        `SELECT id FROM users WHERE deleted_at IS NOT NULL AND id IN (${ids.map(() => '?').join(', ')})`,
+        ids
+    );
+    return rows.map(row => Number(row.id));
+}
+
+/**
  * Which of candidateIds have blocked userId (they can't be added to groups by userId)
  */
 async function findBlockersAmong(userId, candidateIds) {
@@ -149,5 +177,7 @@ module.exports = {
     maskBlockerStatus,
     checkBlockBetween,
     checkDirectChatBlock,
+    checkDirectChatPartnerDeleted,
+    findDeletedAmong,
     findBlockersAmong
 };

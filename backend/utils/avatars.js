@@ -123,6 +123,7 @@ async function rotateUserAvatar(avatarUrl) {
 module.exports = {
     AVATAR_SUBDIR,
     saveUserAvatar,
+    storedAvatarPath,
     deleteUserAvatar,
     rotateUserAvatar,
     isSharpAvailable: () => !!loadSharp()

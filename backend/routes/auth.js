@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const twoFactorController = require('../controllers/twoFactorController');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const {
@@ -13,6 +14,12 @@ const {
     validateForgotPassword,
     validateResetPassword,
     validateChangePassword,
+    validateChangeEmail,
+    validateTwoFactorLogin,
+    validateTwoFactorConfirm,
+    validateTwoFactorSetup,
+    validateReauthentication,
+    validateSecurityActivityQuery,
     validateVerifyEmail,
     validateSessionIdParam,
     validateProfileUpdate,
@@ -69,6 +76,27 @@ const resendUserLimiter = rateLimit({
     keyGenerator: (req) => `user:${req.user.id}`
 });
 
+// Per IP. Each account also locks after a few wrong codes (TWO_FACTOR_MAX_ATTEMPTS), whatever the IP.
+const twoFactorLoginLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: 20,
+    message: 'Too many code attempts. Please try again in a few minutes.'
+});
+
+const twoFactorActionLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 15,
+    message: 'Too many attempts. Please try again in a few minutes.',
+    keyGenerator: (req) => `user:${req.user.id}`
+});
+
+const changeEmailLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    message: 'Too many email changes. Please try again later.',
+    keyGenerator: (req) => `user:${req.user.id}`
+});
+
 const sessionActionLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 30,
@@ -90,6 +118,7 @@ function requireRefreshHeader(req, res, next) {
 // Public routes
 router.post('/register', registerLimiter, validateRegistration, checkValidation, authController.register);
 router.post('/login', loginLimiter, validateLogin, checkValidation, authController.login);
+router.post('/login/2fa', twoFactorLoginLimiter, validateTwoFactorLogin, checkValidation, authController.verifyLoginCode);
 router.post('/refresh', refreshLimiter, requireRefreshHeader, authController.refresh);
 router.post('/forgot-password', passwordResetLimiter, validateForgotPassword, checkValidation, authController.forgotPassword);
 router.post('/reset-password', passwordResetLimiter, validateResetPassword, checkValidation, authController.resetPassword);
@@ -102,11 +131,22 @@ router.post('/logout', sessionActionLimiter, requireRefreshHeader, optionalAuth,
 router.get('/profile', authenticateToken, authController.getProfile);
 router.put('/profile', sessionActionLimiter, authenticateToken, validateProfileUpdate, checkValidation, authController.updateProfile);
 router.put('/password', changePasswordLimiter, authenticateToken, validateChangePassword, checkValidation, authController.changePassword);
+router.put('/email', authenticateToken, changeEmailLimiter, validateChangeEmail, checkValidation, authController.changeEmail);
 router.post('/resend-verification', resendIpLimiter, authenticateToken, resendUserLimiter, authController.resendVerification);
 
 // Signed-in devices
 router.get('/sessions', sessionActionLimiter, authenticateToken, authController.listSessions);
 router.post('/sessions/revoke-others', sessionActionLimiter, authenticateToken, authController.revokeOtherSessions);
 router.delete('/sessions/:sessionId', sessionActionLimiter, authenticateToken, validateSessionIdParam, checkValidation, authController.revokeSession);
+
+// Security activity (from the audit log)
+router.get('/security-activity', sessionActionLimiter, authenticateToken, validateSecurityActivityQuery, checkValidation, authController.getSecurityActivity);
+
+// Two-factor authentication
+router.get('/2fa', sessionActionLimiter, authenticateToken, twoFactorController.getStatus);
+router.post('/2fa/setup', authenticateToken, twoFactorActionLimiter, validateTwoFactorSetup, checkValidation, twoFactorController.beginSetup);
+router.post('/2fa/confirm', authenticateToken, twoFactorActionLimiter, validateTwoFactorConfirm, checkValidation, twoFactorController.confirmSetup);
+router.post('/2fa/disable', authenticateToken, twoFactorActionLimiter, validateReauthentication, checkValidation, twoFactorController.disable);
+router.post('/2fa/recovery-codes', authenticateToken, twoFactorActionLimiter, validateReauthentication, checkValidation, twoFactorController.regenerateRecoveryCodes);
 
 module.exports = router;

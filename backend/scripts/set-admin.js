@@ -34,6 +34,7 @@ async function main() {
     });
 
     console.log(`${user.username} ${revoke ? 'is no longer an admin' : 'is now an admin'}. They see the console link after reloading the app.`);
+    if (!revoke) console.log('The console also needs two-factor authentication: turn it on under Settings > Security.');
     return 0;
 }
 

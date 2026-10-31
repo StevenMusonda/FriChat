@@ -15,7 +15,7 @@ const authConfig = require('../config/auth');
 const REFRESH_TOKEN_BYTES = 32;
 const REFRESH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TOUCH_INTERVAL_MS = 60 * 1000;
-const REVOKED_REASONS = ['logout', 'user', 'password', 'reuse', 'admin', 'suspended'];
+const REVOKED_REASONS = ['logout', 'user', 'password', 'reuse', 'admin', 'suspended', '2fa', 'deletion'];
 
 const isPostgres = () => process.env.DB_TYPE === 'postgresql';
 
@@ -139,27 +139,30 @@ function verifyAccessToken(token) {
 }
 
 /**
- * The signed-in user for an access token's session, or null if the session was revoked or the
- * account is suspended. is_admin comes from here, on every request, never from the token.
+ * The signed-in user for an access token's session, or null if the session was revoked, the account
+ * is suspended or deleted, or the user has 2FA on and this session never passed it. Every REST request
+ * and socket handshake goes through here, so that last rule holds however a session came to exist.
+ * is_admin comes from here, on every request, never from the token.
  */
 async function findSessionUser(userId, sessionId) {
     return queryOne(`
-        SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at, u.is_admin
+        SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.status, u.email_verified_at, u.is_admin, u.totp_enabled_at
         FROM sessions s
         JOIN users u ON u.id = s.user_id
-        WHERE s.id = ? AND s.user_id = ? AND s.revoked_at IS NULL AND u.suspended_at IS NULL
+        WHERE s.id = ? AND s.user_id = ? AND s.revoked_at IS NULL AND u.suspended_at IS NULL AND u.deleted_at IS NULL
+        AND (u.totp_enabled_at IS NULL OR s.mfa_verified_at IS NOT NULL)
     `, [sessionId, userId]);
 }
 
 // --- refresh cookie ---
 
-function readRefreshCookie(req) {
+function readCookie(req, name) {
     const header = req.headers && req.headers.cookie;
     if (!header) return null;
     for (const part of header.split(';')) {
         const index = part.indexOf('=');
         if (index === -1) continue;
-        if (part.slice(0, index).trim() === authConfig.REFRESH_COOKIE_NAME) {
+        if (part.slice(0, index).trim() === name) {
             try {
                 return decodeURIComponent(part.slice(index + 1).trim());
             } catch (error) {
@@ -168,6 +171,10 @@ function readRefreshCookie(req) {
         }
     }
     return null;
+}
+
+function readRefreshCookie(req) {
+    return readCookie(req, authConfig.REFRESH_COOKIE_NAME);
 }
 
 function setRefreshCookie(res, token) {
@@ -182,13 +189,13 @@ function clearRefreshCookie(res) {
 // --- session lifecycle ---
 
 /**
- * New session at login/registration
+ * New session at login/registration. mfaVerified: this sign-in passed a second factor.
  * @returns {{ sessionId, refreshToken }}
  */
-async function createSession(userId, { userAgent, ip }) {
+async function createSession(userId, { userAgent, ip }, { mfaVerified = false } = {}) {
     const refreshToken = generateRefreshToken();
-    const sql = `INSERT INTO sessions (user_id, refresh_token_hash, user_agent, device_label, ip_address, expires_at)
-        VALUES (?, ?, ?, ?, ?, ${plusDaysSql()})`;
+    const sql = `INSERT INTO sessions (user_id, refresh_token_hash, user_agent, device_label, ip_address, expires_at, mfa_verified_at)
+        VALUES (?, ?, ?, ?, ?, ${plusDaysSql()}, ${mfaVerified ? 'CURRENT_TIMESTAMP' : 'NULL'})`;
     const params = [userId, hashToken(refreshToken), userAgent || null, describeDevice(userAgent), ip || null, authConfig.refreshTokenTtlDays()];
 
     let sessionId;
@@ -207,7 +214,7 @@ function isDuplicateKeyError(error) {
 
 /**
  * Exchange a refresh token for a new one.
- * @returns {{ sessionId, userId, refreshToken }
+ * @returns {{ sessionId, userId, refreshToken, mfaVerified }
  *   | { error: 'invalid' }   unknown, expired or revoked: sign in again
  *   | { error: 'race' }      rotated by a parallel request a moment ago: retry with the newer cookie
  *   | { error: 'reused', sessionId, userId }  an already-rotated token: the caller revokes the session}
@@ -217,7 +224,7 @@ async function rotateRefreshToken(token, { ip } = {}) {
     const hash = hashToken(token);
 
     const session = await queryOne(`
-        SELECT id, user_id, revoked_at,
+        SELECT id, user_id, revoked_at, mfa_verified_at,
             CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_expired
         FROM sessions
         WHERE refresh_token_hash = ?
@@ -245,7 +252,7 @@ async function rotateRefreshToken(token, { ip } = {}) {
         if (swapped !== 1) return { error: 'race' };
 
         lastTouched.set(Number(session.id), Date.now());
-        return { sessionId: Number(session.id), userId: Number(session.user_id), refreshToken: next };
+        return { sessionId: Number(session.id), userId: Number(session.user_id), refreshToken: next, mfaVerified: !!session.mfa_verified_at };
     }
 
     const used = await queryOne(`
@@ -271,6 +278,13 @@ async function findSessionByRefreshToken(token) {
         'SELECT id, user_id FROM sessions WHERE refresh_token_hash = ? AND revoked_at IS NULL',
         [hashToken(token)]
     );
+}
+
+/**
+ * This session has passed a second factor
+ */
+async function markMfaVerified(sessionId) {
+    await executeQuery('UPDATE sessions SET mfa_verified_at = CURRENT_TIMESTAMP WHERE id = ?', [sessionId]);
 }
 
 /**
@@ -385,12 +399,14 @@ module.exports = {
     signAccessToken,
     verifyAccessToken,
     findSessionUser,
+    readCookie,
     readRefreshCookie,
     setRefreshCookie,
     clearRefreshCookie,
     createSession,
     rotateRefreshToken,
     findSessionByRefreshToken,
+    markMfaVerified,
     disconnectSessions,
     revokeSession,
     revokeUserSessions,

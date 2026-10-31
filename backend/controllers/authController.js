@@ -13,6 +13,10 @@ const verification = require('../utils/emailVerification');
 const { safeAvatarUrl } = require('../utils/privacy');
 const { toBool } = require('../utils/messageQueries');
 const auditLog = require('../utils/auditLog');
+const twoFactor = require('../utils/twoFactor');
+const knownDevices = require('../utils/knownDevices');
+const accountDeletion = require('../utils/accountDeletion');
+const { notifySecurityEvent } = require('../utils/securityEmails');
 
 const RESET_TOKEN_TTL_MINUTES = 60;
 
@@ -35,17 +39,73 @@ function shapeUser(user) {
         fullName: user.full_name || null,
         avatarUrl: safeAvatarUrl(user.avatar_url),
         emailVerified: verification.isEmailVerified(user),
-        isAdmin: toBool(user.is_admin) // only decides whether the console link shows; admin routes check the database
+        isAdmin: toBool(user.is_admin), // only decides whether the console link shows; admin routes check the database
+        twoFactorEnabled: !!user.totp_enabled_at
     };
 }
 
 /**
- * Start a session for this device: refresh token in an HttpOnly cookie, access token in the body
+ * Start a session for this device: refresh token in an HttpOnly cookie, access token in the body.
+ * options.mfaVerified: this sign-in passed a second factor.
  */
-async function startSession(req, res, user) {
-    const { sessionId, refreshToken } = await sessions.createSession(user.id, sessions.requestMeta(req));
+async function startSession(req, res, user, options) {
+    const { sessionId, refreshToken } = await sessions.createSession(user.id, sessions.requestMeta(req), options);
     sessions.setRefreshCookie(res, refreshToken);
     return sessions.signAccessToken(user, sessionId);
+}
+
+/**
+ * The last step of every sign-in, after the password and (when it's on) the second factor. Signing
+ * in cancels a pending account deletion.
+ * @param {Object} secondFactor - what verifySecondFactor returned, null without 2FA
+ */
+async function completeLogin(req, res, user, secondFactor = null) {
+    let deletionCancelled = false;
+    if (user.deletion_due_at) {
+        if (!(await accountDeletion.cancelDeletion(user))) {
+            return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+        deletionCancelled = true;
+        await auditLog.recordRequest(req, 'account_deletion_cancelled', { actorId: user.id, targetType: 'user', targetId: user.id });
+    }
+
+    // Update user status to online
+    await executeQuery(
+        'UPDATE users SET status = ?, last_seen = CURRENT_TIMESTAMP WHERE id = ?',
+        ['online', user.id]
+    );
+
+    const { accessToken, expiresIn } = await startSession(req, res, user, { mfaVerified: !!secondFactor });
+
+    const meta = sessions.requestMeta(req);
+    const device = sessions.describeDevice(meta.userAgent);
+    await auditLog.recordRequest(req, 'login', { actorId: user.id, targetType: 'user', targetId: user.id, metadata: { device } });
+
+    if (secondFactor && secondFactor.method === 'recovery') {
+        await auditLog.recordRequest(req, '2fa_recovery_used', { actorId: user.id, targetType: 'user', targetId: user.id, metadata: { device } });
+        notifySecurityEvent(user, 'recovery_used', { left: secondFactor.recoveryCodesLeft });
+    }
+
+    // The session has started: not recognising a device must not turn that into a failed sign-in
+    try {
+        if ((await knownDevices.recognize(req, res, user)).isNew) {
+            notifySecurityEvent(user, 'new_device', { device, ip: meta.ip });
+        }
+    } catch (error) {
+        console.error('Recognise device error:', error.message);
+    }
+
+    res.json({
+        success: true,
+        message: 'Login successful',
+        data: {
+            ...shapeUser(user),
+            accessToken,
+            expiresIn,
+            ...(deletionCancelled && { deletionCancelled: true }),
+            ...(secondFactor && secondFactor.method === 'recovery' && { recoveryCodesLeft: secondFactor.recoveryCodesLeft })
+        }
+    });
 }
 
 /**
@@ -94,6 +154,7 @@ async function register(req, res) {
         await verification.issueVerification(user);
 
         const { accessToken, expiresIn } = await startSession(req, res, user);
+        await knownDevices.adopt(req, res, user);
 
         res.status(201).json({
             success: true,
@@ -123,7 +184,7 @@ async function login(req, res) {
             [username, username]
         );
 
-        if (!user) {
+        if (!user || user.deleted_at) {
             await auditLog.recordRequest(req, 'login_failed', { metadata: { unknownAccount: true } });
             return res.status(401).json({
                 success: false,
@@ -152,20 +213,16 @@ async function login(req, res) {
             });
         }
 
-        // Update user status to online
-        await executeQuery(
-            'UPDATE users SET status = ?, last_seen = CURRENT_TIMESTAMP WHERE id = ?',
-            ['online', user.id]
-        );
+        // Nothing is started yet: no session, no cookie, and a pending deletion stays pending
+        if (user.totp_enabled_at) {
+            return res.json({
+                success: true,
+                message: 'Enter the code from your authenticator app',
+                data: { twoFactorRequired: true, ...twoFactor.signLoginChallenge(user) }
+            });
+        }
 
-        const { accessToken, expiresIn } = await startSession(req, res, user);
-        await auditLog.recordRequest(req, 'login', { actorId: user.id, targetType: 'user', targetId: user.id });
-
-        res.json({
-            success: true,
-            message: 'Login successful',
-            data: { ...shapeUser(user), accessToken, expiresIn }
-        });
+        await completeLogin(req, res, user);
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({
@@ -173,6 +230,49 @@ async function login(req, res) {
             message: 'Login failed',
             error: error.message
         });
+    }
+}
+
+/**
+ * POST /api/auth/login/2fa Body: { challengeToken, code }: the second step of a sign-in
+ * The account is read again here, so a suspension or password change since step one counts.
+ */
+async function verifyLoginCode(req, res) {
+    const expired = () => res.status(401).json({
+        success: false,
+        message: 'That took too long. Please sign in again.',
+        code: 'CHALLENGE_EXPIRED'
+    });
+
+    try {
+        const challenge = twoFactor.verifyLoginChallenge(req.body.challengeToken);
+        if (!challenge) return expired();
+
+        const user = await queryOne('SELECT * FROM users WHERE id = ?', [challenge.userId]);
+        if (!user || user.deleted_at || !user.totp_enabled_at || twoFactor.passwordFingerprint(user.password_hash) !== challenge.pw) {
+            return expired();
+        }
+        if (user.suspended_at) {
+            await auditLog.recordRequest(req, 'login_blocked_suspended', { actorId: user.id, targetType: 'user', targetId: user.id });
+            return res.status(403).json({ success: false, message: 'This account has been suspended.', code: 'ACCOUNT_SUSPENDED' });
+        }
+
+        const result = await twoFactor.verifySecondFactor(user.id, req.body.code, req.ip);
+        if (result.error) {
+            const device = sessions.describeDevice(sessions.requestMeta(req).userAgent);
+            await auditLog.recordRequest(req, '2fa_login_failed', { targetType: 'user', targetId: user.id, metadata: { device } });
+            if (result.error.retryAfter) res.set('Retry-After', String(result.error.retryAfter));
+            return res.status(result.error.code === 'TWO_FACTOR_LOCKED' ? 429 : 401).json({
+                success: false,
+                message: result.error.message,
+                code: result.error.code
+            });
+        }
+
+        await completeLogin(req, res, user, result);
+    } catch (error) {
+        console.error('Two-factor login error:', error);
+        res.status(500).json({ success: false, message: 'Login failed' });
     }
 }
 
@@ -214,16 +314,24 @@ async function refresh(req, res) {
         }
 
         const user = await queryOne(
-            'SELECT id, username, email, full_name, avatar_url, email_verified_at, is_admin, suspended_at FROM users WHERE id = ?',
+            'SELECT id, username, email, full_name, avatar_url, email_verified_at, is_admin, suspended_at, deleted_at, totp_enabled_at FROM users WHERE id = ?',
             [result.userId]
         );
-        if (!user || user.suspended_at) {
-            await sessions.revokeSession(req.io, result.sessionId, user ? 'suspended' : 'user');
+        if (!user || user.suspended_at || user.deleted_at) {
+            await sessions.revokeSession(req.io, result.sessionId, user && user.suspended_at ? 'suspended' : 'user');
             sessions.clearRefreshCookie(res);
             return res.status(401).json({ success: false, message: 'User not found', code: 'SESSION_EXPIRED' });
         }
 
+        // A session that never passed the second factor can't be renewed into one that looks like it did
+        if (user.totp_enabled_at && !result.mfaVerified) {
+            await sessions.revokeSession(req.io, result.sessionId, '2fa');
+            sessions.clearRefreshCookie(res);
+            return res.status(401).json({ success: false, message: 'Please sign in again.', code: 'SESSION_EXPIRED' });
+        }
+
         sessions.setRefreshCookie(res, result.refreshToken);
+        await knownDevices.adopt(req, res, user);
         const { accessToken, expiresIn } = sessions.signAccessToken(user, result.sessionId);
 
         res.json({
@@ -298,7 +406,8 @@ async function getProfile(req, res) {
                 avatarUrl: safeAvatarUrl(user.avatar_url),
                 status: user.status,
                 emailVerified: verification.isEmailVerified(user),
-                isAdmin: toBool(user.is_admin)
+                isAdmin: toBool(user.is_admin),
+                twoFactorEnabled: !!user.totp_enabled_at
             }
         });
     } catch (error) {
@@ -368,6 +477,7 @@ async function changePassword(req, res) {
 
         const revoked = await sessions.revokeUserSessions(req.io, userId, 'password', req.sessionId);
         await auditLog.recordRequest(req, 'password_changed', { targetType: 'user', targetId: userId, metadata: { revokedSessions: revoked } });
+        notifySecurityEvent(req.user, 'password_changed');
 
         res.json({
             success: true,
@@ -379,6 +489,72 @@ async function changePassword(req, res) {
     } catch (error) {
         console.error('Change password error:', error);
         res.status(500).json({ success: false, message: 'Failed to change password' });
+    }
+}
+
+/**
+ * PUT /api/auth/email Body: { password, code?, newEmail } (code when 2FA is on)
+ * The new address starts unverified and gets a link; the old one is told about the change.
+ */
+async function changeEmail(req, res) {
+    try {
+        const userId = req.user.id;
+        const { newEmail } = req.body;
+
+        const check = await twoFactor.reauthenticate(userId, req.body, req.ip);
+        if (check.error) {
+            if (check.error.retryAfter) res.set('Retry-After', String(check.error.retryAfter));
+            return res.status(check.error.status).json({ success: false, message: check.error.message, code: check.error.code });
+        }
+
+        if (newEmail === req.user.email) {
+            return res.status(400).json({ success: false, message: 'That is already your email address', code: 'SAME_EMAIL' });
+        }
+        const taken = await queryOne('SELECT id FROM users WHERE email = ?', [newEmail]);
+        if (taken) {
+            return res.status(400).json({ success: false, message: 'That email address can\'t be used', code: 'EMAIL_UNAVAILABLE' });
+        }
+
+        try {
+            await executeQuery(
+                'UPDATE users SET email = ?, email_verified_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [newEmail, userId]
+            );
+        } catch (error) {
+            // Someone took the address since the check above
+            if (error.code === 'ER_DUP_ENTRY' || error.code === '23505') {
+                return res.status(400).json({ success: false, message: 'That email address can\'t be used', code: 'EMAIL_UNAVAILABLE' });
+            }
+            throw error;
+        }
+
+        // A reset link sent to the old address must stop working
+        await executeQuery('DELETE FROM password_resets WHERE user_id = ?', [userId]);
+        await verification.issueVerification({ ...req.user, email: newEmail });
+
+        await auditLog.recordRequest(req, 'email_changed', { targetType: 'user', targetId: userId });
+        notifySecurityEvent(req.user, 'email_changed', { newEmail });
+
+        res.json({
+            success: true,
+            message: `Your email is now ${newEmail}. Check your inbox to verify it.`,
+            data: { email: newEmail, emailVerified: false }
+        });
+    } catch (error) {
+        console.error('Change email error:', error);
+        res.status(500).json({ success: false, message: 'Failed to change your email address' });
+    }
+}
+
+/**
+ * GET /api/auth/security-activity?before= - sign-ins and security changes on this account
+ */
+async function getSecurityActivity(req, res) {
+    try {
+        res.json({ success: true, data: await auditLog.forUser(req.user.id, { before: req.query.before }) });
+    } catch (error) {
+        console.error('Security activity error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load your security activity' });
     }
 }
 
@@ -397,11 +573,11 @@ async function forgotPassword(req, res) {
         const { email } = req.body;
 
         const user = await queryOne(
-            'SELECT id, username, email FROM users WHERE email = ?',
+            'SELECT id, username, email, deleted_at FROM users WHERE email = ?',
             [email]
         );
 
-        if (!user) {
+        if (!user || user.deleted_at) {
             return res.json(genericResponse);
         }
 
@@ -453,6 +629,8 @@ async function resetPassword(req, res) {
             });
         }
 
+        const owner = await queryOne('SELECT email, username FROM users WHERE id = ?', [reset.user_id]);
+
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
 
@@ -467,6 +645,7 @@ async function resetPassword(req, res) {
         // Whoever knew the old password is signed out everywhere
         await sessions.revokeUserSessions(req.io, reset.user_id, 'password');
         await auditLog.recordRequest(req, 'password_reset', { actorId: reset.user_id, targetType: 'user', targetId: reset.user_id });
+        notifySecurityEvent(owner, 'password_reset');
 
         res.json({
             success: true,
@@ -585,11 +764,14 @@ async function revokeOtherSessions(req, res) {
 module.exports = {
     register,
     login,
+    verifyLoginCode,
     refresh,
     logout,
     getProfile,
     updateProfile,
     changePassword,
+    changeEmail,
+    getSecurityActivity,
     forgotPassword,
     resetPassword,
     verifyEmail,

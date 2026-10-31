@@ -26,12 +26,32 @@ function clearAppModules() {
     }
 }
 
-function setupFakeDb(dbType, handler) {
+/**
+ * Phase 14 bookkeeping on paths older tests already cover (sign-ins, sending). Their worlds don't model
+ * it, and every answer here is "nothing to do", so those tests stay about what they were written for.
+ * @returns {Array|Object|undefined} the database's answer, undefined when this isn't such a query
+ */
+function bookkeepingAnswer(dbType, rawSql) {
+    const sql = rawSql.replace(/\$\d+/g, '?');
+    const noRows = dbType === 'postgresql' ? [] : { affectedRows: 0, insertId: 1 };
+    if (/^SELECT u\.id FROM group_members gm JOIN users u .* u\.deleted_at IS NOT NULL LIMIT 1$/.test(sql)) return [];
+    if (/^SELECT id FROM users WHERE deleted_at IS NOT NULL AND id IN/.test(sql)) return [];
+    if (/^SELECT COUNT\(\*\) AS total FROM known_devices/.test(sql)) return [{ total: 0 }];
+    if (/^(INSERT INTO|UPDATE) known_devices/.test(sql)) return noRows;
+    if (/^SELECT email, username FROM users WHERE id = \?$/.test(sql)) return [];
+    return undefined;
+}
+
+/**
+ * @param {Object} options - { realBookkeeping: true } sends those queries to handler too (phase 14's own tests)
+ */
+function setupFakeDb(dbType, handler, { realBookkeeping = false } = {}) {
     const calls = [];
     const record = (sql, params) => {
         const normalized = sql.replace(/\s+/g, ' ').trim();
         calls.push({ sql: normalized, params });
-        return handler(normalized, params || []);
+        const answer = realBookkeeping ? undefined : bookkeepingAnswer(dbType, normalized);
+        return answer !== undefined ? answer : handler(normalized, params || []);
     };
 
     process.env.DB_TYPE = dbType;

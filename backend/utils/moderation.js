@@ -36,7 +36,7 @@ function shapeUser(row) {
  * Newest accounts first. q matches username, email or name; status 'suspended' | 'active'.
  */
 async function searchUsers({ q, status, before } = {}) {
-    const where = [];
+    const where = ['u.deleted_at IS NULL'];
     const params = [];
     if (q) {
         const like = escapeLike(q);
@@ -55,7 +55,7 @@ async function searchUsers({ q, status, before } = {}) {
                u.status, u.last_seen, u.created_at,
                (SELECT COUNT(*) FROM reports r WHERE r.reported_user_id = u.id AND r.status = 'open') AS open_reports
         FROM users u
-        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+        WHERE ${where.join(' AND ')}
         ORDER BY u.id DESC
         LIMIT ${ADMIN_PAGE_SIZE + 1}
     `, params);

@@ -65,6 +65,16 @@ CREATE TABLE users (
     is_admin BOOLEAN NOT NULL DEFAULT FALSE, -- set by scripts/set-admin.js or the database, never the API
     suspended_at TIMESTAMP NULL DEFAULT NULL, -- NULL = not suspended
     suspended_reason VARCHAR(255) NULL,
+    totp_secret_enc VARCHAR(255) NULL, -- encrypted with TOTP_ENCRYPTION_KEY
+    totp_pending_enc VARCHAR(255) NULL, -- set up, not confirmed yet
+    totp_pending_at TIMESTAMP NULL DEFAULT NULL,
+    totp_enabled_at TIMESTAMP NULL DEFAULT NULL, -- NULL = 2FA off
+    totp_last_step BIGINT NULL, -- last time step used: a code works once
+    totp_failed_attempts INT NOT NULL DEFAULT 0,
+    totp_locked_until TIMESTAMP NULL DEFAULT NULL,
+    deletion_requested_at TIMESTAMP NULL DEFAULT NULL,
+    deletion_due_at TIMESTAMP NULL DEFAULT NULL, -- end of the grace period
+    deleted_at TIMESTAMP NULL DEFAULT NULL, -- the row is an anonymous tombstone
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_username (username),
@@ -354,7 +364,8 @@ CREATE TABLE sessions (
     last_active_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL, -- refresh token lifetime, slides forward on every rotation
     revoked_at DATETIME NULL,
-    revoked_reason VARCHAR(20) NULL, -- 'logout' | 'user' | 'password' | 'reuse'
+    revoked_reason VARCHAR(20) NULL, -- 'logout' | 'user' | 'password' | 'reuse' | 'admin' | 'suspended' | '2fa' | 'deletion'
+    mfa_verified_at TIMESTAMP NULL DEFAULT NULL, -- NULL = never passed a second factor
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY unique_session_refresh_token (refresh_token_hash),
     INDEX idx_sessions_user_id (user_id)
@@ -712,6 +723,47 @@ CREATE TABLE quarantined_files (
     uploaded_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Single-use recovery codes (SHA-256 hashes only)
+CREATE TABLE recovery_codes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    used_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_recovery_code (user_id, code_hash)
+);
+
+-- Browsers this user has signed in from (a random cookie, hashed with the user id)
+CREATE TABLE known_devices (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    device_hash CHAR(64) NOT NULL,
+    label VARCHAR(100) NULL,
+    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_known_device (user_id, device_hash),
+    INDEX idx_known_devices_last_seen (last_seen_at)
+);
+
+-- Personal data exports. The zip lives in a private folder with no URL.
+CREATE TABLE data_exports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | running | ready | failed | expired
+    file_name VARCHAR(100) NULL,
+    file_size BIGINT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP NULL DEFAULT NULL,
+    finished_at TIMESTAMP NULL DEFAULT NULL,
+    expires_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_data_exports_user (user_id, id),
+    INDEX idx_data_exports_status (status, id)
 );
 
 -- Create a view for easy message retrieval with user info

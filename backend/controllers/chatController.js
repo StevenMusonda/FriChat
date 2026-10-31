@@ -18,7 +18,7 @@ const { getGroupDetailsForMember } = require('./groupController');
 const { toBool } = require('../utils/messageQueries');
 const auditLog = require('../utils/auditLog');
 const { checkUnverifiedContact } = require('../utils/emailVerification');
-const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong } = require('../utils/blocks');
+const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong, findDeletedAmong } = require('../utils/blocks');
 const privacy = require('../utils/privacy');
 const messageRequests = require('../utils/messageRequests');
 const disappearing = require('../utils/disappearing');
@@ -395,6 +395,10 @@ async function createChat(req, res) {
             if (privacyError) return sendError(res, privacyError);
         }
 
+        if ((await findDeletedAmong(participants)).length > 0) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
         // Someone the other person shares no chat with lands in their Requests
         const isMessageRequest = chatType === 'direct' && !(await privacy.isContact(userId, participants[0]));
 
@@ -493,6 +497,10 @@ async function addMember(req, res) {
                 message: 'This user is banned from the group. Unban them first.',
                 code: 'BANNED'
             });
+        }
+
+        if ((await findDeletedAmong([newUserId])).length > 0) {
+            return res.status(404).json({ success: false, message: 'User not found' });
         }
 
         // Someone who blocked this admin can't be added by them
@@ -631,7 +639,7 @@ async function searchUsers(req, res) {
             SELECT id, username, full_name, avatar_url, status
             FROM users
             WHERE (username LIKE ? OR full_name LIKE ?)
-            AND id != ?
+            AND id != ? AND deleted_at IS NULL
             LIMIT 20
         `, [`%${query}%`, `%${query}%`, userId]);
 

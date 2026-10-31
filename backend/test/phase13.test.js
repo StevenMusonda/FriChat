@@ -34,7 +34,7 @@ function createWorld(dbType) {
             [ALICE]: { id: ALICE, username: 'alice', email: 'a@x.io', is_admin: pg ? false : 0, suspended_at: null },
             [BOB]: { id: BOB, username: 'bob', email: 'b@x.io', is_admin: pg ? false : 0, suspended_at: null },
             [EVE]: { id: EVE, username: 'eve', email: 'e@x.io', is_admin: pg ? false : 0, suspended_at: null },
-            [ADMIN]: { id: ADMIN, username: 'root', email: 'r@x.io', is_admin: pg ? true : 1, suspended_at: null }
+            [ADMIN]: { id: ADMIN, username: 'root', email: 'r@x.io', is_admin: pg ? true : 1, suspended_at: null, totp_enabled_at: new Date() }
         },
         members: { [CHAT]: new Set([ALICE, BOB]) },
         messages: [],

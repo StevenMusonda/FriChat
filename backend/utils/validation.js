@@ -695,6 +695,77 @@ const validateSessionIdParam = [
         .toInt()
 ];
 
+// The password checked again before a sensitive action; bcrypt compares bytes, so it's left as typed
+const passwordConfirmationRule = body('password')
+    .isString()
+    .notEmpty()
+    .isLength({ max: 200 })
+    .withMessage('Enter your password');
+
+// A 6-digit code or a recovery code; spaces and dashes are fine
+const twoFactorCodeRule = () => body('code')
+    .isString()
+    .trim()
+    .isLength({ min: 6, max: 32 })
+    .withMessage('Enter the code from your authenticator app, or a recovery code');
+
+/**
+ * Validation rules for the second step of a sign-in
+ */
+const validateTwoFactorLogin = [
+    body('challengeToken')
+        .isString()
+        .isLength({ min: 1, max: 1000 })
+        .withMessage('Please sign in again'),
+    twoFactorCodeRule()
+];
+
+const validateTwoFactorSetup = [passwordConfirmationRule];
+
+const validateTwoFactorConfirm = [twoFactorCodeRule()];
+
+/**
+ * For actions that need the password, and a code when 2FA is on (the handler decides that)
+ */
+const validateReauthentication = [
+    passwordConfirmationRule,
+    twoFactorCodeRule().optional({ values: 'falsy' })
+];
+
+const validateChangeEmail = [
+    ...validateReauthentication,
+    body('newEmail')
+        .trim()
+        .isEmail()
+        .withMessage('Enter a valid email address')
+        .isLength({ max: 100 })
+        .withMessage('That email address is too long')
+        .normalizeEmail()
+];
+
+const validateSecurityActivityQuery = [
+    query('before')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Invalid cursor')
+        .toInt()
+];
+
+const validateExportIdParam = [
+    param('exportId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid export ID')
+        .toInt()
+];
+
+const validateExportDownload = [
+    ...validateExportIdParam,
+    query('token')
+        .isString()
+        .isLength({ min: 1, max: 1000 })
+        .withMessage('This link has expired')
+];
+
 /**
  * Validation rules for blocking a user
  */
@@ -1442,6 +1513,14 @@ module.exports = {
     validateChangePassword,
     validateVerifyEmail,
     validateSessionIdParam,
+    validateTwoFactorLogin,
+    validateTwoFactorSetup,
+    validateTwoFactorConfirm,
+    validateReauthentication,
+    validateChangeEmail,
+    validateSecurityActivityQuery,
+    validateExportIdParam,
+    validateExportDownload,
     validateBlockUser,
     validateUserIdParam,
     validateReport,

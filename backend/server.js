@@ -26,6 +26,7 @@ const eventRoutes = require('./routes/events');
 const listRoutes = require('./routes/lists');
 const reportRoutes = require('./routes/reports');
 const adminRoutes = require('./routes/admin');
+const accountRoutes = require('./routes/account');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -121,6 +122,7 @@ app.use('/api/events', eventRoutes);
 app.use('/api/lists', listRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/account', accountRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

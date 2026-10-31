@@ -2112,6 +2112,136 @@ Use accounts A and B in a group, C for admin, and D, a brand-new account sharing
 - **Images are re-encoded in memory**, up to 100 megapixels each, before the chat membership check (uploads stay limited to 30 a minute per IP).
 - **Evidence and quarantine files live on local disk.** On a host with an ephemeral disk they need a persistent volume, like `uploads/`.
 
+## Phase 14: Account security and data rights
+
+Two-factor sign-in, security emails and an activity list, a personal data export, and account deletion with a grace period.
+
+### What it does
+
+- **Two-factor authentication.** Settings → Security → **Set up**. Enter your password, scan the QR code (or type the key), and confirm with a first code. You get 10 single-use recovery codes, shown once. Every other device is signed out, because none of them has passed the second factor.
+- **Signing in.** After the right password, the app asks for a code. Until then there's no session and no cookie. Recovery codes work in the same box.
+- **No way around it.** Sessions record whether they passed a second factor (`sessions.mfa_verified_at`). The check runs on every REST request, every socket handshake and every token refresh, so a session without it is refused however it was created. A password reset doesn't sign anyone in or remove 2FA.
+- **Limits on guessing.** 5 wrong codes in a row lock the second factor for 15 minutes. During a lock a correct code fails too. The count is kept on the account, so a restart, a new sign-in or a different IP doesn't reset it, and wrong codes in settings count as well. Each code works once.
+- **Sensitive changes.** Turning 2FA off, new recovery codes, changing your email and deleting your account need your password and a current code. A recovery code counts as a code.
+- **Admins need 2FA.** Without it, `/api/admin` answers 403 and the console says why.
+- **Security emails.** Sent for a sign-in from a new device, a password change or reset, an email change (to the old address), 2FA on or off, new recovery codes, a recovery code used, and each stage of a deletion. A device is recognised by a random cookie, not a fingerprint, so clearing cookies counts as a new device. An account's first device gets no email, and browsers already signed in when this ships are recorded on their next refresh.
+- **Change email.** Settings → Profile. There was no way to change an email before, so this phase adds one. The new address starts unverified and gets a link.
+- **Security activity.** Settings → Security lists sign-ins, failed attempts and security changes from the audit log, with device and IP. It never shows who acted, so admins stay anonymous.
+- **Data export.** Settings → Security → **Request my data**. A background job builds a zip with `data.json` and your uploads. You get an email, then download it from Settings for 72 hours. You can ask once every 24 hours.
+- **What's in the export.** Your profile, settings, chats (with members' names only), your messages, reactions, file details, polls, votes, events, RSVPs, list items, scheduled messages, reminders, blocked users (names), devices, warnings and security activity. It has no other person's messages, emails, photos or last-seen times.
+- **The email has no download link.** It only says the export is ready. Downloading takes a signed-in session, which mints a 5-minute link, so someone reading your mailbox can't get your data without passing 2FA.
+- **Delete account.** Settings → Security. Confirm with your password and a code. You're signed out everywhere, your push subscriptions are removed and pending scheduled messages are cancelled. Signing in within 14 days (with the second factor) cancels the deletion. Cancelled scheduled messages don't come back.
+- **After 14 days.** A job removes your profile, photo, uploads, reactions, votes, memberships, sessions, push subscriptions and exports. Your user row stays as an anonymous tombstone, because messages need a sender. Your messages stay in other people's chats under "Deleted user".
+- **Uploads go for everyone.** A message carrying your file is deleted for everyone, including copies other people forwarded. Text of messages you had deleted for everyone is erased; until now it was only hidden.
+- **Groups and chats.** You leave every group, and admin passes on as usual. A group left empty is deleted. Direct chats stay for the other person and stop taking new messages.
+
+### Setup
+
+**Run the migration before you start the new server.** Every signed-in request reads the new columns, so without it all signed-in requests fail.
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_account_security.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_account_security_postgresql.sql
+```
+
+Install the new packages and create the encryption key:
+
+```bash
+cd backend
+npm install
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Put the key in `backend/.env` as `TOTP_ENCRYPTION_KEY`.
+
+**Back up `TOTP_ENCRYPTION_KEY` separately from the database.** It encrypts every 2FA secret. Without it nobody can sign in with an authenticator app. Recovery codes still work, because they aren't encrypted with it, and after signing in with one a user can turn 2FA off and set it up again. Changing the key has the same effect. Without a key, setup answers 503 and sign-in for 2FA accounts fails with an error. It never skips the check.
+
+**Admins:** turn on 2FA under Settings → Security **before** you deploy to anyone who relies on the console. The console is closed to an admin without it.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TOTP_ENCRYPTION_KEY` | none, required for 2FA | 32 bytes, base64 or 64 hex characters |
+| `TOTP_ISSUER` | `FriChat` | Name shown in authenticator apps |
+| `TWO_FACTOR_MAX_ATTEMPTS` | `5` | Wrong codes in a row before a lock (3-20) |
+| `TWO_FACTOR_LOCK_MINUTES` | `15` | Length of the lock |
+| `DATA_EXPORT_PATH` | `./private/exports` | Private folder for export zips. Must be outside `UPLOAD_PATH` |
+| `DATA_EXPORT_TTL_HOURS` | `72` | How long an export can be downloaded |
+| `DATA_EXPORT_COOLDOWN_HOURS` | `24` | Time between exports. 0 switches it off |
+| `ACCOUNT_DELETION_GRACE_DAYS` | `14` | Grace period. The texts in the app say 14, so change them too |
+
+Someone who lost both their phone and their recovery codes can't get in by themselves. Check who is asking, then on the server:
+
+```bash
+npm run 2fa:reset -- username
+```
+
+This turns 2FA off, signs out every device, writes an audit entry and emails them.
+
+### API
+
+| Method and path | Auth | Body or query | Limit |
+|---|---|---|---|
+| `POST /api/auth/login` | None | `{ username, password }`. With 2FA on, answers `{ twoFactorRequired, challengeToken, expiresIn }` and no session | 20 / 15 min per IP |
+| `POST /api/auth/login/2fa` | Challenge token | `{ challengeToken, code }` | 20 / 5 min per IP, plus the account lock |
+| `GET /api/auth/2fa` | Bearer | | 30 / min per IP |
+| `POST /api/auth/2fa/setup` | Bearer | `{ password }` | 15 / 15 min per user |
+| `POST /api/auth/2fa/confirm` | Bearer | `{ code }` | 15 / 15 min per user |
+| `POST /api/auth/2fa/disable` | Bearer | `{ password, code }` | 15 / 15 min per user |
+| `POST /api/auth/2fa/recovery-codes` | Bearer | `{ password, code }` | 15 / 15 min per user |
+| `PUT /api/auth/email` | Bearer | `{ password, code?, newEmail }` | 5 / hour per user |
+| `GET /api/auth/security-activity` | Bearer | `?before=` | 30 / min per IP |
+| `POST /api/account/exports` | Bearer | | 5 / hour per user, and one per cooldown |
+| `GET /api/account/exports` | Bearer | | 30 / min per user |
+| `POST /api/account/exports/:exportId/link` | Bearer (owner) | | 30 / min per user |
+| `GET /api/account/exports/:exportId/download` | Link token | `?token=` | 30 / 15 min per IP |
+| `POST /api/account/delete` | Bearer | `{ password, code? }` | 5 / 15 min per user |
+
+Error codes: `INVALID_2FA_CODE`, `TWO_FACTOR_LOCKED` (429, with `Retry-After`), `TWO_FACTOR_CODE_REQUIRED`, `TWO_FACTOR_REQUIRED` (admin console), `CHALLENGE_EXPIRED`, `WRONG_PASSWORD`, `EXPORT_IN_PROGRESS`, `EXPORT_COOLDOWN`, `ACCOUNT_DELETED`.
+
+### Socket events
+
+No new events. `session_revoked` has two new reasons: `2fa` and `deletion`. The socket handshake refuses a session that hasn't passed 2FA.
+
+### Manual test checklist
+
+1. Settings → Security → **Set up**. Check the QR code scans and the manual key works, and that a wrong code is refused.
+2. Save the recovery codes, then close them. They can't be shown again. A second signed-in browser is signed out.
+3. Sign out and in. The app asks for a code. Reloading at that point leaves you signed out.
+4. Enter 5 wrong codes: you're locked, and a right code fails too.
+5. Sign in with a recovery code. It says how many are left, and the same code fails next time.
+6. Sign in from a private window: you get a new-device email. Sign in again from the same browser: no email.
+7. Change your password, your email and 2FA: each sends an email, and each appears in Security activity.
+8. As an admin without 2FA, open `admin.html`: it tells you to turn it on. Turn it on and it opens.
+9. Request an export, wait a minute, and download it from Settings. `data.json` should parse, and uploads should be in the zip. Asking again is refused.
+10. Delete your account: you land on the sign-in page with a notice. Enter your password only and stop at the code step, and nothing is cancelled. Finish signing in and the deletion is cancelled.
+11. Delete it again. In the database, set `deletion_due_at` to the past. Within a minute the name becomes "Deleted user" for the other person, the files are gone from `uploads/`, and signing in fails.
+
+### Tests
+
+`npm test` covers both drivers: `test/phase14.test.js` and `test/phase14Frontend.test.js`.
+
+`test/phase14.integration.test.js` runs on a real PostgreSQL database. **It deletes every user, so use an empty test database:**
+
+```bash
+TEST_PG_DATABASE=frichat_test npm test
+```
+
+After a purge it searches every text column of every table for the person's details. Another test reads the schema and fails if a new table referencing `users` isn't handled by deletion.
+
+### Known limitations
+
+- **Deletion keeps two things, on purpose.** `audit_log` keeps the numeric user id and IP addresses, because it's append-only. `report_evidence` keeps the message text and any copied attachment, because phase 13 made evidence outlive accounts; the sender's name and id are removed. Check both against your legal obligations and set a retention policy.
+- **Message text stays.** Messages stay in other people's chats, and they can contain personal details. So can other people's messages that @mention the person.
+- **The export doesn't include** other people's messages in shared chats, or messages that have already expired.
+- **Exports aren't encrypted at rest** and aren't limited in size. An account with many large uploads needs that much free disk for up to 72 hours. On a host with an ephemeral disk they need a persistent volume, and a restart could lose a ready export.
+- **Lost key:** there's no key rotation. Changing `TOTP_ENCRYPTION_KEY` means every user re-enrols.
+- **A device cookie isn't proof of anything.** It only decides whether to send an email.
+- **Rate limits are per process**, as in earlier phases. The 2FA lock and export cooldown are in the database and hold across instances.
+- **`reset-2fa` can't disconnect live sockets** from its separate process. Those sockets stay open until they next reconnect or their tab reloads, and any REST call is refused at once.
+- **Tested on real PostgreSQL only.** On MySQL the same code ran through the fake driver, with checks on its SQL dialect, but `add_account_security.sql` has not been run on a real MySQL server.
+
 ---
 
 **Enjoy the new features! 🎉**

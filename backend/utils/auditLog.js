@@ -11,7 +11,8 @@
  */
 
 const { executeQuery, insertAndGetId } = require('../config/database');
-const { AUDIT_EVENTS, ADMIN_PAGE_SIZE } = require('../config/moderation');
+const { AUDIT_EVENTS, SECURITY_ACTIVITY_EVENTS, ADMIN_PAGE_SIZE } = require('../config/moderation');
+const { SECURITY_ACTIVITY_PAGE_SIZE } = require('../config/accountSecurity');
 const { normalizeIp } = require('./sessions');
 
 const MAX_METADATA_LENGTH = 2000;
@@ -116,4 +117,39 @@ async function search({ event, actorId, targetType, targetId, ip, q, from, to, b
     };
 }
 
-module.exports = { record, recordRequest, search };
+/**
+ * Settings > Security: what happened to this user's own account, newest first. Only events from the
+ * fixed list, and only the time, the IP and the device: never who acted, so an admin stays anonymous.
+ */
+async function forUser(userId, { before } = {}) {
+    const params = [userId, userId, ...SECURITY_ACTIVITY_EVENTS];
+    const placeholders = SECURITY_ACTIVITY_EVENTS.map(() => '?').join(', ');
+    let cursor = '';
+    if (before) {
+        cursor = 'AND id < ?';
+        params.push(before);
+    }
+
+    const rows = await executeQuery(`
+        SELECT id, event, ip_address, metadata, created_at
+        FROM audit_log
+        WHERE (actor_id = ? OR (target_type = 'user' AND target_id = ?))
+        AND event IN (${placeholders}) ${cursor}
+        ORDER BY id DESC
+        LIMIT ${SECURITY_ACTIVITY_PAGE_SIZE + 1}
+    `, params);
+
+    const page = rows.slice(0, SECURITY_ACTIVITY_PAGE_SIZE).map((row) => {
+        const entry = shapeEntry(row);
+        return {
+            id: entry.id,
+            event: entry.event,
+            ipAddress: entry.ipAddress,
+            device: entry.metadata && typeof entry.metadata.device === 'string' ? entry.metadata.device : null,
+            createdAt: entry.createdAt
+        };
+    });
+    return { entries: page, nextCursor: rows.length > SECURITY_ACTIVITY_PAGE_SIZE ? page[page.length - 1].id : null };
+}
+
+module.exports = { record, recordRequest, search, forUser };

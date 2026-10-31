@@ -7730,3 +7730,82 @@ body.admin-page {
     font-size: 0.875rem;
     color: var(--text-secondary);
 }
+
+/* ===== Security settings and two-step sign-in (phase 14) ===== */
+
+.btn[hidden],
+.settings-form label[hidden],
+.settings-button-row[hidden],
+.two-factor-panel[hidden] {
+    display: none;
+}
+
+#twoFactorStartBtn {
+    flex-shrink: 0;
+    width: auto;
+}
+
+.settings-button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.settings-form .settings-button-row .btn {
+    align-self: auto;
+}
+
+.two-factor-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+/* Scanners need the dark-on-light code in the dark theme too */
+.two-factor-qr {
+    align-self: center;
+    width: 200px;
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    background-color: #ffffff;
+}
+
+.two-factor-key {
+    padding: 8px 10px;
+    border-radius: 8px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.05em;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.recovery-codes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 6px 16px;
+    margin: 0;
+    padding-left: 28px;
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    user-select: all;
+}
+
+.auth-form[hidden] {
+    display: none;
+}
+
+.link-button {
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+}

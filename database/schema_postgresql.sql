@@ -79,12 +79,23 @@ CREATE TABLE users (
     is_admin BOOLEAN NOT NULL DEFAULT FALSE, -- set by scripts/set-admin.js or the database, never the API
     suspended_at TIMESTAMP NULL, -- NULL = not suspended
     suspended_reason VARCHAR(255) NULL,
+    totp_secret_enc VARCHAR(255) NULL, -- encrypted with TOTP_ENCRYPTION_KEY
+    totp_pending_enc VARCHAR(255) NULL, -- set up, not confirmed yet
+    totp_pending_at TIMESTAMP NULL,
+    totp_enabled_at TIMESTAMP NULL, -- NULL = 2FA off
+    totp_last_step BIGINT NULL, -- last time step used: a code works once
+    totp_failed_attempts INTEGER NOT NULL DEFAULT 0,
+    totp_locked_until TIMESTAMP NULL,
+    deletion_requested_at TIMESTAMP NULL,
+    deletion_due_at TIMESTAMP NULL, -- end of the grace period
+    deleted_at TIMESTAMP NULL, -- the row is an anonymous tombstone
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_username ON users(username);
 CREATE INDEX idx_email ON users(email);
+CREATE INDEX idx_users_deletion_due ON users(deletion_due_at);
 
 -- Password reset tokens (only a SHA-256 hash of the token is stored)
 CREATE TABLE password_resets (
@@ -352,7 +363,8 @@ CREATE TABLE sessions (
     last_active_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL, -- refresh token lifetime, slides forward on every rotation
     revoked_at TIMESTAMP NULL,
-    revoked_reason VARCHAR(20) NULL -- 'logout' | 'user' | 'password' | 'reuse'
+    revoked_reason VARCHAR(20) NULL, -- 'logout' | 'user' | 'password' | 'reuse' | 'admin' | 'suspended' | '2fa' | 'deletion'
+    mfa_verified_at TIMESTAMP NULL -- NULL = never passed a second factor
 );
 
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
@@ -693,6 +705,46 @@ CREATE TABLE quarantined_files (
     uploaded_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Single-use recovery codes (SHA-256 hashes only)
+CREATE TABLE recovery_codes (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash CHAR(64) NOT NULL,
+    used_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, code_hash)
+);
+
+-- Browsers this user has signed in from (a random cookie, hashed with the user id)
+CREATE TABLE known_devices (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_hash CHAR(64) NOT NULL,
+    label VARCHAR(100) NULL,
+    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, device_hash)
+);
+
+CREATE INDEX idx_known_devices_last_seen ON known_devices(last_seen_at);
+
+-- Personal data exports. The zip lives in a private folder with no URL.
+CREATE TABLE data_exports (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending | running | ready | failed | expired
+    file_name VARCHAR(100) NULL,
+    file_size BIGINT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP NULL,
+    finished_at TIMESTAMP NULL,
+    expires_at TIMESTAMP NULL
+);
+
+CREATE INDEX idx_data_exports_user ON data_exports(user_id, id);
+CREATE INDEX idx_data_exports_status ON data_exports(status, id);
 
 -- Create a view for easy message retrieval with user info
 CREATE VIEW message_details AS

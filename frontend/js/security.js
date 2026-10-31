@@ -314,6 +314,7 @@ window.isUserBlocked = isUserBlocked;
 Object.assign(FriChat, {
     isUserBlocked,
     setUserBlocked,
-    initializeSecurity
+    initializeSecurity,
+    refreshEmailUi: updateVerificationUi
 });
 })(globalThis.FriChat = globalThis.FriChat || {});

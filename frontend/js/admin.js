@@ -319,7 +319,9 @@
 
         const config = await apiRequest(CONFIG.ENDPOINTS.ADMIN_CONFIG);
         if (!config.success) {
-            byId('adminDenied').hidden = false;
+            const denied = byId('adminDenied');
+            if (config.code === 'TWO_FACTOR_REQUIRED') denied.textContent = config.message;
+            denied.hidden = false;
             return;
         }
 

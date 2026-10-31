@@ -39,7 +39,41 @@ const AUDIT_EVENTS = [
     'admin_user_suspended',
     'admin_user_unsuspended',
     'admin_user_logged_out',
-    'admin_message_deleted'
+    'admin_message_deleted',
+    'email_changed',
+    '2fa_enabled',
+    '2fa_disabled',
+    '2fa_login_failed',
+    '2fa_locked',
+    '2fa_recovery_used',
+    '2fa_recovery_regenerated',
+    '2fa_reset_by_operator',
+    'data_export_requested',
+    'data_export_downloaded',
+    'account_deletion_requested',
+    'account_deletion_cancelled',
+    'account_deleted'
+];
+
+// What a user sees about their own account under Settings > Security
+const SECURITY_ACTIVITY_EVENTS = [
+    'login',
+    'login_failed',
+    'password_changed',
+    'password_reset',
+    'session_revoked',
+    'email_changed',
+    '2fa_enabled',
+    '2fa_disabled',
+    '2fa_login_failed',
+    '2fa_locked',
+    '2fa_recovery_used',
+    '2fa_recovery_regenerated',
+    '2fa_reset_by_operator',
+    'data_export_requested',
+    'data_export_downloaded',
+    'account_deletion_requested',
+    'account_deletion_cancelled'
 ];
 
 // Images are decoded and re-encoded, so a decompression bomb is refused before sharp allocates it
@@ -84,6 +118,7 @@ module.exports = {
     EVIDENCE_CONTEXT_MESSAGES,
     ADMIN_PAGE_SIZE,
     AUDIT_EVENTS,
+    SECURITY_ACTIVITY_EVENTS,
     UPLOAD_MAX_IMAGE_PIXELS,
     clamavConfig,
     spamConfig,
