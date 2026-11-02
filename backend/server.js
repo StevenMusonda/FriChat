@@ -147,8 +147,10 @@ const connectedUsers = new Map(); // userId -> socketId
 const socketLimiter = createSocketRateLimiter();
 setInterval(socketLimiter.sweep, 60 * 1000).unref();
 
-// 1:1 voice/video calls: signaling, ringing, busy/timeout and history (utils/calls.js)
+// Voice/video calls: signaling, ringing, busy/timeout and history (utils/calls.js, utils/groupCalls.js).
+// On io so the REST side can reach it: group removals, blocks, the active-call banner and the Calls panel.
 const callManager = createCallManager({ io, push: callPush });
+io.callManager = callManager;
 
 /**
  * Socket.IO's view of the client IP (X-Forwarded-For only when TRUST_PROXY is set)
@@ -566,6 +568,8 @@ io.on('connection', (socket) => {
      * Calls: call_invite, call_accept, call_reject, call_cancel, call_offer, call_answer,
      * call_ice_candidate, call_hangup and call_sync. Each handler checks that this socket's user is
      * the caller or callee (invites: both share the direct chat, no block, request accepted).
+     * Group calls add call_join, call_leave and call_media_state; those check chat membership,
+     * blocks and the room on every event (utils/groupCalls.js).
      */
     callManager.register(socket, onLimited);
 

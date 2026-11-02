@@ -17,6 +17,7 @@ const CONFIG = {
         // 1:1 calls (calls.js)
         CALL_ICE_SERVERS: '/calls/ice-servers',
         CALLS: '/calls',
+        CALL_ACTIVE: '/calls/active',
         // Auth
         REGISTER: '/auth/register',
         LOGIN: '/auth/login',
@@ -212,6 +213,8 @@ const CONFIG = {
         THEME: 'theme',
         CURRENT_CHAT: 'currentChat',
         ARCHIVED_EXPANDED: 'archivedExpanded',
+        // Set once the "work best with up to 4 people" note was shown (groupCalls.js)
+        GROUP_CALL_NOTE_SEEN: 'groupCallNoteSeen',
         // '0' = Enter adds a new line and Shift+Enter sends (default: Enter sends)
         ENTER_TO_SEND: 'enterToSend',
         // Unsent composer text, per user and chat: draft:<userId>:<chatId>

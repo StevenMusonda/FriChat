@@ -311,6 +311,16 @@ const validateStarredQuery = [
 ];
 
 /**
+ * Validation rules for a group chat's banner: GET /api/calls/active?chatId=
+ */
+const validateActiveCallQuery = [
+    query('chatId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid chat')
+        .toInt()
+];
+
+/**
  * Validation rules for the Calls tab: GET /api/calls?limit=&before=
  */
 const validateCallHistoryQuery = [
@@ -1550,6 +1560,7 @@ module.exports = {
     validateUploadReply,
     validateDisappearingTimer,
     validateCallHistoryQuery,
+    validateActiveCallQuery,
     checkUploadValidation,
     isWaveform,
     validateMessageIdParam,

@@ -5,7 +5,7 @@
  * API responses are never cached.
  */
 
-const CACHE_VERSION = 'frichat-shell-v18';
+const CACHE_VERSION = 'frichat-shell-v19';
 
 const APP_SHELL = [
     'chat.html',
@@ -39,6 +39,7 @@ const APP_SHELL = [
     'js/voice.js',
     'js/disappearing.js',
     'js/calls.js',
+    'js/groupCalls.js',
     'js/events.js',
     'js/lists.js',
     'js/moderation.js',
@@ -155,7 +156,7 @@ self.addEventListener('push', (event) => {
     const chatId = data.chatId || null;
     // An incoming call stays on screen until it's handled (where the platform allows); its "Missed call"
     // replaces it through the same tag. A service worker can't ring or show an answer screen itself:
-    // clicking opens the page, which shows the Accept/Decline modal (calls.js, call_sync).
+    // clicking opens the page, which shows the Accept/Decline or Join/Dismiss modal (calls.js, groupCalls.js, call_sync).
     const isCall = data.type === 'call';
     const notification = self.registration.showNotification(data.title || 'FriChat', {
         body: data.body || 'New message',

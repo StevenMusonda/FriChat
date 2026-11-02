@@ -133,7 +133,7 @@
                         </div>
                     </div>
                     <div class="chat-actions">
-                        <!-- 1:1 calls (calls.js): shown for direct chats only -->
+                        <!-- Calls (calls.js, groupCalls.js): shown for direct and group chats -->
                         <button type="button" class="icon-btn call-header-btn" id="voiceCallBtn" title="Voice call" aria-label="Voice call" hidden>
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
                         </button>
@@ -173,6 +173,16 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                     <span id="scheduledBarText"></span>
                     <button type="button" class="poll-link" id="scheduledBarBtn">View</button>
+                </div>
+
+                <!-- A call is running in this group (groupCalls.js) -->
+                <div class="group-call-banner" id="groupCallBanner" role="status" hidden>
+                    <span class="group-call-banner-avatars" id="groupCallBannerAvatars"></span>
+                    <span class="group-call-banner-text">
+                        <span id="groupCallBannerText"></span>
+                        <span class="group-call-banner-count" id="groupCallBannerCount"></span>
+                    </span>
+                    <button type="button" class="group-call-banner-join" id="groupCallBannerJoin">Join</button>
                 </div>
 
                 <!-- Someone in this group has a birthday today (events.js) -->
@@ -969,6 +979,41 @@
         </div>
     </div>
 
+    <!-- Group call ringing (groupCalls.js) -->
+    <div class="call-incoming" id="groupRingModal" role="alertdialog" aria-modal="true" aria-labelledby="groupRingName" aria-describedby="groupRingType" hidden>
+        <div class="call-incoming-card">
+            <div class="call-avatar call-avatar-ringing" id="groupRingAvatar"><span>?</span></div>
+            <h3 class="call-incoming-name" id="groupRingName">Group call</h3>
+            <p class="call-incoming-type" id="groupRingType">Someone started a call</p>
+            <div class="call-incoming-actions">
+                <div class="group-ring-action">
+                    <button type="button" class="call-round-btn call-decline" id="groupRingDismissBtn" aria-label="Dismiss"></button>
+                    <span>Dismiss</span>
+                </div>
+                <div class="group-ring-action">
+                    <button type="button" class="call-round-btn call-accept" id="groupRingJoinBtn" aria-label="Join"></button>
+                    <span>Join</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group call, full screen (groupCalls.js); the control icons are copied from the 1:1 screen -->
+    <div class="call-screen group-call-screen" id="groupCallScreen" role="dialog" aria-modal="true" aria-labelledby="groupCallTitle" hidden>
+        <div class="group-call-bar">
+            <h3 class="group-call-title" id="groupCallTitle">Group call</h3>
+            <p class="call-status"><span id="groupCallStatus" role="status" aria-live="polite"></span> <span class="group-call-count" id="groupCallCount"></span></p>
+            <p class="group-call-note" id="groupCallNote" hidden></p>
+        </div>
+        <div class="group-call-grid" id="groupCallGrid" data-count="0"></div>
+        <div class="call-controls">
+            <button type="button" class="call-round-btn call-control" id="groupCallMuteBtn" aria-label="Mute microphone" aria-pressed="false" title="Mute"></button>
+            <button type="button" class="call-round-btn call-control" id="groupCallCameraBtn" aria-label="Turn camera off" aria-pressed="false" title="Camera" hidden></button>
+            <button type="button" class="call-round-btn call-control" id="groupCallScreenBtn" aria-label="Share screen" aria-pressed="false" title="Share screen" hidden></button>
+            <button type="button" class="call-round-btn call-decline" id="groupCallLeaveBtn" aria-label="Leave call" title="Leave call"></button>
+        </div>
+    </div>
+
     <!-- Message Search (search.js) -->
     <div class="modal" id="searchModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="searchModalTitle">
         <div class="modal-content search-modal">
@@ -1381,6 +1426,7 @@
     <script src="js/voice.js"></script>
     <script src="js/disappearing.js"></script>
     <script src="js/calls.js"></script>
+    <script src="js/groupCalls.js"></script>
     <script src="js/events.js"></script>
     <script src="js/lists.js"></script>
     <script src="js/moderation.js"></script>
@@ -1539,8 +1585,9 @@
             startFeature('Voice notes', () => FriChat.initializeVoiceNotes());
             startFeature('Disappearing messages', () => FriChat.initializeDisappearing());
 
-            // 1:1 voice and video calls: header buttons, incoming modal, call screen, Calls panel
+            // Voice and video calls: header buttons, incoming modal, call screens, Calls panel
             startFeature('Calls', () => FriChat.initializeCalls());
+            startFeature('Group calls', () => FriChat.initializeGroupCalls());
 
             // Report dialog, warnings from admins, console link
             startFeature('Moderation', () => FriChat.initializeModeration());

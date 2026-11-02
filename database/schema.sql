@@ -544,7 +544,7 @@ CREATE TABLE calls (
     id INT AUTO_INCREMENT PRIMARY KEY,
     chat_id INT NOT NULL,
     caller_id INT NOT NULL,
-    callee_id INT NOT NULL,
+    callee_id INT NULL,                                -- NULL = group call (see call_participants)
     call_type ENUM('voice', 'video') NOT NULL,
     -- ringing | active | completed | missed | declined | cancelled | busy | failed
     status VARCHAR(10) NOT NULL DEFAULT 'ringing',
@@ -558,6 +558,19 @@ CREATE TABLE calls (
     INDEX idx_calls_caller (caller_id, started_at),
     INDEX idx_calls_callee (callee_id, started_at),
     INDEX idx_calls_chat (chat_id)
+);
+
+-- Phase 16: who joined a group call (one row per person, whatever the number of rejoins)
+CREATE TABLE call_participants (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    call_id INT NOT NULL,
+    user_id INT NOT NULL,
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- first time this person joined
+    left_at TIMESTAMP NULL DEFAULT NULL,             -- last time they left (NULL = still in the call)
+    FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_call_participant (call_id, user_id),
+    INDEX idx_call_participants_user (user_id)
 );
 
 -- Phase 12: events (a message of type 'event' is the card), RSVPs, reminders and shared lists

@@ -45,13 +45,13 @@ module.exports = {
         },
         // Starting, answering and ending calls
         call: {
-            events: ['call_invite', 'call_accept', 'call_reject', 'call_cancel', 'call_hangup', 'call_sync'],
+            events: ['call_invite', 'call_accept', 'call_reject', 'call_cancel', 'call_hangup', 'call_sync', 'call_join', 'call_leave'],
             perSocket: { capacity: 8, refillPerSecond: 0.5 },
             perUser: { capacity: 16, refillPerSecond: 1 }
         },
         // WebRTC signaling inside a call: a burst of ICE candidates at the start and on restarts
         callSignal: {
-            events: ['call_offer', 'call_answer', 'call_ice_candidate'],
+            events: ['call_offer', 'call_answer', 'call_ice_candidate', 'call_media_state'],
             perSocket: { capacity: 120, refillPerSecond: 20 },
             perUser: { capacity: 200, refillPerSecond: 30 },
             silent: true

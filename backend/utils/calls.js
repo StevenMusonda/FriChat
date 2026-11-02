@@ -15,8 +15,11 @@
  *
  * Live calls are held in memory (one server instance, like the socket rate limits). A restart ends them.
  *
+ * Group calls (utils/groupCalls.js) share the calls and userCalls maps below, so "one call per user"
+ * holds across both kinds. The handlers here pass a group call's events on to that file.
+ *
  * Events, client -> server: call_invite, call_accept, call_reject, call_cancel, call_offer, call_answer,
- * call_ice_candidate, call_hangup, call_sync.
+ * call_ice_candidate, call_hangup, call_sync; for group calls also call_join, call_leave, call_media_state.
  * Server -> client: call_invite (to the callee's tabs), call_ringing (to the caller), call_accept,
  * call_reject, call_busy, call_cancel, call_timeout, call_offer, call_answer, call_ice_candidate,
  * call_hangup, call_peer_reconnected, call_sync, call_error, call_log_updated.
@@ -37,6 +40,7 @@ const { getNotificationSettings, isDndActive } = require('./notificationSettings
 const { recordNewMessage } = require('./chatState');
 const { getMessageById } = require('./messageQueries');
 const { chatExpiresAtSql } = require('./timeSql');
+const { groupStore, createGroupCalls } = require('./groupCalls');
 
 const SYSTEM_CODE_PREFIX = 'call:';
 
@@ -169,9 +173,13 @@ async function markEnded(callId, status, reason) {
  * disappearing-messages timer like any other message; clients build the text from the code.
  */
 async function postCallNotice(io, call, status, seconds) {
+    return postNotice(io, call, noticeCode(call.type, status, seconds));
+}
+
+async function postNotice(io, call, content) {
     const messageId = await insertAndGetId(
         `INSERT INTO messages (chat_id, sender_id, message_type, content, status, expires_at) VALUES (?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
-        [call.chatId, call.callerId, 'system', noticeCode(call.type, status, seconds), 'sent', call.chatId]
+        [call.chatId, call.callerId, 'system', content, 'sent', call.chatId]
     );
     await executeQuery('UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [call.chatId]);
     // The caller has read it; a missed call stays unread for the callee (and un-archives the chat)
@@ -191,7 +199,7 @@ async function isDnd(userId) {
     return isDndActive(await getNotificationSettings(userId), new Date());
 }
 
-const defaultStore = { checkCallAllowed, insertCall, markAnswered, markEnded, postCallNotice, callerCard, isDnd };
+const defaultStore = { checkCallAllowed, insertCall, markAnswered, markEnded, postCallNotice, callerCard, isDnd, postGroupNotice: postNotice, ...groupStore };
 
 // ===== Call manager =====
 
@@ -199,10 +207,10 @@ const defaultStore = { checkCallAllowed, insertCall, markAnswered, markEnded, po
  * @param {Object} options
  * @param {Object} options.io - Socket.IO server
  * @param {Object} [options.store] - database functions (tests pass fakes)
- * @param {Object} [options.push] - { notifyIncomingCall(io, call, caller), notifyMissedCall(io, call, caller) }
+ * @param {Object} [options.push] - the functions of utils/callPush.js
  * @param {Function} [options.now]
  * @param {Object} [options.timers] - { setTimeout, clearTimeout }
- * @param {Object} [options.limits] - { ringTimeoutMs, reconnectGraceMs }
+ * @param {Object} [options.limits] - { ringTimeoutMs, reconnectGraceMs, groupCallMax }
  */
 function createCallManager({ io, store = defaultStore, push = null, now = () => Date.now(), timers = { setTimeout, clearTimeout }, limits = {} } = {}) {
     const ringTimeoutMs = limits.ringTimeoutMs || RING_TIMEOUT_MS;
@@ -246,6 +254,24 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         for (const timer of Object.values(call.graceTimers)) timers.clearTimeout(timer);
         call.graceTimers = {};
     }
+
+    const groupCalls = createGroupCalls({
+        io,
+        store,
+        push,
+        now,
+        timers,
+        ringTimeoutMs,
+        reconnectGraceMs,
+        maxParticipants: limits.groupCallMax,
+        calls,
+        userCalls,
+        emitError,
+        getCall,
+        toId,
+        cleanDescription,
+        cleanCandidate
+    });
 
     function publicCall(call) {
         return {
@@ -304,6 +330,9 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         let reservedCallee = false;
         try {
             const allowed = await store.checkCallAllowed(chatId, callerId);
+            if (allowed.error && allowed.error.code === 'NOT_DIRECT') {
+                return await groupCalls.start(socket, chatId, type, allowed.error); // releases the reservation itself
+            }
             if (allowed.error) {
                 userCalls.delete(callerId);
                 return emitError(socket, 'call_invite', allowed.error, { chatId });
@@ -426,6 +455,7 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
 
     async function reject(socket, data) {
         const call = getCall(data && data.callId);
+        if (call && call.isGroup) return groupCalls.dismiss(socket, call);
         if (!call || call.calleeId !== socket.userId || call.status !== 'ringing') return;
         toSocket(call.callerSocket).emit('call_reject', { callId: call.id });
         toUser(call.calleeId).emit('call_cancel', { callId: call.id, reason: 'declined' });
@@ -434,6 +464,7 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
 
     async function cancel(socket, data) {
         const call = getCall(data && data.callId);
+        if (call && call.isGroup) return groupCalls.leave(socket, data);
         if (!call || call.callerId !== socket.userId || call.status !== 'ringing') return;
         toUser(call.calleeId).emit('call_cancel', { callId: call.id, reason: 'cancelled' });
         toUser(call.callerId).except(socket.id).emit('call_cancel', { callId: call.id, reason: 'cancelled' });
@@ -470,15 +501,23 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         toSocket(target).emit(event, { callId: call.id, sdp: description, iceRestart: !!data.iceRestart });
     }
 
+    function isGroupSignal(data) {
+        const call = getCall(data && data.callId);
+        return !!call && !!call.isGroup;
+    }
+
     function offer(socket, data) {
-        relay(socket, data, 'call_offer', 'offer');
+        if (isGroupSignal(data)) return groupCalls.offer(socket, data);
+        return relay(socket, data, 'call_offer', 'offer');
     }
 
     function answer(socket, data) {
-        relay(socket, data, 'call_answer', 'answer');
+        if (isGroupSignal(data)) return groupCalls.answer(socket, data);
+        return relay(socket, data, 'call_answer', 'answer');
     }
 
     function iceCandidate(socket, data) {
+        if (isGroupSignal(data)) return groupCalls.iceCandidate(socket, data);
         const call = signalingCall(socket, data, 'call_ice_candidate');
         if (!call) return;
         const candidate = cleanCandidate(data.candidate);
@@ -490,6 +529,7 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
 
     async function hangup(socket, data) {
         const call = getCall(data && data.callId);
+        if (call && call.isGroup) return groupCalls.leave(socket, data);
         if (!call || !isParticipant(call, socket.userId)) return;
 
         if (call.status === 'ringing') {
@@ -512,9 +552,11 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
      * A tab (re)connected. With { callId }: it was in that call, rebind its socket. Without: if this
      * user is being called, show the invite again (e.g. the page was opened from a call notification).
      */
-    function sync(socket, data) {
+    async function sync(socket, data) {
         const userId = socket.userId;
         const wanted = data && data.callId !== undefined && data.callId !== null ? toId(data.callId) : null;
+        const wantedCall = wanted ? calls.get(wanted) : null;
+        if (wantedCall && wantedCall.isGroup) return groupCalls.rebind(socket, wantedCall);
         const current = userCalls.get(userId);
         const call = typeof current === 'number' ? calls.get(current) : null;
 
@@ -543,6 +585,7 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         if (call && call.status === 'ringing' && call.calleeId === userId) {
             socket.emit('call_invite', invitePayload(call));
         }
+        if (!call) await groupCalls.resendInvites(socket);
     }
 
     /**
@@ -558,6 +601,7 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         }
         const call = typeof current === 'number' ? calls.get(current) : null;
         if (!call) return;
+        if (call.isGroup) return groupCalls.socketGone(socket, call);
 
         if (call.status === 'ringing') {
             if (call.callerId === userId && call.callerSocket === socket.id) {
@@ -605,6 +649,9 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         handle('call_ice_candidate', iceCandidate);
         handle('call_hangup', hangup);
         handle('call_sync', sync);
+        handle('call_join', groupCalls.join);
+        handle('call_leave', groupCalls.leave);
+        handle('call_media_state', groupCalls.mediaState);
         socket.on('disconnect', () => {
             disconnect(socket).catch(error => console.error('Call disconnect error:', error));
         });
@@ -624,6 +671,14 @@ function createCallManager({ io, store = defaultStore, push = null, now = () => 
         disconnect,
         timeout,
         getActiveCallFor,
+        join: groupCalls.join,
+        leave: groupCalls.leave,
+        mediaState: groupCalls.mediaState,
+        memberRemoved: groupCalls.memberRemoved,
+        userBlocked: groupCalls.userBlocked,
+        activeCallForChat: groupCalls.activeCallForChat,
+        isLive: groupCalls.isLive,
+        stopGroupRinging: groupCalls.stopRinging,
         _calls: calls,
         _userCalls: userCalls
     };

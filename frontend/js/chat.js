@@ -723,7 +723,7 @@ async function loadChatDetails(chatId) {
             // Disappearing messages timer: header clock, who may change it (disappearing.js)
             if (typeof FriChat.applyDisappearingDetails === 'function') FriChat.applyDisappearingDetails(chat);
 
-            // Voice/video call buttons for direct chats (calls.js)
+            // Voice/video call buttons, and the banner of a group's running call (calls.js, groupCalls.js)
             if (typeof FriChat.applyCallDetails === 'function') FriChat.applyCallDetails(chat);
 
             // Birthday banner in groups (events.js)

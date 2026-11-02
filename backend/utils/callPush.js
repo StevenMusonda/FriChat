@@ -32,6 +32,31 @@ function notifyIncomingCall(io, call, caller) {
     });
 }
 
+function notifyIncomingGroupCall(io, call, caller, userId) {
+    return notifyUser(io, userId, {
+        type: 'call',
+        callId: call.id,
+        chatId: call.chatId,
+        title: `Incoming group ${typeLabel(call.type)} call`,
+        body: `${callerName(caller)} started a call in ${decodeEntities(String(call.chatName || 'a group'))}`,
+        tag: `call-${call.id}`,
+        url: `chat.html?chat=${call.chatId}&call=${call.id}`,
+        ttl: Math.ceil(RING_TIMEOUT_MS / 1000)
+    });
+}
+
+function notifyMissedGroupCall(io, call, caller, userId) {
+    return notifyUser(io, userId, {
+        type: 'missed_call',
+        callId: call.id,
+        chatId: call.chatId,
+        title: `Missed group ${typeLabel(call.type)} call`,
+        body: `${callerName(caller)} in ${decodeEntities(String(call.chatName || 'a group'))}`,
+        tag: `call-${call.id}`,
+        url: `chat.html?chat=${call.chatId}`
+    });
+}
+
 function notifyMissedCall(io, call, caller) {
     return notifyUser(io, call.calleeId, {
         type: 'missed_call',
@@ -44,4 +69,4 @@ function notifyMissedCall(io, call, caller) {
     });
 }
 
-module.exports = { notifyIncomingCall, notifyMissedCall };
+module.exports = { notifyIncomingCall, notifyMissedCall, notifyIncomingGroupCall, notifyMissedGroupCall };

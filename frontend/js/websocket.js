@@ -37,7 +37,8 @@ const PLANNER_EVENTS = ['poll_updated', 'scheduled_message_updated', 'reminder_d
 const LIFECYCLE_EVENTS = ['voice_note_played', 'chat_disappearing_updated', 'messages_expired'];
 // 1:1 calls: ringing, answering, WebRTC signaling and the call log (calls.js)
 const CALL_EVENTS = ['call_invite', 'call_ringing', 'call_accept', 'call_reject', 'call_busy', 'call_cancel', 'call_timeout',
-    'call_offer', 'call_answer', 'call_ice_candidate', 'call_hangup', 'call_peer_reconnected', 'call_sync', 'call_error', 'call_log_updated'];
+    'call_offer', 'call_answer', 'call_ice_candidate', 'call_hangup', 'call_peer_reconnected', 'call_sync', 'call_error', 'call_log_updated',
+    'call_participants', 'call_room_update'];
 
 // Events and shared lists: new answers, reminders, list changes (events.js, lists.js)
 const PLAN_EVENTS = ['event_updated', 'event_reminder', 'list_updated', 'list_deleted', 'list_item_due'];

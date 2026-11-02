@@ -10,6 +10,9 @@
  *   - Connection drops: one ICE restart (by the caller), then the call ends with a message
  *   - "Missed video call" / "Voice call, 4:12" notices in the thread and the Calls panel
  *
+ * Group calls live in groupCalls.js, which gets these helpers through FriChat.callKit; this file
+ * keeps the header buttons, the notices and the Calls panel for both kinds.
+ *
  * Every name shown comes from the server and is set with textContent (never innerHTML).
  */
 
@@ -34,7 +37,7 @@ const DISCONNECTED_GRACE_MS = 2500;
 let call = null;
 let incoming = null;
 
-// The open direct chat's call target, from GET /chats/:id
+// The open chat's call target, from GET /chats/:id
 let headerTarget = null;
 
 // Calls panel paging
@@ -60,14 +63,46 @@ function parseCallNotice(content) {
     return match ? { type: match[1], status: match[2], seconds: Number(match[3]) } : null;
 }
 
+/**
+ * "call:group:video:started" or "call:group:video:completed:750:3:1,2,3" -> { type, status, seconds, count, userIds }, or null
+ */
+function parseGroupNotice(content) {
+    const match = /^call:group:(voice|video):(started|completed|missed)(?::(\d+):(\d+):([\d,]*))?$/.exec(String(content || ''));
+    if (!match) return null;
+    return {
+        type: match[1],
+        status: match[2],
+        seconds: Number(match[3] || 0),
+        count: Number(match[4] || 0),
+        userIds: (match[5] || '').split(',').filter(Boolean).map(Number)
+    };
+}
+
 function isCallNotice(message) {
-    return !!parseCallNotice(message && message.content);
+    const content = message && message.content;
+    return !!(parseCallNotice(content) || parseGroupNotice(content));
+}
+
+/**
+ * The same notice reads differently per viewer: only those who joined see how the call went
+ */
+function describeGroupNotice(message, notice) {
+    const me = Number(getCurrentUser().userId);
+    if (notice.status === 'started') {
+        const actor = Number(message.sender_id) === me ? 'You' : (message.full_name || message.username || 'Someone');
+        return `${actor} started a ${notice.type} call`;
+    }
+    if (!notice.userIds.includes(me)) return 'Missed group call';
+    if (notice.count < 2) return 'No one joined your call';
+    return `Call ended, ${formatCallDuration(notice.seconds)}, ${notice.count} participants`;
 }
 
 /**
  * Plain text of a call notice, worded for the viewer (the notice's sender is the caller). Callers escape it.
  */
 function describeCallNotice(message) {
+    const groupNotice = parseGroupNotice(message && message.content);
+    if (groupNotice) return describeGroupNotice(message, groupNotice);
     const notice = parseCallNotice(message && message.content);
     if (!notice) return 'Call';
     const label = notice.type === 'video' ? 'Video call' : 'Voice call';
@@ -93,7 +128,7 @@ function describeCallNotice(message) {
 }
 
 function callNoticeIconHtml(message) {
-    const notice = parseCallNotice(message && message.content);
+    const notice = parseCallNotice(message && message.content) || parseGroupNotice(message && message.content);
     return svgIcon(notice && notice.type === 'video' ? 'video' : 'phone', 14);
 }
 
@@ -101,6 +136,8 @@ function callNoticeIconHtml(message) {
  * Was this notice a call the viewer missed? (shown in red)
  */
 function isMissedCallNotice(message) {
+    const groupNotice = parseGroupNotice(message && message.content);
+    if (groupNotice) return groupNotice.status !== 'started' && !groupNotice.userIds.includes(Number(getCurrentUser().userId));
     const notice = parseCallNotice(message && message.content);
     if (!notice || Number(message.sender_id) === Number(getCurrentUser().userId)) return false;
     return ['missed', 'cancelled', 'busy'].includes(notice.status);
@@ -489,7 +526,7 @@ function attachLocalMedia(current, media) {
  * @param {Object} peer - { id, username, fullName, avatarUrl } of the person being called
  */
 async function startCall(chatId, type, peer) {
-    if (call || incoming) {
+    if (call || incoming || (typeof FriChat.isInGroupCall === 'function' && FriChat.isInGroupCall())) {
         showNotification('You\'re already in a call.', 'info');
         return;
     }
@@ -749,6 +786,8 @@ function onInvite(data) {
     const callId = Number(data.callId);
     if (incoming && incoming.callId === callId) return; // shown again after a reconnect
     if (call || incoming) return; // the server only rings a user who isn't in a call; another tab may be
+    // A group call's ring gives way to a direct call: that call's banner stays in the group chat
+    if (typeof FriChat.dismissGroupRing === 'function') FriChat.dismissGroupRing();
 
     incoming = {
         callId,
@@ -967,6 +1006,8 @@ function onSocketConnect() {
 }
 
 function handleCallEvent(event, data) {
+    if (typeof FriChat.handleGroupCallEvent === 'function' && FriChat.handleGroupCallEvent(event, data)) return;
+
     const callId = Number(data.callId);
     const isCurrent = !!call && call.id === callId;
     const isIncoming = !!incoming && incoming.callId === callId;
@@ -1061,7 +1102,7 @@ function handleCallError(data) {
 // ===== Header buttons =====
 
 /**
- * Called with GET /chats/:id for the open chat: call buttons for direct chats only
+ * Called with GET /chats/:id for the open chat: call buttons in direct and group chats
  */
 function applyCallDetails(chat) {
     headerTarget = null;
@@ -1074,6 +1115,12 @@ function applyCallDetails(chat) {
                 peer: { id: Number(other.id), username: other.username, fullName: other.full_name || null, avatarUrl: other.avatar_url || null }
             };
         }
+    } else if (chat && chat.chat_type === 'group') {
+        headerTarget = { chatId: Number(chat.id), group: true, chatName: chat.chat_name || '' };
+        if (typeof FriChat.applyGroupCallChat === 'function') FriChat.applyGroupCallChat(chat);
+    }
+    if (!headerTarget || !headerTarget.group) {
+        if (typeof FriChat.resetGroupCallBanner === 'function') FriChat.resetGroupCallBanner();
     }
     el('voiceCallBtn').hidden = !headerTarget;
     el('videoCallBtn').hidden = !headerTarget;
@@ -1085,12 +1132,24 @@ function resetCallHeader() {
 
 function callFromHeader(type) {
     if (!headerTarget || headerTarget.chatId !== currentChatId) return;
-    startCall(headerTarget.chatId, type, headerTarget.peer);
+    if (headerTarget.group) FriChat.startGroupCall(headerTarget.chatId, type, headerTarget.chatName);
+    else startCall(headerTarget.chatId, type, headerTarget.peer);
 }
 
 // ===== Calls panel =====
 
+/**
+ * Group calls: "12:30, 3 participants" for those who joined, "Missed" for those who didn't
+ */
+function groupRowStatus(entry) {
+    if (entry.live) return 'In progress';
+    if (!entry.joined) return 'Missed';
+    if (entry.participantCount < 2) return 'No one joined';
+    return `${formatCallDuration(entry.durationSeconds)}, ${entry.participantCount} participants`;
+}
+
 function callRowStatus(entry) {
+    if (entry.group) return groupRowStatus(entry);
     const outgoing = entry.direction === 'outgoing';
     switch (entry.status) {
         // Duration first: it's what's left when a narrow screen cuts the line
@@ -1112,14 +1171,16 @@ function callRowStatus(entry) {
 }
 
 function isMissedEntry(entry) {
+    if (entry.group) return !entry.live && !entry.joined;
     return entry.direction === 'incoming' && ['missed', 'cancelled', 'busy'].includes(entry.status);
 }
 
 function renderCallRow(entry) {
     const h = FriChat.h;
-    const name = personName(entry.otherUser);
+    const name = entry.group ? (entry.groupName || 'Group call') : personName(entry.otherUser);
     const avatar = h('div', { className: 'chat-avatar call-row-avatar' });
-    fillCallAvatar(avatar, entry.otherUser);
+    if (entry.group) fillCallAvatar(avatar, { fullName: name, avatarUrl: entry.groupAvatarUrl });
+    else fillCallAvatar(avatar, entry.otherUser);
 
     const when = entry.startedAt ? new Date(entry.startedAt) : null;
     const whenText = when && !isNaN(when)
@@ -1145,12 +1206,32 @@ function renderCallRow(entry) {
         const button = h('button', {
             className: 'icon-btn call-row-btn',
             attrs: { type: 'button', title: type === 'video' ? 'Video call' : 'Voice call', 'aria-label': `${type === 'video' ? 'Video' : 'Voice'} call ${name}` },
-            on: { click: () => { closeCallsPanel(); startCall(entry.chatId, type, entry.otherUser); } }
+            on: {
+                click: () => {
+                    closeCallsPanel();
+                    if (entry.group) FriChat.startGroupCall(entry.chatId, type, name);
+                    else startCall(entry.chatId, type, entry.otherUser);
+                }
+            }
         });
         button.innerHTML = svgIcon(type === 'video' ? 'video' : 'phone', 18); // fixed markup
         return button;
     };
 
+    if (entry.group && entry.live) {
+        const rejoin = h('button', {
+            className: 'call-row-rejoin',
+            text: 'Rejoin',
+            attrs: { type: 'button', 'aria-label': `Rejoin the call in ${name}` },
+            on: {
+                click: () => {
+                    closeCallsPanel();
+                    FriChat.joinGroupCall({ callId: entry.id, chatId: entry.chatId, type: entry.type, chatName: name });
+                }
+            }
+        });
+        return h('div', { className: 'call-row', attrs: { 'data-call-id': entry.id } }, open, rejoin);
+    }
     return h('div', { className: 'call-row', attrs: { 'data-call-id': entry.id } }, open, callBack('voice'), callBack('video'));
 }
 
@@ -1239,6 +1320,26 @@ Object.assign(FriChat, {
     applyCallDetails,
     resetCallHeader,
     startCall,
-    initializeCalls
+    initializeCalls,
+    // Shared with groupCalls.js
+    callKit: {
+        audioContext,
+        canShareScreen,
+        connectionState,
+        dndActiveHere,
+        fetchIceServers,
+        fillCallAvatar,
+        formatCallDuration,
+        getCallMedia,
+        isInOneToOneCall: () => !!(call || incoming),
+        mediaErrorMessage,
+        mediaSupportError,
+        personName,
+        setPressed,
+        startTone,
+        stopStream,
+        stopTone,
+        videoSender
+    }
 });
 })(globalThis.FriChat = globalThis.FriChat || {});

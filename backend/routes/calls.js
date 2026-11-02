@@ -8,7 +8,7 @@ const router = express.Router();
 const callController = require('../controllers/callController');
 const { authenticateToken } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
-const { validateCallHistoryQuery, checkValidation } = require('../utils/validation');
+const { validateCallHistoryQuery, validateActiveCallQuery, checkValidation } = require('../utils/validation');
 
 // Fetched before each call (and on ICE restarts), so a little room; per user, not per IP
 const callLimiter = rateLimit({
@@ -22,6 +22,7 @@ router.use(authenticateToken);
 router.use(callLimiter);
 
 router.get('/ice-servers', callController.getIceServers);
+router.get('/active', validateActiveCallQuery, checkValidation, callController.getActiveCall);
 router.get('/', validateCallHistoryQuery, checkValidation, callController.listCalls);
 
 module.exports = router;

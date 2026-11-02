@@ -2448,3 +2448,106 @@ TEST_PG_DATABASE=frichat_test npm test
 ---
 
 **Enjoy the new features! 🎉**
+
+## Phase 16: Group voice and video calls
+
+Group chats now have the same voice and video buttons as direct chats. Calls hold up to 4 people by default, on top of the 1:1 call code: the same ICE/TURN credentials, rate limits, push and history.
+
+### What it does
+
+- **Starting:** any member can start a call. A group has one call at a time, so pressing a call button while one is running joins it instead.
+- **Ringing:** the other members get a modal with **Join** and **Dismiss**, plus a push if no tab is visible. Members in do-not-disturb, members with a block either way with the caller, and members already in a call are not rung. Ringing stops after 30 seconds. The call itself keeps going.
+- **Banner:** while a call runs, the group chat shows a banner with the participants' photos, a count and a **Join** button (**Full** when the room is full).
+- **Joining and leaving:** members come and go while the call runs. A fifth joiner gets "This call is full (4 people at most)". The call ends when the last person leaves, even if that person started alone.
+- **One call at a time:** this holds across 1:1 and group calls. Calling someone who is in a group call gives the usual busy response.
+- **Blocks:** nobody is in a call with someone they blocked or who blocked them. Whoever tries to join second is refused with a message that doesn't name the other person. If someone blocks a participant during a call, the blocked person is disconnected and sees "You've been disconnected from this call."
+- **Removed members:** being removed from the group, or leaving it, ends their part in the call straight away.
+- **Call screen:** a grid of tiles with name, muted icon and a speaking highlight, plus mute, camera, screen share (desktop only), leave, the participant count and a timer. The first group call in a browser shows "Group calls work best with up to 4 people."
+- **History:** the chat gets "Alice started a video call", then one notice when the call ends. Those who joined read "Call ended, 12:30, 3 participants" and the others read "Missed group call". The Calls panel lists group calls, with **Rejoin** while one is running.
+
+### The mesh limit, and moving to an SFU
+
+Group calls are mesh WebRTC: every person sends their audio and video directly to every other person. That needs no media server, but each person's upload grows with the number of people, and a phone encodes one video stream per peer. Four people means three uploads each. Beyond that, phones and home connections struggle, and anyone who needs TURN multiplies the traffic on your relay.
+
+`GROUP_CALL_MAX` can be set from 2 to 8, but 4 is the recommended limit. If you need bigger calls, move to an SFU (selective forwarding unit), where each person uploads once and the server forwards the streams. [LiveKit](https://livekit.io) is the natural choice: it is open source, can be self-hosted, and has a JavaScript client.
+
+Most of this phase can stay as it is:
+
+- **Keep:** the room rules in `backend/utils/groupCalls.js` (membership, blocks, one call per user, `GROUP_CALL_MAX`), ringing, the banner, notices, history, and the tile grid.
+- **Replace:** `call_offer`, `call_answer` and `call_ice_candidate` between participants, and the peer connection code in `frontend/js/groupCalls.js`.
+- **Add:** an endpoint that checks the room rules and issues a short-lived LiveKit access token for that room. Enforce blocks by refusing the token, as `call_join` does today. Removing someone mid-call then also needs a call to LiveKit's server API.
+
+### Setup
+
+Run the migration before you start the new server. It makes `calls.callee_id` nullable and adds `call_participants`. Existing calls aren't changed.
+
+```bash
+# MySQL (run once)
+mysql -u root -p frichat < database/add_group_calls.sql
+# PostgreSQL (safe to run more than once)
+psql -U postgres -d frichat -f database/add_group_calls_postgresql.sql
+```
+
+Fresh installs get both changes from `schema.sql` and `schema_postgresql.sql`.
+
+Optional setting in `backend/.env`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GROUP_CALL_MAX` | `4` | People allowed in one group call, 2 to 8. It is read when a call starts. |
+
+There are no new npm packages. As with 1:1 calls, calls need HTTPS (localhost excepted), and people on strict networks need TURN (see Phase 11).
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/calls/active?chatId=` | The running call in a chat, as this viewer may see it, or `null`. Members only. Used by the banner. |
+| `GET /api/calls` | Also lists group calls, with `group`, `groupName`, `groupAvatarUrl`, `participantCount`, `joined` and `live`. |
+
+Both use the existing per-user limit on `/api/calls`.
+
+### Socket events
+
+Existing events keep their names. Inside a group call, `call_offer`, `call_answer` and `call_ice_candidate` carry `to` (a user id) from the client and `from` to the receiver. They are size-checked as in 1:1 calls and relayed only between two participants of the same room.
+
+| Client to server | Purpose |
+|---|---|
+| `call_invite { chatId, type }` | In a group chat: start a call, or join the running one |
+| `call_join { callId }` | Join. Refused with `call_error` codes `CALL_FULL`, `BLOCKED`, `NOT_A_MEMBER`, `ALREADY_IN_CALL`, `OTHER_DEVICE` or `NOT_FOUND`. |
+| `call_leave { callId }` | Leave. `call_hangup` does the same in a group call. |
+| `call_reject { callId }` | Dismiss the ring |
+| `call_media_state { callId, muted, cameraOff, screen }` | What the others should show on your tile |
+| `call_sync { callId }` | Rebind after a socket reconnect, within the 15-second grace period |
+
+| Server to client | Purpose |
+|---|---|
+| `call_participants` | The room, sent to everyone in it whenever it changes. The joiner's copy has `offerTo`, the people to send offers to. |
+| `call_room_update` | To the whole chat: a call started, changed or ended. Clients then fetch `GET /api/calls/active`, because photos depend on the viewer. |
+| `call_peer_reconnected { callId, from }` | That person's socket came back, so ICE may need a restart |
+
+`call_join` and `call_leave` share the `call` rate limit group, and `call_media_state` shares `callSignal`. Every event checks chat membership against the database.
+
+The newcomer offers to everyone already in the room, which avoids offer collisions. The side that offered also does that pair's ICE restart. A pair that stays disconnected shows "Connection lost" on the tile, and the call continues for everyone else.
+
+### Test checklist
+
+Use a group with five members, each in their own browser profile. A fake camera helps on one machine: start Chrome or Edge with `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`.
+
+- [ ] A presses the video button in the group. B, C and D get the Join/Dismiss modal, and the chat shows "A started a video call".
+- [ ] A sees "Group calls work best with up to 4 people." On the next call the note doesn't appear.
+- [ ] B presses Join. A and B see each other, and the timer starts.
+- [ ] C presses Dismiss. The modal closes and the banner stays. C presses Join on the banner: three tiles.
+- [ ] D joins, then E tries. E's banner says Full, and joining from a ring gives "This call is full".
+- [ ] B mutes: the others see the muted icon. B turns the camera off: the others see B's photo.
+- [ ] Whoever speaks gets a green outline.
+- [ ] On desktop, A shares the screen: the others see it, and stopping restores the camera. The button isn't shown on phones.
+- [ ] On a phone width, the tiles and controls all fit.
+- [ ] D leaves, then opens the Calls panel: the call shows **Rejoin**, which works.
+- [ ] A blocks D during the call: D is disconnected, and D can't rejoin while A is there.
+- [ ] An admin removes B from the group during the call: B is disconnected.
+- [ ] The last person leaves: the banner disappears, those who joined read "Call ended, ...", and E reads "Missed group call" in red.
+- [ ] A member in do-not-disturb, and a member with a block with the caller, get no ring, but do see the banner.
+- [ ] Someone in a group call can't start a 1:1 call, and calling them gives busy.
+
+Automated: `npm test` runs `test/phase16.test.js`, and `npm run test:pages` checks that no script names collide.

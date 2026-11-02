@@ -5,7 +5,22 @@
  * uses it for its own safety timer; the server decides when a call times out).
  */
 
+// Mesh sends every person's media to every other person, so it stops being usable quite quickly
+const DEFAULT_GROUP_CALL_MAX = 4;
+const GROUP_CALL_MAX_LIMIT = 8;
+
+/**
+ * People allowed in one group call: GROUP_CALL_MAX, 2 to 8. Read when a call starts, so tests can set it.
+ */
+function groupCallMax(env = process.env) {
+    const value = parseInt(env.GROUP_CALL_MAX, 10);
+    if (!Number.isInteger(value)) return DEFAULT_GROUP_CALL_MAX;
+    return Math.min(GROUP_CALL_MAX_LIMIT, Math.max(2, value));
+}
+
 module.exports = {
+    groupCallMax,
+
     CALL_TYPES: ['voice', 'video'],
 
     // An unanswered call becomes "missed" after this long

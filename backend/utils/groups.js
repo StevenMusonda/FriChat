@@ -285,6 +285,10 @@ function removeUserFromChatRoom(io, userId, chatId) {
     if (io && typeof io.in === 'function') {
         io.in(`user_${userId}`).socketsLeave(`chat_${chatId}`);
     }
+    // ...and they stop being in its call
+    if (io && io.callManager) {
+        io.callManager.memberRemoved(userId, chatId).catch(error => console.error('Call member removal error:', error));
+    }
 }
 
 /**

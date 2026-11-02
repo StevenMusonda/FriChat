@@ -1,10 +1,10 @@
 /**
  * Call Controller (phase 11)
- * ICE servers (with short-lived TURN credentials) and the signed-in user's call history.
- * Calls themselves are Socket.IO events (utils/calls.js).
+ * ICE servers (with short-lived TURN credentials), the signed-in user's call history and a group
+ * chat's running call. Calls themselves are Socket.IO events (utils/calls.js, utils/groupCalls.js).
  */
 
-const { executeQuery } = require('../config/database');
+const { executeQuery, queryOne } = require('../config/database');
 const { buildIceServers } = require('../utils/turn');
 const { applyUserPrivacy } = require('../utils/privacy');
 const { HISTORY_PAGE_SIZE } = require('../config/calls');
@@ -21,6 +21,55 @@ async function getIceServers(req, res) {
     } catch (error) {
         console.error('ICE servers error:', error);
         res.status(500).json({ success: false, message: 'Failed to load call settings' });
+    }
+}
+
+/**
+ * GET /api/calls/active?chatId=  the group chat's running call (the banner), or null
+ */
+async function getActiveCall(req, res) {
+    try {
+        const chatId = req.query.chatId;
+        const member = await queryOne('SELECT id FROM group_members WHERE chat_id = ? AND user_id = ?', [chatId, req.user.id]);
+        if (!member) return res.status(403).json({ success: false, message: 'Access denied to this chat' });
+
+        const manager = req.io && req.io.callManager;
+        const call = manager ? await manager.activeCallForChat(chatId, req.user.id) : null;
+        res.set('Cache-Control', 'no-store');
+        res.json({ success: true, data: call });
+    } catch (error) {
+        console.error('Active call error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load the call' });
+    }
+}
+
+function placeholders(values) {
+    return values.map(() => '?').join(', ');
+}
+
+/**
+ * Group calls in a page of history: the group's name and photo, who joined, and whether it's running
+ */
+async function addGroupDetails(req, page) {
+    const groupCalls = page.filter(call => call.group);
+    if (groupCalls.length === 0) return;
+
+    const chatIds = [...new Set(groupCalls.map(call => call.chatId))];
+    const chats = await executeQuery(`SELECT id, chat_name, avatar_url FROM chats WHERE id IN (${placeholders(chatIds)})`, chatIds);
+    const chatById = new Map(chats.map(chat => [Number(chat.id), chat]));
+
+    const callIds = groupCalls.map(call => call.id);
+    const joined = await executeQuery(`SELECT call_id, user_id FROM call_participants WHERE call_id IN (${placeholders(callIds)})`, callIds);
+
+    const manager = req.io && req.io.callManager;
+    for (const call of groupCalls) {
+        const chat = chatById.get(call.chatId);
+        const people = joined.filter(row => Number(row.call_id) === call.id).map(row => Number(row.user_id));
+        call.groupName = chat ? chat.chat_name : null;
+        call.groupAvatarUrl = chat ? chat.avatar_url || null : null;
+        call.participantCount = people.length;
+        call.joined = people.includes(Number(req.user.id));
+        call.live = !!manager && manager.isLive(call.id);
     }
 }
 
@@ -51,8 +100,8 @@ async function listCalls(req, res) {
                    c.started_at, c.answered_at, c.ended_at,
                    u.id AS other_id, u.username AS other_username, u.full_name AS other_full_name, u.avatar_url AS other_avatar_url
             FROM calls c
-            JOIN users u ON u.id = CASE WHEN c.caller_id = ? THEN c.callee_id ELSE c.caller_id END
-            WHERE (c.caller_id = ? OR c.callee_id = ?)
+            JOIN users u ON u.id = CASE WHEN c.caller_id = ? AND c.callee_id IS NOT NULL THEN c.callee_id ELSE c.caller_id END
+            WHERE (c.caller_id = ? OR c.callee_id = ? OR c.callee_id IS NULL)
               AND c.chat_id IN (SELECT gm.chat_id FROM group_members gm WHERE gm.user_id = ?)
               ${cursor}
             ORDER BY c.id DESC
@@ -69,6 +118,7 @@ async function listCalls(req, res) {
                 type: row.call_type,
                 status: row.status,
                 endReason: row.end_reason || null,
+                group: row.callee_id === null || row.callee_id === undefined,
                 direction: Number(row.caller_id) === Number(userId) ? 'outgoing' : 'incoming',
                 startedAt: toIso(row.started_at),
                 answeredAt,
@@ -86,6 +136,8 @@ async function listCalls(req, res) {
         });
 
         // Profile photos only where the other person's privacy setting allows
+        await addGroupDetails(req, page);
+
         const people = page.map(call => call.otherUser);
         await applyUserPrivacy(userId, people, { avatar: 'avatarUrl', status: null, customStatus: null });
 
@@ -100,4 +152,4 @@ async function listCalls(req, res) {
     }
 }
 
-module.exports = { getIceServers, listCalls };
+module.exports = { getIceServers, getActiveCall, listCalls };

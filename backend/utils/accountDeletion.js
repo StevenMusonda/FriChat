@@ -86,6 +86,7 @@ const KEPT_REFERENCES = [
     'polls.created_by',
     'calls.caller_id', // the other person's call history
     'calls.callee_id',
+    'call_participants.user_id', // who was in a group call, in the others' history
     'chat_events.created_by',
     'chat_lists.created_by',
     'chat_list_items.created_by',

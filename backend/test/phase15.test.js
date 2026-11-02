@@ -345,7 +345,7 @@ describe('frontend', () => {
     test('the app shell caches the new script', () => {
         const sw = readRepo('frontend/sw.js');
         assert.match(sw, /'js\/ai\.js'/);
-        assert.match(sw, /frichat-shell-v18/);
+        assert.ok(Number(/frichat-shell-v(\d+)/.exec(sw)[1]) >= 18);
     });
 
     test('the new styles use theme variables', () => {

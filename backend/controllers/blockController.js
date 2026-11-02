@@ -60,6 +60,8 @@ async function blockUser(req, res) {
             await emitPresenceChange(req.io, blockerId, blockedId, true);
             // The blocker's other tabs update their menus and blocked list
             if (req.io) req.io.to(`user_${blockerId}`).emit('block_updated', { userId: blockedId, blocked: true });
+            // Nobody stays in a group call with someone they blocked
+            if (req.io && req.io.callManager) await req.io.callManager.userBlocked(blockerId, blockedId);
         }
 
         res.status(created ? 201 : 200).json({
