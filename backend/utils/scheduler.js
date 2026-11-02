@@ -20,6 +20,7 @@ const { fireDueListItems } = require('./lists');
 const { processPendingExports, sweepExpiredExports } = require('./dataExport');
 const { processDueDeletions } = require('./accountDeletion');
 const { purgeOldDevices } = require('./knownDevices');
+const { purgeOldUsage } = require('./aiUsage');
 const { SCHEDULER_TICK_SECONDS } = require('../config/scheduling');
 const { ACCOUNT_JOB_TICK_SECONDS } = require('../config/accountSecurity');
 
@@ -48,6 +49,7 @@ async function removeExpiredAuthRows() {
     try {
         await purgeOldSessions();
         await purgeOldDevices();
+        await purgeOldUsage();
         await executeQuery('DELETE FROM email_verifications WHERE expires_at < CURRENT_TIMESTAMP');
     } catch (error) {
         console.error('Error removing expired sessions:', error);

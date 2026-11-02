@@ -27,6 +27,8 @@ const listRoutes = require('./routes/lists');
 const reportRoutes = require('./routes/reports');
 const adminRoutes = require('./routes/admin');
 const accountRoutes = require('./routes/account');
+const webhookRoutes = require('./routes/webhooks');
+const aiRoutes = require('./routes/ai');
 
 // Import utilities
 const { executeQuery, queryOne, insertAndGetId } = require('./config/database');
@@ -84,14 +86,18 @@ app.use(cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
     credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // Make io available to routes
 app.use((req, res, next) => {
     req.io = io;
     next();
 });
+
+// Incoming webhooks parse their own body: smaller limit, and only after the token checks out
+app.use('/api/webhooks', webhookRoutes);
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Serve uploaded files with CORS headers; never anything that resolves outside the uploads folder.
 // Media is shown; anything else is a download (.html or .svg included), see setUploadHeaders.
@@ -123,6 +129,7 @@ app.use('/api/lists', listRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/account', accountRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

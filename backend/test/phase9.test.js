@@ -132,7 +132,7 @@ function createWorld(dbType, privacyOverrides = {}) {
         if (/FROM users u LEFT JOIN privacy_settings ps ON ps.user_id = u.id WHERE u.id IN/.test(sql)) {
             return params.map(Number).filter(id => world.users[id]).map(id => ({ ...world.users[id], ...(settingsRow(id) || {}) }));
         }
-        if (/^SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators FROM privacy_settings WHERE user_id = \?$/.test(sql)) {
+        if (/^SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators, ai_features FROM privacy_settings WHERE user_id = \?$/.test(sql)) {
             const row = settingsRow(Number(params[0]));
             return row ? [row] : [];
         }

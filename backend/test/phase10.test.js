@@ -76,7 +76,7 @@ function createWorld(dbType) {
             return block ? [{ blocker_id: block.blocker }] : [];
         }
         if (/FROM message_requests WHERE chat_id = \? AND recipient_id = \?/.test(sql)) return [];
-        if (/^SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators FROM privacy_settings/.test(sql)) {
+        if (/^SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators, ai_features FROM privacy_settings/.test(sql)) {
             const userId = Number(params[0]);
             return world.receiptsOff.has(userId)
                 ? [{ last_seen_audience: 'everyone', photo_audience: 'everyone', bio_audience: 'everyone', groups_audience: 'everyone', read_receipts: pg ? false : 0, typing_indicators: pg ? true : 1 }]

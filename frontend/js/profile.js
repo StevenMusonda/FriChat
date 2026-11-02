@@ -31,6 +31,7 @@ const PRIVACY_CONTROLS = {
     privacyGroups: 'groups',
     privacyReadReceipts: 'readReceipts',
     privacyTyping: 'typingIndicators',
+    privacyAiFeatures: 'aiFeatures',
     privacyBirthday: 'birthday'
 };
 
@@ -480,6 +481,7 @@ function applyPrivacySettings(settings) {
         if (control.type === 'checkbox') control.checked = !!settings[field];
         else control.value = settings[field];
     }
+    if (typeof FriChat.applyAiFeaturesSetting === 'function') FriChat.applyAiFeaturesSetting(settings.aiFeatures);
 }
 
 async function savePrivacyControl(control) {

@@ -16,6 +16,7 @@ const {
 const { getMembership, leaveGroup, removeUserFromChatRoom, emitMembersUpdated, isBanned, banUser } = require('../utils/groups');
 const { getGroupDetailsForMember } = require('./groupController');
 const { toBool } = require('../utils/messageQueries');
+const { BOT_USERNAME } = require('../config/webhooks');
 const auditLog = require('../utils/auditLog');
 const { checkUnverifiedContact } = require('../utils/emailVerification');
 const { checkBlockBetween, checkDirectChatBlock, findBlockersAmong, findDeletedAmong } = require('../utils/blocks');
@@ -639,9 +640,9 @@ async function searchUsers(req, res) {
             SELECT id, username, full_name, avatar_url, status
             FROM users
             WHERE (username LIKE ? OR full_name LIKE ?)
-            AND id != ? AND deleted_at IS NULL
+            AND id != ? AND deleted_at IS NULL AND username <> ?
             LIMIT 20
-        `, [`%${query}%`, `%${query}%`, userId]);
+        `, [`%${query}%`, `%${query}%`, userId, BOT_USERNAME]);
 
         res.json({
             success: true,

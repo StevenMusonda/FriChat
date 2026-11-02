@@ -5,6 +5,7 @@
 const { executeQuery, queryOne, dbType } = require('../config/database');
 const { readReceiptsEnabled, receiptlessMemberRooms } = require('./privacy');
 const { isAwaitingAcceptance } = require('./messageRequests');
+const { aiEnabled, SUMMARY_MIN_UNREAD } = require('../config/ai');
 
 // Stored in muted_until for "mute always"
 const MUTE_FOREVER = '9999-12-31 00:00:00';
@@ -66,6 +67,20 @@ async function emitToReceiptViewers(io, chatId, event, payload) {
 }
 
 /**
+ * Opening a chat reads it straight away, before "Summarize unread" can be clicked. So when a read
+ * jumps over enough messages for a summary, keep where the read position was (utils/ai.js uses it for
+ * a while). Called before the position moves. Only with AI configured: otherwise no extra query.
+ */
+async function rememberCatchUp(chatId, userId, previous) {
+    if (!aiEnabled()) return;
+    if ((await getUnreadCount(chatId, userId)) <= SUMMARY_MIN_UNREAD) return;
+    await executeQuery(
+        'UPDATE group_members SET catchup_from_message_id = ?, catchup_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND user_id = ?',
+        [previous, chatId, userId]
+    );
+}
+
+/**
  * Move the user's read position forward to messageId (or the newest message when omitted).
  * Never moves it backwards. Tells the user's other tabs, and tells the chat when
  * messages became read so senders can update their receipts (unless the reader's receipts are off).
@@ -96,6 +111,8 @@ async function markChatRead(io, chatId, userId, messageId = null) {
     const receipts = advanced && await sendsReadReceipts(chatId, userId);
 
     if (advanced) {
+        await rememberCatchUp(chatId, userId, previous);
+
         await executeQuery(`
             UPDATE group_members SET last_read_message_id = ?
             WHERE chat_id = ? AND user_id = ?

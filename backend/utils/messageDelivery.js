@@ -20,14 +20,20 @@ const { chatExpiresAtSql } = require('./timeSql');
  *   chatId, senderId, messageType ('text' | 'poll'), content, replyToMessageId
  *   afterInsert(messageId) - rows that belong to the message (e.g. the poll); if it throws, the message is removed
  *   decorate(message) - adds fields to the broadcast copy (e.g. message.poll)
+ *   webhookId, botName - a webhook message: which webhook, and the name to show
  * @returns {Promise<Object|null>} the message as clients receive it
  */
-async function deliverNewMessage(io, { chatId, senderId, messageType = 'text', content = null, replyToMessageId = null, afterInsert, decorate }) {
+async function deliverNewMessage(io, { chatId, senderId, messageType = 'text', content = null, replyToMessageId = null, afterInsert, decorate, webhookId, botName }) {
     // expires_at follows the chat's disappearing-messages timer at the moment it's actually sent
-    const messageId = await insertAndGetId(
-        `INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
-        [chatId, senderId, messageType, content, replyToMessageId, 'sent', chatId]
-    );
+    const messageId = botName
+        ? await insertAndGetId(
+            `INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status, webhook_id, bot_name, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
+            [chatId, senderId, messageType, content, replyToMessageId, 'sent', webhookId, botName, chatId]
+        )
+        : await insertAndGetId(
+            `INSERT INTO messages (chat_id, sender_id, message_type, content, reply_to_message_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ${chatExpiresAtSql()})`,
+            [chatId, senderId, messageType, content, replyToMessageId, 'sent', chatId]
+        );
 
     if (afterInsert) {
         try {

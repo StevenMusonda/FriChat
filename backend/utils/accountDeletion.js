@@ -31,6 +31,7 @@ const { resolveUploadPath, deleteOrphanedFiles } = require('./uploads');
 const { deleteUserExports } = require('./dataExport');
 const { notifySecurityEvent } = require('./securityEmails');
 const { emitProfileUpdate } = require('./privacy');
+const { userScope } = require('./aiUsage');
 const auditLog = require('./auditLog');
 
 const DELETED_NAME = 'Deleted user';
@@ -65,7 +66,8 @@ const DELETED_ROWS = [
     ['message_requests', 'recipient_id'],
     ['voice_note_plays', 'user_id'],
     ['event_rsvps', 'user_id'],
-    ['user_warnings', 'user_id']
+    ['user_warnings', 'user_id'],
+    ['ai_usage_log', 'user_id']
 ];
 
 /**
@@ -91,7 +93,9 @@ const KEPT_REFERENCES = [
     'chat_list_items.due_set_by',
     'reports.reported_user_id', // an open report still needs its target
     'reports.reviewed_by',
-    'user_warnings.admin_id'
+    'user_warnings.admin_id',
+    'chat_webhooks.created_by', // the webhook is the group's
+    'chat_webhooks.revoked_by'
 ];
 
 // --- the grace period ---
@@ -297,6 +301,7 @@ async function purgeAccount(io, userId) {
     for (const [table, column] of DELETED_ROWS) {
         await executeQuery(`DELETE FROM ${table} WHERE ${column} = ?`, [userId]);
     }
+    await executeQuery('DELETE FROM ai_usage_counters WHERE scope = ?', [userScope(userId)]);
 
     await avatars.deleteUserAvatar(user.avatar_url);
     await writeTombstone(userId);

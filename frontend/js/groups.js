@@ -13,6 +13,8 @@ let currentChatDetails = null;
 let groupInfoOpenFor = null;
 // The full link exists only in the create response, so it's kept here until the panel closes
 let lastCreatedInvite = null;
+// Same for a webhook's secret URL, which can never be shown again
+let lastCreatedWebhook = null;
 
 // Mirrors backend/config/groups.js (the server enforces them)
 const GROUP_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -188,7 +190,10 @@ async function openGroupInfo(chatId) {
     const title = document.getElementById('chatInfoTitle');
     if (!modal || !content) return;
 
-    if (groupInfoOpenFor !== chatId) lastCreatedInvite = null;
+    if (groupInfoOpenFor !== chatId) {
+        lastCreatedInvite = null;
+        lastCreatedWebhook = null;
+    }
     groupInfoOpenFor = chatId;
     // Fresh tabs each time the panel opens; refreshes while it's open keep them (media.js)
     FriChat.resetSharedMediaSection();
@@ -204,6 +209,7 @@ function closeGroupInfo() {
     if (modal) modal.style.display = 'none';
     groupInfoOpenFor = null;
     lastCreatedInvite = null;
+    lastCreatedWebhook = null;
 }
 
 async function refreshGroupInfo() {
@@ -224,26 +230,29 @@ async function refreshGroupInfo() {
         let invites = [];
         let requests = [];
         let bans = [];
+        let webhooks = [];
         if (chat.my_role === 'admin') {
-            const [inviteResponse, requestResponse, banResponse] = await Promise.all([
+            const [inviteResponse, requestResponse, banResponse, webhookResponse] = await Promise.all([
                 chat.invite_links_enabled ? apiRequest(CONFIG.ENDPOINTS.GROUP_INVITES(chatId)) : null,
                 apiRequest(CONFIG.ENDPOINTS.JOIN_REQUESTS(chatId)),
-                apiRequest(CONFIG.ENDPOINTS.GROUP_BANS(chatId))
+                apiRequest(CONFIG.ENDPOINTS.GROUP_BANS(chatId)),
+                apiRequest(CONFIG.ENDPOINTS.GROUP_WEBHOOKS(chatId))
             ]);
             if (inviteResponse && inviteResponse.success) invites = inviteResponse.data;
             if (requestResponse && requestResponse.success) requests = requestResponse.data;
             if (banResponse && banResponse.success) bans = banResponse.data;
+            if (webhookResponse && webhookResponse.success) webhooks = webhookResponse.data;
             updateChatInfoBadge(requests.length);
         }
 
         if (groupInfoOpenFor !== chatId) return;
-        renderGroupInfo(chat, invites, requests, bans);
+        renderGroupInfo(chat, invites, requests, bans, webhooks);
     } catch (error) {
         console.error('Group info error:', error);
     }
 }
 
-function renderGroupInfo(chat, invites, requests, bans = []) {
+function renderGroupInfo(chat, invites, requests, bans = [], webhooks = []) {
     const content = document.getElementById('chatInfoContent');
     const isAdmin = chat.my_role === 'admin';
     const scrollTop = content.parentElement ? content.parentElement.scrollTop : 0;
@@ -253,6 +262,7 @@ function renderGroupInfo(chat, invites, requests, bans = []) {
         renderProfileSection(chat, isAdmin),
         renderSettingsSection(chat, isAdmin),
         isAdmin ? renderInviteSection(chat, invites) : null,
+        isAdmin ? renderWebhookSection(chat, webhooks) : null,
         isAdmin && (chat.approve_new_members || requests.length > 0) ? renderRequestsSection(chat, requests) : null,
         renderMembersSection(chat, isAdmin),
         FriChat.renderSharedMediaSection(chat.id),
@@ -535,6 +545,86 @@ async function revokeGroupInvite(chatId, inviteId) {
         refreshGroupInfo();
     } catch (error) {
         showNotification('Failed to revoke the link', 'error');
+    }
+}
+
+// --- incoming webhooks ---
+
+function renderWebhookSection(chat, webhooks) {
+    const name = h('input', { attrs: { type: 'text', maxlength: 50, placeholder: 'Name, e.g. Deploy bot', 'aria-label': 'Webhook name', required: true } });
+    const form = h('form', { className: 'invite-create-form', on: {
+        submit: async (event) => {
+            event.preventDefault();
+            const button = form.querySelector('button');
+            button.disabled = true;
+            await createGroupWebhook(chat.id, name.value);
+            button.disabled = false;
+        }
+    } }, name, h('button', { className: 'btn btn-primary btn-small', text: 'Create webhook', attrs: { type: 'submit' } }));
+
+    const created = lastCreatedWebhook && lastCreatedWebhook.chatId === chat.id ? renderCreatedWebhook(lastCreatedWebhook) : null;
+
+    const list = webhooks.length
+        ? h('ul', { className: 'invite-list' }, ...webhooks.map(webhook => renderWebhookItem(chat.id, webhook)))
+        : h('p', { className: 'settings-note', text: 'No webhooks yet.' });
+
+    return section('Webhooks',
+        h('p', { className: 'settings-note', text: 'A webhook lets another service post messages here, marked with a Bot badge.' }),
+        form, created, list);
+}
+
+function renderCreatedWebhook(webhook) {
+    const urlInput = h('input', { className: 'invite-url', attrs: { type: 'text', readonly: true, 'aria-label': 'Webhook URL' } });
+    urlInput.value = webhook.url;
+    return h('div', { className: 'invite-created' },
+        h('div', { className: 'invite-url-row' },
+            urlInput,
+            h('button', { className: 'btn btn-secondary btn-small', text: 'Copy', attrs: { type: 'button' }, on: { click: () => copyText(webhook.url, urlInput) } })
+        ),
+        h('p', { className: 'settings-note', text: 'Copy this URL now: it won\'t be shown again. Anyone who has it can post in this group, so treat it like a password.' })
+    );
+}
+
+function renderWebhookItem(chatId, webhook) {
+    const lastUsed = webhook.lastUsedAt
+        ? `Last used ${new Date(webhook.lastUsedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+        : 'Never used';
+    return h('li', { className: 'invite-item invite-active' },
+        h('div', { className: 'invite-item-text' },
+            h('div', { className: 'invite-item-title' }, h('span', { text: webhook.name })),
+            h('div', { className: 'invite-item-meta', text: `${lastUsed}${webhook.createdByUsername ? ` · by @${webhook.createdByUsername}` : ''}` })
+        ),
+        h('button', { className: 'btn btn-secondary btn-small', text: 'Revoke', attrs: { type: 'button' }, on: { click: () => revokeGroupWebhook(chatId, webhook.id) } })
+    );
+}
+
+async function createGroupWebhook(chatId, name) {
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.GROUP_WEBHOOKS(chatId), {
+            method: 'POST',
+            body: JSON.stringify({ name })
+        });
+        if (!response.success) {
+            showNotification(firstErrorMessage(response, 'Failed to create the webhook'), 'error');
+            return;
+        }
+        lastCreatedWebhook = { chatId, url: response.data.url };
+        await refreshGroupInfo();
+    } catch (error) {
+        showNotification('Failed to create the webhook', 'error');
+    }
+}
+
+async function revokeGroupWebhook(chatId, webhookId) {
+    if (!confirm('Revoke this webhook? Anything using its URL will stop being able to post.')) return;
+    try {
+        const response = await apiRequest(CONFIG.ENDPOINTS.GROUP_WEBHOOK(chatId, webhookId), { method: 'DELETE' });
+        if (!response.success) {
+            showNotification(response.message || 'Failed to revoke the webhook', 'error');
+        }
+        refreshGroupInfo();
+    } catch (error) {
+        showNotification('Failed to revoke the webhook', 'error');
     }
 }
 

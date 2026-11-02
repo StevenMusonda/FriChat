@@ -161,6 +161,9 @@ CREATE TABLE group_members (
     muted_until TIMESTAMP NULL, -- NULL = not muted; '9999-12-31' = muted until unmuted ("always")
     archived_at TIMESTAMP NULL, -- NULL = in the main list
     member_tag VARCHAR(30) NULL, -- short label set by admins, shown next to the name
+    ai_disabled BOOLEAN NOT NULL DEFAULT FALSE, -- AI off in this chat for this member
+    catchup_from_message_id INTEGER NULL, -- opening a chat marks it read: where it was while "Summarize unread" is on offer
+    catchup_at TIMESTAMP NULL,
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(chat_id, user_id)
 );
@@ -217,6 +220,8 @@ CREATE TABLE messages (
     link_preview_id INTEGER NULL REFERENCES link_previews(id) ON DELETE SET NULL, -- preview card under the message
     link_preview_dismissed BOOLEAN NOT NULL DEFAULT FALSE, -- the sender removed the preview
     expires_at TIMESTAMP NULL, -- disappearing messages: the scheduler deletes it (and its file) then
+    webhook_id INTEGER NULL, -- the webhook that posted it; a plain number that outlives the webhook
+    bot_name VARCHAR(50) NULL, -- name shown for a webhook message
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- message search: word prefixes, no stemming (to_tsquery('simple', 'term:*'))
@@ -485,6 +490,9 @@ CREATE TABLE privacy_settings (
     birthday_audience VARCHAR(10) NOT NULL DEFAULT 'contacts', -- who sees your birthday (and its banner in shared groups)
     read_receipts BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see your reads, you don't see theirs
     typing_indicators BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see you typing
+    ai_features BOOLEAN NOT NULL DEFAULT TRUE, -- off: nothing of yours goes to the AI provider
+    ai_consent_at TIMESTAMP NULL, -- NULL = hasn't agreed yet
+    translation_language VARCHAR(10) NULL, -- NULL = English
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -745,6 +753,58 @@ CREATE TABLE data_exports (
 
 CREATE INDEX idx_data_exports_user ON data_exports(user_id, id);
 CREATE INDEX idx_data_exports_status ON data_exports(status, id);
+
+-- Phase 15: incoming webhooks (only a SHA-256 hash of the token is stored)
+CREATE TABLE chat_webhooks (
+    id SERIAL PRIMARY KEY,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    name VARCHAR(50) NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    created_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP NULL,
+    revoked_at TIMESTAMP NULL,
+    revoked_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_chat_webhooks_chat ON chat_webhooks(chat_id);
+
+-- One cached translation per message and language
+CREATE TABLE message_translations (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    language VARCHAR(10) NOT NULL,
+    translated_text TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (message_id, language)
+);
+
+-- AI caps: scope is 'user:<id>' with period YYYY-MM-DD, or 'global' with period YYYY-MM (UTC)
+CREATE TABLE ai_usage_counters (
+    id SERIAL PRIMARY KEY,
+    scope VARCHAR(30) NOT NULL,
+    period VARCHAR(10) NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    tokens BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (scope, period)
+);
+
+CREATE INDEX idx_ai_usage_counters_updated ON ai_usage_counters(updated_at);
+
+-- Token usage per request. Never message text.
+CREATE TABLE ai_usage_log (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    feature VARCHAR(20) NOT NULL, -- summary | translation
+    model VARCHAR(60) NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    outcome VARCHAR(20) NOT NULL, -- ok | refused | error
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_ai_usage_log_created ON ai_usage_log(created_at);
 
 -- Create a view for easy message retrieval with user info
 CREATE VIEW message_details AS

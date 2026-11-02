@@ -31,6 +31,7 @@ const {
     shapeMessage,
     getMessageById,
     checkReplyTarget,
+    forgetTranslations,
     editWindowCondition
 } = require('../utils/messageQueries');
 
@@ -654,6 +655,7 @@ async function deleteMessage(req, res) {
                 'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?, deleted_for_everyone = TRUE WHERE id = ?',
                 [userId, messageId]
             );
+            await forgetTranslations(messageId);
 
             // Open clients swap in the placeholder and blank quotes of it
             if (req.io) {
@@ -991,6 +993,7 @@ async function editMessage(req, res) {
             `UPDATE messages SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND sender_id = ?`,
             [content, messageId, userId]
         );
+        await forgetTranslations(messageId);
 
         const updated = await queryOne('SELECT content, edited_at FROM messages WHERE id = ?', [messageId]);
 

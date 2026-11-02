@@ -178,6 +178,9 @@
                 <!-- Someone in this group has a birthday today (events.js) -->
                 <div class="birthday-bar" id="birthdayBar" role="status" hidden></div>
 
+                <!-- More than 30 unread messages: offer a private AI summary (ai.js) -->
+                <div class="ai-catchup" id="aiCatchUpBar" role="status" hidden></div>
+
                 <div class="messages-wrapper" id="messagesWrapper">
                     <div class="messages-container" id="messagesContainer">
                         <!-- Messages will be loaded here -->
@@ -440,6 +443,16 @@
                         </form>
                     </section>
 
+                    <section class="settings-section ai-only" aria-labelledby="settingsTranslationHeading" hidden>
+                        <h4 id="settingsTranslationHeading">Translation</h4>
+                        <div class="settings-form">
+                            <label for="aiLanguageSelect">Translate messages into
+                                <select id="aiLanguageSelect" class="ai-language-select"></select>
+                            </label>
+                            <p class="settings-status" id="aiLanguageStatus" role="status"></p>
+                        </div>
+                    </section>
+
                     <section class="settings-section" aria-labelledby="settingsCustomStatusHeading">
                         <h4 id="settingsCustomStatusHeading">Status</h4>
                         <form class="settings-form" id="customStatusForm" novalidate>
@@ -601,6 +614,13 @@
                                 <span class="settings-row-hint">Let others see when you're typing.</span>
                             </span>
                             <input type="checkbox" class="switch" id="privacyTyping" data-privacy-field checked>
+                        </label>
+                        <label class="settings-row ai-only" for="privacyAiFeatures" hidden>
+                            <span class="settings-row-text">
+                                <span class="settings-row-title">AI features</span>
+                                <span class="settings-row-hint">Summaries and translation send the messages you choose to an AI provider. Turn this off and nothing is sent. You can also turn it off for one chat from its menu.</span>
+                            </span>
+                            <input type="checkbox" class="switch" id="privacyAiFeatures" data-privacy-field checked>
                         </label>
                         <p class="settings-status" id="privacyStatus" role="status"></p>
                     </section>
@@ -791,6 +811,36 @@
                 <button class="modal-close" id="closeProfileCard" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body" id="profileCardBody" aria-live="polite"></div>
+        </div>
+    </div>
+
+    <!-- One-time consent before anything goes to the AI provider (ai.js) -->
+    <div class="modal" id="aiConsentModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="aiConsentTitle" aria-describedby="aiConsentDesc">
+        <div class="modal-content disappearing-modal">
+            <div class="modal-header">
+                <h2 id="aiConsentTitle">Send messages to an AI provider?</h2>
+                <button class="modal-close" id="aiConsentClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="disappearing-intro" id="aiConsentDesc">
+                    Summaries and translations are made by an outside AI provider, Anthropic. When you use one of them,
+                    the text of the messages involved, with the senders' names, leaves this server and is sent to that provider.
+                </p>
+                <ul class="ai-consent-list">
+                    <li>Only when you ask, and only the unread messages of that chat or the one message you picked.</li>
+                    <li>Never photos, files, voice notes, deleted messages or disappearing messages.</li>
+                    <li>Only you see a summary. A translation is saved so that others in the chat don't need to send the message again.</li>
+                    <li>You can turn this off at any time in Settings &gt; Privacy, or for one chat from its menu.</li>
+                </ul>
+                <div class="form-group">
+                    <label for="aiConsentLanguage">Translate messages into</label>
+                    <select id="aiConsentLanguage" class="ai-language-select"></select>
+                </div>
+            </div>
+            <div class="modal-footer ai-consent-actions">
+                <button type="button" class="btn btn-secondary" id="aiConsentCancelBtn">Not now</button>
+                <button type="button" class="btn btn-primary" id="aiConsentAcceptBtn">I agree</button>
+            </div>
         </div>
     </div>
 
@@ -1334,6 +1384,7 @@
     <script src="js/events.js"></script>
     <script src="js/lists.js"></script>
     <script src="js/moderation.js"></script>
+    <script src="js/ai.js"></script>
 
     <script>
         // Start one feature: if it throws (or its script didn't load, so FriChat.initializeX is missing),
@@ -1498,6 +1549,9 @@
             // Events (cards, answers, My events, birthday banner) and shared lists
             startFeature('Events', () => FriChat.initializeEvents());
             startFeature('Lists', () => FriChat.initializeLists());
+
+            // Summaries and translation, when the server has an API key
+            startFeature('AI', () => FriChat.initializeAi());
 
             // Older pages on scroll up, read state and jump button near the bottom
             startFeature('Message scroll', () => initializeMessageScroll());

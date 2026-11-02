@@ -296,7 +296,8 @@ async function ownProfile(userId) {
 async function ownSettings(userId) {
     return {
         privacy: await queryOne(`
-            SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, birthday_audience, read_receipts, typing_indicators
+            SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, birthday_audience, read_receipts, typing_indicators,
+                   ai_features, ai_consent_at, translation_language
             FROM privacy_settings WHERE user_id = ?
         `, [userId]),
         notifications: await queryOne(`

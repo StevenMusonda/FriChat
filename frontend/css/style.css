@@ -7809,3 +7809,149 @@ body.admin-page {
     font: inherit;
     cursor: pointer;
 }
+
+/* ===== Webhook messages and AI features (phase 15) ===== */
+
+.message-sender.profile-link:not([data-profile-user-id]) {
+    cursor: default;
+}
+
+.bot-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--primary-color);
+    color: var(--bg-primary);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+.settings-row.ai-only[hidden],
+.settings-section.ai-only[hidden],
+.ai-catchup[hidden] {
+    display: none;
+}
+
+.ai-catchup {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 16px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+/* .btn fills its row by default */
+.ai-catchup .btn {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+}
+
+.ai-consent-actions .btn {
+    white-space: nowrap;
+}
+
+.ai-language-select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+.ai-catchup-text {
+    flex: 1;
+    min-width: 0;
+    align-self: center;
+}
+
+.ai-catchup-close {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.ai-summary {
+    flex: 1;
+    min-width: 0;
+}
+
+.ai-summary-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.ai-summary-list,
+.ai-consent-list {
+    margin: 0;
+    padding-left: 18px;
+    overflow-wrap: anywhere;
+}
+
+.ai-summary-list li,
+.ai-consent-list li {
+    margin-bottom: 3px;
+}
+
+.ai-consent-list {
+    margin: 12px 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.ai-summary-note {
+    margin: 4px 0 0;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.message-translation {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid currentColor;
+    border-top-color: color-mix(in srgb, currentColor 25%, transparent);
+    font-size: 0.9em;
+}
+
+.message-translation-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.75em;
+    opacity: 0.8;
+}
+
+.message-translation-label .poll-link {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.message-translation-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+    .ai-catchup {
+        padding: 8px 12px;
+    }
+}

@@ -40,6 +40,8 @@ const {
     POLL_MAX_OPTIONS
 } = require('../config/scheduling');
 const { HISTORY_MAX_PAGE_SIZE: CALL_HISTORY_MAX_PAGE_SIZE } = require('../config/calls');
+const { WEBHOOK_NAME_MAX_LENGTH } = require('../config/webhooks');
+const { TRANSLATION_LANGUAGES } = require('../config/ai');
 const {
     REPORT_REASONS,
     REPORT_STATUSES,
@@ -1446,10 +1448,73 @@ const validatePrivacySettings = [
         .optional()
         .isIn(AUDIENCES)
         .withMessage(`Audience must be one of ${AUDIENCES.join(', ')}`),
-    body(['readReceipts', 'typingIndicators'])
+    body(['readReceipts', 'typingIndicators', 'aiFeatures'])
         .optional()
         .isBoolean({ strict: true })
         .withMessage('Must be true or false')
+];
+
+/**
+ * Incoming webhooks (phase 15). The text gets the shared message rule in the controller.
+ */
+const validateCreateWebhook = [
+    chatIdParamRule,
+
+    body('name')
+        .isString()
+        .withMessage('Name must be text')
+        .bail()
+        .isLength({ min: 1, max: WEBHOOK_NAME_MAX_LENGTH })
+        .withMessage(`Name must be 1 to ${WEBHOOK_NAME_MAX_LENGTH} characters`)
+];
+
+const validateWebhookIdParam = [
+    chatIdParamRule,
+
+    param('webhookId')
+        .isInt({ min: 1 })
+        .withMessage('Invalid webhook ID')
+        .toInt()
+];
+
+const validateWebhookPost = [
+    body('text')
+        .isString()
+        .withMessage('text is required and must be a string')
+        .bail()
+        .isLength({ min: 1, max: MAX_MESSAGE_LENGTH })
+        .withMessage(`text must be 1 to ${MAX_MESSAGE_LENGTH} characters`),
+
+    body('username')
+        .optional({ values: 'null' })
+        .isString()
+        .withMessage('username must be a string')
+        .bail()
+        .isLength({ max: WEBHOOK_NAME_MAX_LENGTH })
+        .withMessage(`username must be at most ${WEBHOOK_NAME_MAX_LENGTH} characters`)
+];
+
+/**
+ * Optional AI features (phase 15)
+ */
+const languageRule = (chain) => chain
+    .isIn(Object.keys(TRANSLATION_LANGUAGES))
+    .withMessage('Pick a language from the list');
+
+const validateAiConsent = [
+    languageRule(body('language').optional({ values: 'null' }))
+];
+
+const validateAiLanguage = [
+    languageRule(body('language'))
+];
+
+const validateAiChatSetting = [
+    chatIdParamRule,
+
+    body('enabled')
+        .isBoolean({ strict: true })
+        .withMessage('enabled must be true or false')
 ];
 
 /**
@@ -1550,6 +1615,12 @@ module.exports = {
     validateProfileUpdate,
     validateCustomStatus,
     validatePrivacySettings,
+    validateCreateWebhook,
+    validateWebhookIdParam,
+    validateWebhookPost,
+    validateAiConsent,
+    validateAiLanguage,
+    validateAiChatSetting,
     validateCreateEvent,
     validateEventIdParam,
     validateUpdateEvent,

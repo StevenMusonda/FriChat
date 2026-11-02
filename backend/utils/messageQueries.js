@@ -3,7 +3,7 @@
  * including the quoted original for replies, plus the reply checks used by every send path
  */
 
-const { queryOne, dbType } = require('../config/database');
+const { executeQuery, queryOne, dbType } = require('../config/database');
 const { EDIT_WINDOW_MINUTES, REPLY_SNIPPET_LENGTH } = require('../config/messages');
 const { attachMentions } = require('./mentions');
 const { secondsUntilSql, isoFromSecondsUntil } = require('./timeSql');
@@ -17,6 +17,7 @@ const MESSAGE_COLUMNS = `
     m.sender_id,
     u.username,
     u.full_name,
+    m.bot_name,
     m.message_type,
     m.content,
     m.file_id,
@@ -35,6 +36,7 @@ const MESSAGE_COLUMNS = `
     rm.sender_id as reply_sender_id,
     ru.username as reply_username,
     ru.full_name as reply_full_name,
+    rm.bot_name as reply_bot_name,
     rm.message_type as reply_message_type,
     rm.content as reply_content,
     rf.original_name as reply_file_name,
@@ -75,6 +77,13 @@ function parseWaveform(value) {
 function shapeMessage(row) {
     if (!row) return row;
 
+    // A webhook message comes from one reserved account; the name shown is the webhook's
+    row.is_bot = !!row.bot_name;
+    if (row.bot_name) {
+        row.username = row.bot_name;
+        row.full_name = row.bot_name;
+    }
+
     if (row.reply_to_message_id) {
         const deleted = toBool(row.reply_deleted) || !row.reply_message_type;
         let snippet = null;
@@ -88,7 +97,7 @@ function shapeMessage(row) {
             id: row.reply_to_message_id,
             deleted: deleted,
             sender_id: deleted ? null : row.reply_sender_id,
-            sender_name: deleted ? null : (row.reply_full_name || row.reply_username),
+            sender_name: deleted ? null : (row.reply_bot_name || row.reply_full_name || row.reply_username),
             message_type: deleted ? null : row.reply_message_type,
             snippet: snippet,
             file_name: deleted ? null : (row.reply_file_name || null)
@@ -97,7 +106,7 @@ function shapeMessage(row) {
         row.reply_to = null;
     }
 
-    for (const key of ['reply_sender_id', 'reply_username', 'reply_full_name', 'reply_message_type', 'reply_content', 'reply_file_name', 'reply_deleted']) {
+    for (const key of ['bot_name', 'reply_sender_id', 'reply_username', 'reply_full_name', 'reply_bot_name', 'reply_message_type', 'reply_content', 'reply_file_name', 'reply_deleted']) {
         delete row[key];
     }
 
@@ -162,6 +171,13 @@ async function checkReplyTarget(chatId, replyToMessageId) {
 }
 
 /**
+ * Cached translations (utils/ai.js) repeat the text, so they go when it changes or is deleted
+ */
+async function forgetTranslations(messageId) {
+    await executeQuery('DELETE FROM message_translations WHERE message_id = ?', [messageId]);
+}
+
+/**
  * SQL for "sent within the edit window" (the minutes are a constant, never user input)
  */
 function editWindowCondition(column = 'm.created_at') {
@@ -179,5 +195,6 @@ module.exports = {
     shapeMessage,
     getMessageById,
     checkReplyTarget,
+    forgetTranslations,
     editWindowCondition
 };

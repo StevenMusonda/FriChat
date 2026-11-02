@@ -39,6 +39,7 @@ function bookkeepingAnswer(dbType, rawSql) {
     if (/^SELECT COUNT\(\*\) AS total FROM known_devices/.test(sql)) return [{ total: 0 }];
     if (/^(INSERT INTO|UPDATE) known_devices/.test(sql)) return noRows;
     if (/^SELECT email, username FROM users WHERE id = \?$/.test(sql)) return [];
+    if (/^DELETE FROM message_translations WHERE message_id = \?$/.test(sql)) return noRows;
     return undefined;
 }
 

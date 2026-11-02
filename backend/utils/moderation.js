@@ -7,7 +7,7 @@ const { executeQuery, queryOne, updateAndCount, insertAndGetId } = require('../c
 const { ADMIN_PAGE_SIZE } = require('../config/moderation');
 const { revokeUserSessions } = require('./sessions');
 const { deleteOrphanedFiles } = require('./uploads');
-const { toBool } = require('./messageQueries');
+const { toBool, forgetTranslations } = require('./messageQueries');
 
 const NOT_FOUND = { status: 404, message: 'User not found' };
 
@@ -168,6 +168,7 @@ async function deleteMessageForEveryone(io, messageId, adminId) {
         'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?, deleted_for_everyone = TRUE, file_id = NULL WHERE id = ?',
         [adminId, messageId]
     );
+    await forgetTranslations(messageId);
 
     if (io) {
         io.to(`chat_${message.chat_id}`).emit('message_deleted', {

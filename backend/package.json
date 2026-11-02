@@ -10,7 +10,8 @@
     "test:pages": "node --test test/pageScripts.test.js",
     "vapid:generate": "node scripts/generate-vapid-keys.js",
     "admin:set": "node scripts/set-admin.js",
-    "2fa:reset": "node scripts/reset-2fa.js"
+    "2fa:reset": "node scripts/reset-2fa.js",
+    "ai:injection-check": "node scripts/ai-injection-check.js"
   },
   "keywords": [
     "chat",
@@ -21,6 +22,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

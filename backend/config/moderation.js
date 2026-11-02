@@ -52,7 +52,9 @@ const AUDIT_EVENTS = [
     'data_export_downloaded',
     'account_deletion_requested',
     'account_deletion_cancelled',
-    'account_deleted'
+    'account_deleted',
+    'webhook_created',
+    'webhook_revoked'
 ];
 
 // What a user sees about their own account under Settings > Security

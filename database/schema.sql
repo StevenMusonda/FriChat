@@ -148,6 +148,9 @@ CREATE TABLE group_members (
     muted_until DATETIME NULL, -- NULL = not muted; '9999-12-31' = "always". DATETIME because TIMESTAMP stops at 2038.
     archived_at DATETIME NULL, -- NULL = in the main list
     member_tag VARCHAR(30) NULL, -- short label set by admins, shown next to the name
+    ai_disabled BOOLEAN NOT NULL DEFAULT FALSE, -- AI off in this chat for this member
+    catchup_from_message_id INT NULL, -- opening a chat marks it read: where it was while "Summarize unread" is on offer
+    catchup_at TIMESTAMP NULL DEFAULT NULL,
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -206,6 +209,8 @@ CREATE TABLE messages (
     link_preview_id INT NULL, -- preview card under the message
     link_preview_dismissed BOOLEAN NOT NULL DEFAULT FALSE, -- the sender removed the preview
     expires_at TIMESTAMP NULL DEFAULT NULL, -- disappearing messages: the scheduler deletes it (and its file) then
+    webhook_id INT NULL, -- the webhook that posted it; a plain number that outlives the webhook
+    bot_name VARCHAR(50) NULL, -- name shown for a webhook message
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
@@ -503,6 +508,9 @@ CREATE TABLE privacy_settings (
     birthday_audience VARCHAR(10) NOT NULL DEFAULT 'contacts', -- who sees your birthday (and its banner in shared groups)
     read_receipts BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see your reads, you don't see theirs
     typing_indicators BOOLEAN NOT NULL DEFAULT TRUE, -- off: others don't see you typing
+    ai_features BOOLEAN NOT NULL DEFAULT TRUE, -- off: nothing of yours goes to the AI provider
+    ai_consent_at TIMESTAMP NULL DEFAULT NULL, -- NULL = hasn't agreed yet
+    translation_language VARCHAR(10) NULL, -- NULL = English
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -764,6 +772,61 @@ CREATE TABLE data_exports (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_data_exports_user (user_id, id),
     INDEX idx_data_exports_status (status, id)
+);
+
+-- Phase 15: incoming webhooks (only a SHA-256 hash of the token is stored)
+CREATE TABLE chat_webhooks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chat_id INT NOT NULL,
+    name VARCHAR(50) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    created_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP NULL DEFAULT NULL,
+    revoked_at TIMESTAMP NULL DEFAULT NULL,
+    revoked_by INT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE KEY uq_chat_webhook_token (token_hash),
+    INDEX idx_chat_webhooks_chat (chat_id)
+);
+
+-- One cached translation per message and language
+CREATE TABLE message_translations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    message_id INT NOT NULL,
+    language VARCHAR(10) NOT NULL,
+    translated_text TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_message_translation (message_id, language)
+);
+
+-- AI caps: scope is 'user:<id>' with period YYYY-MM-DD, or 'global' with period YYYY-MM (UTC)
+CREATE TABLE ai_usage_counters (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    scope VARCHAR(30) NOT NULL,
+    period VARCHAR(10) NOT NULL,
+    requests INT NOT NULL DEFAULT 0,
+    tokens BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_ai_usage_scope (scope, period),
+    INDEX idx_ai_usage_counters_updated (updated_at)
+);
+
+-- Token usage per request. Never message text.
+CREATE TABLE ai_usage_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    feature VARCHAR(20) NOT NULL, -- summary | translation
+    model VARCHAR(60) NOT NULL,
+    input_tokens INT NOT NULL DEFAULT 0,
+    output_tokens INT NOT NULL DEFAULT 0,
+    outcome VARCHAR(20) NOT NULL, -- ok | refused | error
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_ai_usage_log_created (created_at)
 );
 
 -- Create a view for easy message retrieval with user info

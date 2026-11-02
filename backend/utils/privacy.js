@@ -23,7 +23,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     bio: 'everyone',
     groups: 'everyone',
     readReceipts: true,
-    typingIndicators: true
+    typingIndicators: true,
+    aiFeatures: true
 });
 
 // API field -> privacy_settings column
@@ -35,7 +36,8 @@ const AUDIENCE_COLUMNS = {
 };
 const SWITCH_COLUMNS = {
     readReceipts: 'read_receipts',
-    typingIndicators: 'typing_indicators'
+    typingIndicators: 'typing_indicators',
+    aiFeatures: 'ai_features'
 };
 
 // The only avatar paths ever handed to clients: files the server wrote itself (utils/avatars.js)
@@ -77,14 +79,14 @@ function shapeSettings(row) {
 
 async function getPrivacySettings(userId) {
     const row = await queryOne(
-        'SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators FROM privacy_settings WHERE user_id = ?',
+        'SELECT last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators, ai_features FROM privacy_settings WHERE user_id = ?',
         [userId]
     );
     return shapeSettings(row);
 }
 
 /**
- * Merge changes ({ lastSeen, photo, bio, groups, readReceipts, typingIndicators }, all optional)
+ * Merge changes ({ lastSeen, photo, bio, groups, readReceipts, typingIndicators, aiFeatures }, all optional)
  * into the stored settings. Callers validate the values first.
  * @returns {Promise<{ previous: object, settings: object }>}
  */
@@ -100,22 +102,24 @@ async function savePrivacySettings(userId, changes) {
 
     const values = [
         userId, settings.lastSeen, settings.photo, settings.bio, settings.groups,
-        settings.readReceipts, settings.typingIndicators
+        settings.readReceipts, settings.typingIndicators, settings.aiFeatures
     ];
     const insert = `INSERT INTO privacy_settings
-        (user_id, last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`;
+        (user_id, last_seen_audience, photo_audience, bio_audience, groups_audience, read_receipts, typing_indicators, ai_features)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
     if (dbType === 'postgresql') {
         await executeQuery(`${insert} ON CONFLICT (user_id) DO UPDATE SET
             last_seen_audience = EXCLUDED.last_seen_audience, photo_audience = EXCLUDED.photo_audience,
             bio_audience = EXCLUDED.bio_audience, groups_audience = EXCLUDED.groups_audience,
             read_receipts = EXCLUDED.read_receipts, typing_indicators = EXCLUDED.typing_indicators,
+            ai_features = EXCLUDED.ai_features,
             updated_at = CURRENT_TIMESTAMP`, values);
     } else {
         await executeQuery(`${insert} ON DUPLICATE KEY UPDATE
             last_seen_audience = VALUES(last_seen_audience), photo_audience = VALUES(photo_audience),
             bio_audience = VALUES(bio_audience), groups_audience = VALUES(groups_audience),
-            read_receipts = VALUES(read_receipts), typing_indicators = VALUES(typing_indicators)`, values);
+            read_receipts = VALUES(read_receipts), typing_indicators = VALUES(typing_indicators),
+            ai_features = VALUES(ai_features)`, values);
     }
     return { previous, settings };
 }

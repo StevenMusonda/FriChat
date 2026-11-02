@@ -9,6 +9,7 @@ const groupController = require('../controllers/groupController');
 const searchController = require('../controllers/searchController');
 const requestController = require('../controllers/requestController');
 const userController = require('../controllers/userController');
+const webhookController = require('../controllers/webhookController');
 const { authenticateToken } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { uploadGroupAvatar, handleAvatarUploadError } = require('../middleware/groupAvatarUpload');
@@ -29,6 +30,8 @@ const {
     validateSharedMediaQuery,
     validateDisappearingTimer,
     validateBirthdaysQuery,
+    validateCreateWebhook,
+    validateWebhookIdParam,
     checkValidation
 } = require('../utils/validation');
 
@@ -89,6 +92,11 @@ router.delete('/:chatId/avatar', groupAvatarLimiter, validateChatIdParam, checkV
 router.post('/:chatId/invites', groupActionLimiter, validateCreateInvite, checkValidation, groupController.createInvite);
 router.get('/:chatId/invites', groupActionLimiter, validateChatIdParam, checkValidation, groupController.listInvites);
 router.delete('/:chatId/invites/:inviteId', groupActionLimiter, validateInviteIdParam, checkValidation, groupController.revokeInvite);
+
+// Incoming webhooks (admins). The URL is returned once, by POST.
+router.get('/:chatId/webhooks', groupActionLimiter, validateChatIdParam, checkValidation, webhookController.listWebhooks);
+router.post('/:chatId/webhooks', groupActionLimiter, validateCreateWebhook, checkValidation, webhookController.createWebhook);
+router.delete('/:chatId/webhooks/:webhookId', groupActionLimiter, validateWebhookIdParam, checkValidation, webhookController.revokeWebhook);
 
 // Join requests from invite links when "Approve new members" is on (admins)
 router.get('/:chatId/join-requests', groupActionLimiter, validateChatIdParam, checkValidation, groupController.listJoinRequests);

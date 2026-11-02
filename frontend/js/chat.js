@@ -445,6 +445,10 @@ function toggleChatOptionsMenu(event) {
         + item('plans:open', 'Events &amp; lists')
         + '<div class="chat-options-separator" role="separator"></div>'
         + item('disappearing:open', escapeHtml(typeof FriChat.disappearingMenuLabel === 'function' ? FriChat.disappearingMenuLabel() : 'Disappearing messages'))
+        + (typeof FriChat.isAiOffered === 'function' && FriChat.isAiOffered()
+            ? '<div class="chat-options-separator" role="separator"></div>'
+              + (FriChat.isAiOnInChat(chat.id) ? item('ai:off', 'Turn off AI in this chat') : item('ai:on', 'Turn on AI in this chat'))
+            : '')
         + '<div class="chat-options-separator" role="separator"></div>'
         + (chat.archived_at ? item('archive:off', 'Unarchive chat') : item('archive:on', 'Archive chat'));
 
@@ -469,6 +473,8 @@ function toggleChatOptionsMenu(event) {
             setChatMentionsOnly(chat.id, value === 'on');
         } else if (kind === 'disappearing') {
             FriChat.openDisappearingModal();
+        } else if (kind === 'ai') {
+            FriChat.setChatAiEnabled(chat.id, value === 'on');
         } else if (kind === 'plans') {
             if (value === 'event') FriChat.openEventForm();
             else FriChat.openChatPlans();
@@ -617,6 +623,8 @@ async function openChat(chatId, options = {}) {
     if (typeof FriChat.resetCallHeader === 'function') FriChat.resetCallHeader();
     // Birthday banner of the chat being left (events.js)
     if (typeof FriChat.resetPlanChatState === 'function') FriChat.resetPlanChatState();
+    // Catch-up summary of the chat being left (ai.js)
+    if (leavingChatId !== chatId && typeof FriChat.hideCatchUp === 'function') FriChat.hideCatchUp();
     localStorage.setItem(CONFIG.STORAGE_KEYS.CURRENT_CHAT, chatId);
     closeChatOptionsMenu();
     updateChatHeaderState();
@@ -644,16 +652,22 @@ async function openChat(chatId, options = {}) {
         if (chatMain) chatMain.classList.add('active');
     }
     
+    // Opening the chat clears its unread count, so read it first (the catch-up bar, ai.js)
+    const listedChat = allChats.find(c => c.id === chatId);
+    const unreadAtOpen = listedChat ? listedChat.unread_count || 0 : 0;
+
     // Load chat details
     await loadChatDetails(chatId);
-    
+
     // Load messages: the newest page, or the page around the message being jumped to
     if (options.aroundMessageId) {
         await loadMessagesAround(chatId, options.aroundMessageId);
     } else {
         await loadMessages(chatId);
     }
-    
+
+    if (typeof FriChat.showCatchUp === 'function') FriChat.showCatchUp(chatId, unreadAtOpen);
+
     // Load pinned messages
     await loadPinnedMessages(chatId);
     

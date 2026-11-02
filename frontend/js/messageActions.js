@@ -89,6 +89,12 @@ function showMessageActions(messageId, event) {
                 Forward
             </div>
         ` : ''}
+        ${typeof FriChat.canTranslateMessage === 'function' && FriChat.canTranslateMessage(message) ? `
+            <div class="message-action-item" onclick="FriChat.translateMessage(${messageId})">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h12"></path><path d="M9 3v2"></path><path d="M5 9c1.5 3 4 5.5 7 7"></path><path d="M13 5c-1 4-4 8-9 10"></path><path d="M12 21l4.5-10L21 21"></path><path d="M13.5 18h6"></path></svg>
+                Translate
+            </div>
+        ` : ''}
         <div class="message-action-item" onclick="FriChat.openReminderModal(${messageId})">
             ${REMIND_ICON_SVG}
             Remind me

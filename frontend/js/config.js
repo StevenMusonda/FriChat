@@ -142,6 +142,16 @@ const CONFIG = {
         ADMIN_USERS: '/admin/users',
         ADMIN_USER_ACTION: (userId, action) => `/admin/users/${userId}/${action}`,
         ADMIN_AUDIT: '/admin/audit',
+
+        // Incoming webhooks and optional AI features (phase 15)
+        GROUP_WEBHOOKS: (chatId) => `/chats/${chatId}/webhooks`,
+        GROUP_WEBHOOK: (chatId, webhookId) => `/chats/${chatId}/webhooks/${webhookId}`,
+        AI_STATUS: '/ai/status',
+        AI_CONSENT: '/ai/consent',
+        AI_LANGUAGE: '/ai/language',
+        AI_CHAT: (chatId) => `/ai/chats/${chatId}`,
+        AI_SUMMARY: (chatId) => `/ai/chats/${chatId}/summary`,
+        AI_TRANSLATE: (messageId) => `/ai/messages/${messageId}/translate`,
     },
     
     // Messages fetched per page when opening a chat or scrolling up
