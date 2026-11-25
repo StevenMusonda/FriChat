@@ -107,6 +107,8 @@ Fill in every `CHANGE_ME`:
 - SMTP settings (see the note in the file; without them signup verification and password resets don't reach users).
 - Push keys: `cd /var/www/frichat/backend && sudo -u frichat env PATH=/opt/node22/bin:/usr/bin:/bin npm run vapid:generate`, paste both keys. Never regenerate them later.
 
+If you use Brevo for email: add the server's public IPv4 address (`curl -4 ifconfig.me`) under Brevo > Security > Authorised IPs, and authenticate the domain (Brevo > Senders, Domains > Domains), or Brevo rejects the login with `525 Unauthorized IP address`.
+
 Then lock the file down: `sudo chmod 600 /var/www/frichat/backend/.env`.
 
 ## 7. Start the backend and the web server
@@ -193,5 +195,5 @@ Calls work with the public STUN server on most connections. For users behind str
 | Everyone shares one rate limit / device list shows 127.0.0.1 | `TRUST_PROXY=1` missing in `.env` |
 | Large video upload fails | proxy body-size limit (`client_max_body_size` in nginx; the Caddyfile already allows 110 MB) |
 | "Calls need a secure connection" | the site is being opened over http, or the certificate isn't issued yet |
-| No verification / reset emails | SMTP not set, or the provider blocks the sender; check `journalctl -u frichat` |
+| No verification / reset emails | SMTP not set, or the provider blocks the sender; check `journalctl -u frichat`. Log says `525 5.7.1 Unauthorized IP address`: Brevo blocks unknown IPs, add the server's public IPv4 (`curl -4 ifconfig.me`) under Brevo > Security > Authorised IPs |
 | `502 Bad Gateway` | the backend isn't running: `systemctl status frichat` |
