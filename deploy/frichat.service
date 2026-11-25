@@ -2,7 +2,7 @@
 # Install: sudo cp deploy/frichat.service /etc/systemd/system/frichat.service
 #          sudo systemctl daemon-reload && sudo systemctl enable --now frichat
 # Logs:    journalctl -u frichat -f
-# Check the Node path with `which node`; change ExecStart if it isn't /usr/bin/node.
+# Uses the separate Node 22 in /opt/node22 (see step 3 of the guide), not the system Node.
 
 [Unit]
 Description=FriChat backend (Node.js, Express, Socket.IO)
@@ -16,7 +16,7 @@ Group=frichat
 WorkingDirectory=/var/www/frichat/backend
 # Settings come from /var/www/frichat/backend/.env (dotenv reads it from the working directory)
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node server.js
+ExecStart=/opt/node22/bin/node server.js
 Restart=on-failure
 RestartSec=5
 
