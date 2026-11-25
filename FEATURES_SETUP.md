@@ -2551,3 +2551,30 @@ Use a group with five members, each in their own browser profile. A fake camera 
 - [ ] Someone in a group call can't start a 1:1 call, and calling them gives busy.
 
 Automated: `npm test` runs `test/phase16.test.js`, and `npm run test:pages` checks that no script names collide.
+
+---
+
+## Deployment: Hetzner server (frichat.online)
+
+Not a feature: files for running FriChat in production on one Linux server, with the frontend, API and Socket.IO all on `https://frichat.online`.
+
+**What changed**
+- `frontend/js/config.js`: the API and Socket.IO address is now the page's own origin on any host except `localhost` / `127.0.0.1`, where it stays `http://localhost:3000` as before. No more editing the file when switching between local and hosted. `frontend/sw.js` `CACHE_VERSION` is `frichat-shell-v20` so installed apps pick up the new `config.js`.
+- `deploy/` (new): `Caddyfile` (serves `frontend/`, forwards `/api`, `/socket.io`, `/uploads` to Node, automatic HTTPS), `nginx-frichat.conf` (alternative if nginx already runs), `frichat.service` (systemd), `env.production.example`, `backup.sh` (nightly database + uploads backup), and `DEPLOY_HETZNER.md` (the step-by-step guide).
+
+**Migration to run:** none. A new server loads `database/schema_postgresql.sql` once on an empty database (step 5 of the guide).
+
+**New env variables:** none. `deploy/env.production.example` lists the existing ones that must change in production: `NODE_ENV=production`, `CORS_ORIGIN`, `FRONTEND_URL`, `PUBLIC_API_URL` (all `https://frichat.online`), `TRUST_PROXY=1`, `COOKIE_SECURE=true`, SMTP settings, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, VAPID keys.
+
+**New endpoints / socket events:** none.
+
+**Manual test checklist** (after following `deploy/DEPLOY_HETZNER.md`)
+- [ ] `https://frichat.online/api/health` returns `{"success":true,...}`.
+- [ ] Sign up, verify the email, log in; the session survives a page reload (refresh cookie works over HTTPS).
+- [ ] Two browsers in one chat: messages, typing indicator and reactions appear instantly (WebSocket works through the proxy).
+- [ ] An image, a video and a voice note upload and display.
+- [ ] A password-reset email arrives and its link opens `https://frichat.online/reset-password.html`.
+- [ ] A 1:1 call connects (needs HTTPS; add coturn for strict networks, Phase 11).
+- [ ] Settings > Devices shows your real IP, not `127.0.0.1` (`TRUST_PROXY=1`).
+- [ ] `http://SERVER_IP:3000` is unreachable from outside.
+- [ ] `sudo /usr/local/sbin/frichat-backup` writes a `db_*.sql.gz` and a `files_*.tar.gz`.

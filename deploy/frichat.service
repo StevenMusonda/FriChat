@@ -1,0 +1,31 @@
+# systemd unit: keeps the FriChat backend running, restarts it after a crash and starts it at boot.
+# Install: sudo cp deploy/frichat.service /etc/systemd/system/frichat.service
+#          sudo systemctl daemon-reload && sudo systemctl enable --now frichat
+# Logs:    journalctl -u frichat -f
+# Check the Node path with `which node`; change ExecStart if it isn't /usr/bin/node.
+
+[Unit]
+Description=FriChat backend (Node.js, Express, Socket.IO)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=frichat
+Group=frichat
+WorkingDirectory=/var/www/frichat/backend
+# Settings come from /var/www/frichat/backend/.env (dotenv reads it from the working directory)
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+# Basic hardening: the app can write to its own folder only, not to the rest of the system
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/www/frichat/backend
+
+[Install]
+WantedBy=multi-user.target

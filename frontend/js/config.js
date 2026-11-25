@@ -3,14 +3,18 @@
  * API endpoints and settings
  */
 
+// Where the API lives.
+// - Opened on localhost / 127.0.0.1 (frontend on its own port, backend on :3000): http://localhost:3000
+// - Any other host (production, e.g. https://frichat.online behind a reverse proxy that serves the
+//   frontend and forwards /api, /socket.io and /uploads to Node): the same origin as the page
+const API_ORIGIN = (typeof window !== 'undefined' && window.location
+    && !['localhost', '127.0.0.1', '[::1]', ''].includes(window.location.hostname))
+    ? window.location.origin
+    : 'http://localhost:3000';
+
 const CONFIG = {
-    API_BASE_URL: 'http://localhost:3000/api',
-    SOCKET_URL: 'http://localhost:3000',
-
-
-    //uncomment for render
-    //API_BASE_URL: 'https://frichat-vfr1.onrender.com/api',
-    //SOCKET_URL: 'https://frichat-vfr1.onrender.com',
+    API_BASE_URL: `${API_ORIGIN}/api`,
+    SOCKET_URL: API_ORIGIN,
     
     // API Endpoints
     ENDPOINTS: {

@@ -1,0 +1,42 @@
+# FriChat on Hetzner: Caddy serves the frontend files and forwards the API, Socket.IO and uploads to Node.
+# Caddy gets and renews the HTTPS certificate for you. Install: see deploy/DEPLOY_HETZNER.md
+# Copy to /etc/caddy/Caddyfile, then: sudo systemctl reload caddy
+
+frichat.online {
+    encode zstd gzip
+
+    # Headers for the static pages (Node's API answers already get theirs from helmet)
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # API, WebSocket (Socket.IO) and uploaded files -> Node on localhost:3000.
+    # Caddy passes WebSocket upgrades through on its own.
+    @backend path /api/* /socket.io/* /uploads/*
+    handle @backend {
+        # Uploads are capped at 100 MB by the app (MAX_FILE_SIZE); leave some room for the form overhead
+        request_body {
+            max_size 110MB
+        }
+        reverse_proxy 127.0.0.1:3000
+    }
+
+    # Everything else is the static frontend
+    handle {
+        root * /var/www/frichat/frontend
+
+        # The service worker must never be served from a stale cache
+        @sw path /sw.js
+        header @sw Cache-Control "no-cache"
+
+        file_server
+    }
+
+    log {
+        output file /var/log/caddy/frichat-access.log
+    }
+}
